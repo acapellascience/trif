@@ -174,6 +174,53 @@ So on Windows:
   an entry to read them (the probe gives one), or the organization's policies quietly don't apply (the
   Mac showed this: below).
 
+### Windows without an administrator? (round 9, step 9)
+
+Tried on windows-latest with TRIF's pinned claude.exe 2.1.330 in the container TRIF's fence makes for a run
+(less-privileged + registryRead), `tests/whole-box/win-net-probe.js`, runs
+[44886490084](https://github.com/acapellascience/trif/actions/runs/44886490084) and
+[44887167150](https://github.com/acapellascience/trif/actions/runs/44887167150). The idea: a named pipe
+whose security names the run's container (`tests/whole-box/pipe-bridge.cs`, outside the box as the user,
+carries each connection to TRIF's relay), so nothing in the box needs loopback.
+
+| From inside the container | no network capability | + `privateNetworkClientServer` |
+|---|---|---|
+| A pipe with Node's (Windows' default) security; ours not naming the container | refused (EPERM) | the same |
+| **Our pipe naming the container** (with or without a low label) | **opens, carries both ways** | the same |
+| Listening on a port of its own (127.0.0.1) | **refused (EACCES)** | works (same process) |
+| A port on this computer outside (127.0.0.1; its own LAN address) | refused | refused (timed out) |
+| The internet (1.1.1.1:443) | refused | refused |
+| claude.exe with `HTTPS_PROXY` = the relay's 127.0.0.1 port (control) | can't connect, relay saw nothing | the same |
+| claude.exe with `ANTHROPIC_UNIX_SOCKET` = the pipe (a name found in claude.exe, undocumented) | opens the pipe, sends nothing, "FailedToOpenSocket" | (not tried) |
+| **claude.exe → shim (box-shim.js, a port inside) → pipe → bridge → relay** | can't: the shim can't listen | **works**: the stand-in API (Read, Write, the `trif` MCP tool; the box held), and the real api.anthropic.com, TLS end to end, 401 for the made-up token |
+
+So:
+
+- **With no capability and no administrator there's no way.** Claude Code speaks only TCP to a proxy, and
+  a container with no network capability can't listen, so nothing inside can turn its TCP into the pipe.
+  (The pipe itself works: the container may open a pipe whose security names it.)
+- **`privateNetworkClientServer` (no administrator) makes the pipe path work**, internet and this computer's
+  ports still closed. But that capability is Windows' "home and work networks": inbound and outbound to
+  the local network. On CI there's no other computer to show it, but by its definition a boxed run could
+  reach the router, printers, a NAS, and at work the company's internal servers. The Mac box allows none.
+- **The administrator's loopback exemption** (the spike: works, no shim) opens every port on this computer
+  to the container: TRIF's relay, and also whatever else listens there (development servers, databases,
+  Docker). The Mac box allows one port.
+- **The exemption plus firewall rules for the container**, both in the same one administrator step:
+  Windows Firewall rules can name an AppContainer (`New-NetFirewallRule -Package <container SID>`), so the
+  step can block it from every port on this computer but the relay's (a fixed port then). That is the
+  Mac's guarantee. Not tried yet.
+
+| Option | Administrator | The box can reach | Like the Mac |
+|---|---|---|---|
+| W1. `privateNetworkClientServer` + pipe + shim | no | the relay; **the local network** | no (the LAN) |
+| W2. Loopback exemption, one fixed container | once, at setup | the relay; **every port on this computer** | no (local services) |
+| W3. W2 + firewall rules for that container (all but the relay's port blocked) | once, at setup | the relay only | yes |
+
+All three still need: one fixed container for every run (an exemption or rules name one container; each
+run's folders then go to a capability of its own, which fence.cs takes already), and no Bash (the Windows
+design). Recommendation (For Tim, round 9, in the progress file): W3.
+
 ## Enterprise: what managed settings can still do
 
 Tested for real on GitHub's macOS runner: the workflow writes

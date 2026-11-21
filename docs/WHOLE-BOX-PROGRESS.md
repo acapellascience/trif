@@ -86,9 +86,23 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   the relay without loopback (a named pipe the AppContainer is granted, or another no-admin path)? If none,
   the one-time admin prompt at setup (loopback exemption for TRIF's container). Build whichever works;
   trade-off in WHOLE-BOX.md for Tim.
+  - [x] **9a.** *(round 9)* Tried: **no way without an administrator that keeps the box to the relay.** A
+    pipe naming the container opens from inside, but Claude Code speaks only TCP and a container with no
+    network capability can't listen, so nothing inside can carry its TCP to the pipe
+    (`ANTHROPIC_UNIX_SOCKET` doesn't either). With `privateNetworkClientServer` (no administrator) the pipe
+    path works end to end, but it opens the local network. WHOLE-BOX.md "Windows without an
+    administrator?": options W1–W3.
+  - [ ] **9b'.** Build Tim's pick (For Tim, round 9: recommended W3, the exemption + firewall rules in one
+    administrator step at setup).
 - [ ] **9b. Windows half of the rest:** pinned claude.exe (1), Credential Manager for the token (6), `trif`
   over MCP, no Bash (7), refusal errors (3), fallback (4), relay (8), managed settings in
   `C:\Program Files\ClaudeCode` (5), daily CI (2).
+  - [x] **(1)** *(round 9)* claudepin installs the pinned claude.exe on Windows (the system's tar.exe by
+    its full path) and checks its Authenticode signature: Valid, signed by "Anthropic, PBC" (`winSigner` in
+    the pin file; Windows PowerShell's Get-AuthenticodeSignature without a PowerShell 7 PSModulePath). On CI.
+  - [ ] **(6)** Nothing to build here: claudetoken.js uses keyring.js's setKey/getKey, which on the windows
+    branch are Credential Manager (credman.js, same signatures; a setup-token token fits its 2560 bytes).
+    Test when the branches meet.
 
 ### Later
 
@@ -338,6 +352,41 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   nothing reached it). Locally the touched suites pass (~280 tests); tests/update.test.js's web-ext part
   needs node_modules, which this worktree doesn't have (CI's `tests` workflow passes it).
 
+### Round 9 (11-21): step 9a (Windows' network without an administrator: none that keeps the box to the relay), 9b(1) (the pinned claude.exe)
+
+- **The probe** (tests/whole-box/win-net-probe.js, in whole-box.yml's windows job before the spike's probe):
+  TRIF's pinned claude.exe in the fence's run container (lpac + registryRead), no network capability, no
+  loopback exemption; pipe-bridge.cs (outside, as the user: a pipe with its own security, carried to a TCP
+  port), box-shim.js (inside: a port of the container's own for Claude Code's `HTTPS_PROXY`, carried to the
+  pipe), win-inside.js (what node in the container can open). Results: WHOLE-BOX.md "Windows without an
+  administrator?" and Findings.
+- **9b(1)**: claudepin on Windows: `%SystemRoot%\System32\tar.exe` (Git's GNU tar earlier on PATH would read
+  `C:\…` as a host); after the sha512, Authenticode: Get-AuthenticodeSignature must say `Valid` and the
+  signer's CN and O must both be `Anthropic, PBC` (claudepin.winSignatureProblem, unit-tested on what CI
+  printed and on near misses). The first CI try read nothing: the step's pwsh 7 PSModulePath made Windows
+  PowerShell load 7's Security module, which failed; now dropped for the check, and PowerShell's stderr
+  goes into the error. The windows job installs the pin as the helper does (cached by the pin file) and
+  every Windows probe uses it.
+- Tests: claudepin.test.js (+1, the signature lines; the pin file's winSigner), 11 pass locally with
+  release-claudepin.test.js. CI as below.
+
+## For Tim (round 9): NEEDS AN ANSWER before Windows' box goes on
+
+**How should TRIF's full sandbox on Windows reach Anthropic?** There's no way without an administrator that
+keeps a chat to TRIF's relay only (round 9 tried a named pipe; details in WHOLE-BOX.md). Three choices:
+
+- **W1, no administrator:** the pipe works if the sandbox gets Windows' "home and work networks"
+  permission. The internet and this computer stay closed, but a chat could reach other devices on your
+  network (router, printers, a NAS; at work, the company's internal servers).
+- **W2, one administrator prompt at setup:** Windows' loopback exemption for TRIF's sandbox. A chat could
+  reach TRIF's relay, and also every other server on this computer (development servers, databases).
+- **W3, one administrator prompt at setup (recommended):** W2 plus firewall rules so the sandbox reaches
+  only the relay's port. The same as the Mac. More to build (a fixed relay port, the rules, removing
+  them when the setting goes off), and the rules need testing on CI first.
+
+Until you choose, Windows keeps today's design (no full sandbox). Draft card words for W2/W3 are in
+WHOLE-BOX-STRINGS.md.
+
 ## For Tim (round 8): not blocking, the loop goes on
 
 1. **Plain-http telemetry collectors on other computers** (`http://collector.corp:4318`). The relay only
@@ -383,6 +432,22 @@ company's settings loosen Claude Code's rules; TRIF's full sandbox still holds")
 question with nothing to decide.
 
 ## Findings
+
+- **Round 9, Windows' network** (windows-latest, pinned claude.exe 2.1.330, the fence's lpac container):
+  Node's default pipe and a pipe not naming the container: EPERM; a pipe whose access list names the
+  container: opens and carries both ways, a low mandatory label not needed. With no network capability,
+  `listen` on 127.0.0.1 inside: EACCES; 127.0.0.1 outside, its own LAN address, 1.1.1.1: EACCES. With
+  `privateNetworkClientServer`: listening works; 127.0.0.1 outside and its own LAN address time out;
+  the internet EACCES; shim → pipe → bridge → relay: the stand-in run worked (Read, Write, MCP; the secret
+  "where it leads on disk could not be determined", another site's and the home folder's writes EPERM),
+  and the real api.anthropic.com through the relay: three tunnels (≈2 KB up, 4.9 KB down; one 37 KB up),
+  "Failed to authenticate. API Error: 401 OAuth access token is invalid." in 2.9 s. claude.exe's
+  `HTTPS_PROXY` straight at the relay: "Can't reach the API server … (FailedToOpenSocket)", the relay saw
+  nothing. `ANTHROPIC_UNIX_SOCKET` (in the binary, undocumented) set to the pipe: claude.exe opened it,
+  sent 0 bytes, then FailedToOpenSocket. The pinned claude.exe: 387,754,656 bytes; Authenticode Valid,
+  `CN="Anthropic, PBC", O="Anthropic, PBC"`, issuer DigiCert Trusted G4 Code Signing RSA4096 SHA384 2021 CA1.
+  Child processes started by node in the privateNetworkClientServer container: `spawn EPERM` (claude.exe's
+  MCP child starts fine; not looked into).
 
 - **Round 8, an organization's own proxy** (CI, pinned 2.1.330 in the box, managed `env` `HTTPS_PROXY` =
   `http://192.0.2.1:3128`, TRIF's relay as the run's own `HTTPS_PROXY`): the relay saw nothing; Claude Code
@@ -517,12 +582,23 @@ question with nothing to decide.
 
 ## Next
 
-Round 9: Windows, step 9 (can the boxed claude.exe reach the relay without the loopback exemption: a named
-pipe the AppContainer is granted, or another no-admin path, on windows-latest; else the one-time admin
-prompt), then 9b's first parts (the pinned claude.exe, Credential Manager for the token). The For Tim
-(round 8) points don't block it. The daily run starts once whole-box-latest.yml is on main.
+**Waiting for Tim** (For Tim, round 9: W1, W2 or W3). Then step 9b': W3 would be one fixed container for
+every run (each run's folders on a capability of its own), the relay on a fixed port, the exemption and
+`New-NetFirewallRule -Package` rules made in one elevated step by `trif setup` / turning the switch on (and
+removed when it goes off), tested on windows-latest (the box reaching the relay, refused at every other
+port on this computer, the internet closed); then 9b's (3), (4), (5), (8) on Windows. The For Tim (round
+8) points don't block anything.
 
 ## CI
+
+- Round 9: whole-box [44885239892](https://github.com/acapellascience/trif/actions/runs/44885239892) (b68cf50)
+  passed: the pinned claude.exe installed and validly signed by Anthropic, PBC; the probe's node couldn't
+  start (lstat C:\, fixed with --preserve-symlinks). [44885793055](https://github.com/acapellascience/trif/actions/runs/44885793055)
+  (a8f871c) passed: the container's pipe results; the shim can't listen. 2623e2b's (44886363875) Windows
+  failed: the new signature check read nothing (PSModulePath, fixed). [44886490084](https://github.com/acapellascience/trif/actions/runs/44886490084)
+  (the privateNetworkClientServer path end to end, 401 from the real Anthropic) and
+  [44887167150](https://github.com/acapellascience/trif/actions/runs/44887167150) (ANTHROPIC_UNIX_SOCKET)
+  passed, macos and windows. The `tests` workflow passed for every round-9 commit it finished.
 
 - Round 8: [whole-box 44883531774](https://github.com/acapellascience/trif/actions/runs/44883531774) (ab3e6e2,
   5b) **passed** (macos, windows): the org test strict; **an organization's apiKeyHelper run in the box, its

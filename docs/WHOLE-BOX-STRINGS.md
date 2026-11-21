@@ -171,3 +171,15 @@ Settings, under the switch (on), one line:
 
 Not said anywhere yet (Tim's call whether to): that the token lasts a year and can only make model
 requests (no Remote Control, no claude.ai connectors), and that it needs a Pro, Max, Team or Enterprise plan.
+
+## Windows: setting up TRIF's full sandbox (round 9, step 9; only if Tim picks W2 or W3)
+
+When the switch is turned on, before the download, a card:
+
+- **TRIF's full sandbox on Windows needs one change only an administrator can make: it lets the sandbox
+  reach TRIF's own connection to Anthropic on this computer, and nothing else. Windows will ask once.**
+  Buttons: **Continue** (Windows' administrator prompt) / **Not now** (the switch stays off).
+- Refused or failed: **Windows didn't make the change, so TRIF's full sandbox stays off. Chats use the older
+  protection.**
+
+(W3's "nothing else"; for W2 it would have to say "and other programs' servers on this computer".)

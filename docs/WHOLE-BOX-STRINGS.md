@@ -38,16 +38,52 @@ The offer that follows these (step 4, "Run this chat with the older protection")
 
 ## Signing in for TRIF's full sandbox (step 6, `claude setup-token`)
 
-In code now (helper/lib/logins.js, mode "token"; the panel's button for it: not yet):
+In code now (helper/lib/logins.js, mode "token"):
 
 - TRIF's copy not there: **TRIF's own copy of Claude Code isn't downloaded yet (Settings: Run chats in
   TRIF's full sandbox)**
 - Failed: **Signing in to Claude Code for TRIF's full sandbox failed: {last lines it printed}** (any
   sk-ant-… in them shown as [token])
+- A code it didn't take (round 3): **Signing in to Claude Code for TRIF's full sandbox failed: OAuth error:
+  That code wasn't accepted. It may be incomplete, expired, already used, or from an earlier sign-in
+  attempt. Sign in again to get a new code.** (Claude Code's own words after "failed: "; the panel then
+  offers Try again, a fresh sign-in)
 - Finished without a token: **Claude Code finished, but TRIF didn't find a sign-in token in what it printed.**
 - The keyring refused it: **Signed in, but TRIF couldn't keep the sign-in: {keyring's error}**
 - The saved one isn't a token (someone changed the keyring item): **the saved Claude Code sign-in isn't a
   token TRIF recognizes; sign in again**
 
-Not written yet: the panel's offer to sign in (when the setting is on and there's no token and no API key),
-and what it says about the token (one year, model requests only, kept in the Keychain).
+### The panel (round 3: extension/login.js, sidepanel.js; the setting on, chats with Claude Code)
+
+The login notice, in place of "Claude Code isn't logged in" (the user's own login can't be used in the box):
+
+- Title: **Sign in to Claude Code for TRIF's full sandbox**
+- Line: **Chats in TRIF's full sandbox can't use your own Claude Code login. Sign in once with your account;
+  TRIF keeps the sign-in in your Mac's Keychain.**
+- Button: **Sign in** (beside it, as now: Switch to {agent} · Use robotless)
+- After a run's token was refused: title **Sign in to Claude Code again for TRIF's full sandbox**, line
+  **Claude Code refused the sign-in TRIF kept (it may have expired, or been signed out elsewhere).**
+- The gate's one-line version: **Claude Code needs you to sign in for TRIF's full sandbox. Sign in**
+- While signing in: **Signing in to Claude Code for TRIF's full sandbox…** / **Signing in to Claude Code
+  for TRIF's full sandbox** (then the same "Finish signing in in the tab that opened, then paste the code it
+  shows here:", "Checking the code…" as the normal login)
+- Done: **Signed in** · **Chats in TRIF's full sandbox can use Claude Code now.**
+- Failed: **Couldn't sign in to Claude Code for TRIF's full sandbox** · {the error above} · **Try again**
+
+The run's messages (helper/lib/claudetoken.js, runs.js), shown as the chat's login line:
+
+- No API key, no token: **Chats in TRIF's full sandbox need you to sign in to Claude Code for TRIF first.**
+- The keyring couldn't be read: **TRIF's full sandbox couldn't read your Claude Code sign-in ({why}): sign
+  in again.**
+- Anthropic refused the token: **Claude Code refused TRIF's full sandbox sign-in (it may have expired, or been
+  signed out elsewhere): sign in again.**
+
+Settings, under the switch (on), one line:
+
+- **Its chats use your saved Anthropic API key.** (a key is saved: it wins, as now)
+- **Signed in to Claude Code for TRIF's full sandbox (kept in your Mac's Keychain).** + button **Sign out**
+- **Claude Code refused TRIF's sign-in: sign in again from a chat.** + **Sign out**
+- **Not signed in yet: a chat will ask you to sign in.**
+
+Not said anywhere yet (Tim's call whether to): that the token lasts a year and can only make model
+requests (no Remote Control, no claude.ai connectors), and that it needs a Pro, Max, Team or Enterprise plan.

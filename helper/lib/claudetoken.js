@@ -32,15 +32,59 @@ const OUTRANKS = ['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_C
 const redactTokens = (text) => String(text).replace(ANY_ANTHROPIC_SECRET, '[token]');
 
 /**
+ * One line of a terminal UI's output as it would look on screen (round 3's CI probe: Claude Code's
+ * setup-token draws with Ink, which moves the cursor between words, ESC[<n>G and ESC[<n>C, rather than
+ * printing spaces): those moves become spaces, every other escape sequence and control character goes.
+ * Within the line (logins.js splits at \r and \n), the text is drawn left to right, later over earlier.
+ */
+function termLine(raw) {
+  const cells = [];
+  let col = 0;
+  const str = String(raw);
+  for (let i = 0; i < str.length;) {
+    const c = str[i];
+    if (c === '\x1b') {
+      const csi = /^\x1b\[([0-?]*)[ -/]*([@-~])/.exec(str.slice(i, i + 32));
+      if (csi) {
+        const n = Math.max(1, parseInt(csi[1], 10) || 1);
+        if (csi[2] === 'G') col = Math.min(n - 1, 8000);
+        else if (csi[2] === 'C') col = Math.min(col + n, 8000);
+        else if (csi[2] === 'D') col = Math.max(0, col - n);
+        i += csi[0].length;
+        continue;
+      }
+      const osc = /^\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/.exec(str.slice(i, i + 4096));
+      if (osc) { i += osc[0].length; continue; }
+      i += /^\x1b[()*+#%][\s\S]/.test(str.slice(i, i + 3)) ? 3 : 2; // (a character set; ESC 7, ESC 8, …)
+      continue;
+    }
+    const cp = str.codePointAt(i);
+    const ch = String.fromCodePoint(cp);
+    i += ch.length;
+    if (cp < 0x20 || cp === 0x7f || (cp >= 0x80 && cp < 0xa0)) continue;
+    while (cells.length < col) cells.push(' ');
+    cells[col++] = ch;
+  }
+  return cells.join('').replace(/\s+$/, '');
+}
+// What setup-token draws that says nothing to the person (its logo, spinners, box borders, its own
+// instructions, which the panel gives in its own words): not passed on.
+const CHROME = /^(welcome to claude code|this will guide you|·?\s*opening browser|browser didn.t open|paste code here|finishing sign|press enter to retry)/i;
+// Its answer to a code it didn't take (round 3's CI probe: "✘ OAuth error: That code wasn't accepted. …",
+// then "Press Enter to retry", and it waits).
+const REFUSED_CODE = /^OAuth error\b|\bcode wasn.t accepted\b/i;
+
+/**
  * One line of `claude setup-token` output -> {kind:"token", token, text} | {kind:"login", url} |
  * {kind:"text", text} | null. `text` never holds the token (nor any sk-ant-… string).
  */
 function parseSetupTokenLine(line) {
   const raw = String(line);
   const tok = TOKEN_RE.exec(raw);
-  const t = redactTokens(raw).replace(/^\s*paste code here[^>]*>/i, '').trim();
+  const t = redactTokens(raw).replace(/^\s*paste code here[^>]*>/i, '').trim().replace(/^[✘✗×✔✓·*✢✳✶✻✽]\s*/u, '');
   if (tok) return { kind: 'token', token: tok[0], text: t };
-  if (!t || /^opening browser/i.test(t)) return null;
+  if (!t || !/[A-Za-z]{3}/.test(t) || CHROME.test(t)) return null;
+  if (REFUSED_CODE.test(t)) return { kind: 'text', text: t, refused: true };
   const m = /\bvisit:\s*(https:\/\/\S+)/i.exec(t) || /(https:\/\/(?:[a-z0-9-]+\.)*(?:claude\.com|claude\.ai|anthropic\.com)\/\S*oauth\S*)/i.exec(t);
   if (m) return { kind: 'login', url: m[1] };
   return { kind: 'text', text: t };
@@ -117,4 +161,4 @@ async function prepareBoxed({ keyPrep = async () => ({}), env = process.env, key
   };
 }
 
-module.exports = { SERVICE, ACCOUNT, TOKEN_RE, OUTRANKS, redactTokens, parseSetupTokenLine, tokenEnv, storeToken, readToken, hasToken, removeToken, ptyCommand, prepareBoxed };
+module.exports = { SERVICE, ACCOUNT, TOKEN_RE, OUTRANKS, redactTokens, termLine, parseSetupTokenLine, tokenEnv, storeToken, readToken, hasToken, removeToken, ptyCommand, prepareBoxed };

@@ -693,7 +693,13 @@ class Runs {
     if (run.doneSent) return;
     if (run.secrets.length) { const t = JSON.stringify(event); const r = redactSecrets(t, run.secrets); if (r !== t) event = JSON.parse(r); }
     if (event.kind === 'done') run.doneSent = true;
-    if (event.kind === 'error' && event.reason === 'login') { run.loginFailed = event.message; event = { ...event, agent: run.agent }; }
+    if (event.kind === 'error' && event.reason === 'login') {
+      // (TRIF's full sandbox signed in with the setup-token token, and Claude Code refused it: expired, or
+      // revoked. WHOLE-BOX-STRINGS.md.)
+      if (run.wholeBox && run.state.signIn === 'token') event = { ...event, message: 'Claude Code refused TRIF\'s full sandbox sign-in (it may have expired, or been signed out elsewhere): sign in again.' };
+      run.loginFailed = event.message;
+      event = { ...event, agent: run.agent, ...(run.wholeBox ? { mode: 'token' } : {}) };
+    }
     try { this.onEvent(run.id, event); } catch (e) { this.logger.error(`agent event handler: ${e.message}`); }
   }
 
@@ -837,9 +843,14 @@ class Runs {
       }
     }
     // Adapters with something to settle first (codex-oss: the provider, its key, a local server; claude
-    // and codex: a saved API key's proxy, agentkeys.js).
-    if (adapter.prepare) {
-      adapter.prepare({ ws, model: run.model, openModel: run.openModel, logger: this.logger }).then((prep) => {
+    // and codex: a saved API key's proxy, agentkeys.js). TRIF's full sandbox: a saved API key's proxy as
+    // now, else the sign-in from `claude setup-token` (claudetoken.js prepareBoxed: Claude Code's own
+    // login is out of the box's reach), or none: the run says so, the panel offers the sign-in.
+    const prepare = run.wholeBox && adapter.id === 'claude' && adapter.prepare
+      ? (o) => require('./claudetoken').prepareBoxed({ keyPrep: () => adapter.prepare(o) })
+      : adapter.prepare;
+    if (prepare) {
+      prepare({ ws, model: run.model, openModel: run.openModel, logger: this.logger }).then((prep) => {
         // (cleanup: what prepare started for the run, the key proxy; _finish calls it.)
         if (prep && typeof prep.cleanup === 'function') run.cleanup = prep.cleanup;
         if (run.stopped || run.finished) return this._finish(run, { code: null, signal: null });
@@ -849,11 +860,13 @@ class Runs {
         if (om) this._log(run, { webmods: 'openModel', provider: om.provider, model: om.model, baseUrl: om.baseUrl, key: om.keyed ? 'keyring' : null, keyProxy: !!run.cleanup });
         const ak = run.state.apiKey;
         if (ak) this._log(run, { webmods: 'apiKey', account: ak.account, source: ak.source, keyProxy: !!run.cleanup });
+        if (run.state.signIn) this._log(run, { webmods: 'signIn', kind: run.state.signIn, source: 'keyring' }); // (never the token)
         const runEnv = { ...env, ...((prep && prep.env) || {}) };
         for (const k of (prep && prep.unsetEnv) || []) delete runEnv[k];
         this._spawn(run, found, runEnv, (prep && prep.options) || {});
       }, (e) => {
-        this._emit(run, { kind: 'error', message: e.message });
+        // (no sign-in for TRIF's full sandbox: a login error, so the panel shows its sign-in, mode "token")
+        this._emit(run, e && e.signIn ? { kind: 'error', reason: 'login', message: e.message } : { kind: 'error', message: e.message });
         this._finish(run, { code: null, signal: null });
       });
       return;
@@ -1189,10 +1202,12 @@ class Runs {
     // Failed for want of a login: say so in `done` (the panel shows its login notice instead of an error),
     // and agent.list says logged out from now on, whatever the agent's own status check says (Claude
     // Code's still says logged in with an expired login it can't refresh), until a login or a run works.
+    // (TRIF's full sandbox: its own sign-in, mode "token", not the user's Claude Code login, which this
+    // says nothing about: host.js tells the Settings switch, wholeboxsetting.js)
     if (run.loginFailed && !done.ok) {
-      done.error = { kind: 'login', agent: run.agent, message: run.loginFailed };
-      agents.noteLoginFailed(run.agent);
-    } else if (done.ok) {
+      done.error = { kind: 'login', agent: run.agent, message: run.loginFailed, ...(run.wholeBox ? { mode: 'token', refused: run.state.signIn === 'token' } : {}) };
+      if (!run.wholeBox) agents.noteLoginFailed(run.agent);
+    } else if (done.ok && !run.wholeBox) {
       agents.noteLoginWorked(run.agent);
     }
     if (run.shuttingDown) this._emit(run, { kind: 'error', message: 'the helper shut down (Chrome closed?) before the agent finished' });

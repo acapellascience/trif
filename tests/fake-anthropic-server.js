@@ -31,6 +31,8 @@ function startFakeAnthropic({ script = [{ say: 'ok' }] } = {}) {
       }
       const s = script[Math.min(step++, script.length - 1)];
       const n = step;
+      // ({status: 401}: an API error instead, e.g. a sign-in Anthropic refuses)
+      if (s.status) return send(s.status, { type: 'error', error: { type: s.errorType || 'authentication_error', message: s.message || 'Invalid bearer token' } });
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
       const ev = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
       ev('message_start', { message: { id: `msg_${n}`, type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null, usage } });

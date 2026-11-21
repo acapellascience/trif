@@ -14,6 +14,7 @@ const LOGIN_TIMEOUT_MS = Number(envVar('LOGIN_TIMEOUT_MS')) > 0 ? Number(envVar(
 const KILL_GRACE_MS = Number(envVar('AGENT_KILL_GRACE_MS')) > 0 ? Number(envVar('AGENT_KILL_GRACE_MS')) : 3000;
 const MAX_CODE = 4096;
 const NOTES_KEEP = 20;
+const TOKEN_EXIT_MS = 3000; // (token mode: how long setup-token may go on after printing the token)
 
 function newLoginId() {
   return 'l' + Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
@@ -207,13 +208,27 @@ class Logins {
   }
 
   _onLine(login, raw) {
-    const line = stripAnsi(raw).trim();
+    // (token mode: setup-token draws with a terminal UI, cursor moves for spaces: claudetoken.termLine)
+    const line = (login.tokenMode ? require('./claudetoken').termLine(raw) : stripAnsi(raw)).trim();
     if (!line || login.doneSent) return;
     let ev = null;
     try { ev = login.parseLine(line); } catch (e) { this.logger.warn(`agent login ${login.id}: parse error: ${e.message}`); }
     if (!ev) return;
     if (ev.kind === 'token') { // (token mode: kept for the keyring, its line not passed on)
-      if (login.tokenMode && typeof ev.token === 'string') login.token = ev.token;
+      if (login.tokenMode && typeof ev.token === 'string') {
+        login.token = ev.token;
+        // (if it waits for a key after showing the token, as it does after a refused code: it's done)
+        if (!login.tokenTimer) login.tokenTimer = setTimeout(() => { login.afterToken = true; this._kill(login); }, TOKEN_EXIT_MS);
+        login.timers.push(login.tokenTimer);
+      }
+      return;
+    }
+    // (token mode: a code setup-token didn't take; it would wait for Return and start over with a new
+    // sign-in link: this login ends instead, and the panel's Try again starts a fresh one)
+    if (ev.refused && login.tokenMode && !login.refusedCode) {
+      login.refusedCode = redact(ev.text, login.codes);
+      this._emit(login, { kind: 'text', text: login.refusedCode });
+      this._kill(login);
       return;
     }
     if (ev.kind === 'login' && typeof ev.url === 'string') {
@@ -263,11 +278,13 @@ class Logins {
       // `setup-token` saves nothing itself: the token it printed goes to the keyring, or the sign-in failed.
       const token = login.token;
       login.token = null;
-      if (code === 0 && token) {
+      if (token && (code === 0 || login.afterToken)) {
         try {
           await require('./claudetoken').storeToken(token, { env: process.env });
           ok = true;
         } catch (e) { message = `Signed in, but TRIF couldn't keep the sign-in: ${require('./claudetoken').redactTokens(e.message)}`; }
+      } else if (login.refusedCode) {
+        message = `Signing in to ${adapter.name} for TRIF's full sandbox failed: ${login.refusedCode}`;
       } else if (code === 0) {
         message = `${adapter.name} finished, but TRIF didn't find a sign-in token in what it printed.`;
       } else {

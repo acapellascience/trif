@@ -7,6 +7,9 @@
 // createLogin({ request, changed, succeeded }): request is the page's port request(); changed() after
 // every change (the page re-renders); succeeded() once the agent is logged in (the page reloads the
 // agent list). The page passes each agentEvent to onAgentEvent and shows nodes() while `current` is set.
+// mode "token" (the side panel, with Settings' "Run chats in TRIF's full sandbox" on): TRIF's own sign-in
+// for the box, `claude setup-token` run by TRIF's copy of Claude Code; the same link and code, and the
+// helper keeps the token (docs/WHOLE-BOX-STRINGS.md: draft words).
 
 import { isLoginUrl, PANEL } from './lib.js';
 import { setMarkdown } from './markdown.js';
@@ -38,15 +41,15 @@ function markdownBlock(className, text) {
 }
 
 export function createLogin({ request, changed = () => {}, succeeded = () => {} }) {
-  let L = null; // {loginId, agent, name, fix, phase, url, error, early}
+  let L = null; // {loginId, agent, name, fix, mode, phase, url, error, early}
 
-  async function start(agent, name, fix) {
-    const me = { loginId: null, agent, name, fix, phase: 'starting', url: null, error: null, early: [] };
+  async function start(agent, name, fix, mode) {
+    const me = { loginId: null, agent, name, fix, mode: mode === 'token' ? 'token' : undefined, phase: 'starting', url: null, error: null, early: [] };
     L = me;
     changed();
     let loginId;
     try {
-      ({ loginId } = await request({ type: 'agent.login', agent: agent || undefined }));
+      ({ loginId } = await request({ type: 'agent.login', agent: agent || undefined, ...(me.mode ? { mode: me.mode } : {}) }));
     } catch (e) {
       if (L === me) failed(me, String(e?.message ?? e));
       return;
@@ -151,16 +154,18 @@ export function createLogin({ request, changed = () => {}, succeeded = () => {} 
   function nodes(agentInfo, { intro = `Log in with your account to use it from this ${PANEL}.`, more = [] } = {}) {
     const name = L?.name || agentInfo?.name || 'The agent';
     const fix = L?.fix || agentInfo?.loginFix || '';
+    const token = (L ? L.mode : agentInfo?.loginMode) === 'token';
+    const doing = token ? `Signing in to ${name} for TRIF’s full sandbox` : `Logging in to ${name}`;
     const fallback = () => (fix ? markdownBlock('note', `Or ${fix}.`) : null);
     const cancelButton = () => button('Cancel', '', cancel);
     const out = [];
     let tone = '';
     switch (L?.phase) {
       case 'starting':
-        out.push(el('p', 'title', `Logging in to ${name}…`), el('p', null, 'Opening the sign-in page…'), actions(cancelButton()));
+        out.push(el('p', 'title', `${doing}…`), el('p', null, 'Opening the sign-in page…'), actions(cancelButton()));
         break;
       case 'code': {
-        out.push(el('p', 'title', `Logging in to ${name}`),
+        out.push(el('p', 'title', doing),
           el('p', null, 'Finish signing in in the tab that opened, then paste the code it shows here:'));
         const form = el('form', 'login-form');
         const input = el('input');
@@ -178,22 +183,30 @@ export function createLogin({ request, changed = () => {}, succeeded = () => {} 
         break;
       }
       case 'checking':
-        out.push(el('p', 'title', `Logging in to ${name}`), el('p', null, 'Checking the code…'), actions(cancelButton()));
+        out.push(el('p', 'title', doing), el('p', null, 'Checking the code…'), actions(cancelButton()));
         break;
       case 'success':
         tone = 'ok';
-        out.push(el('p', 'title', 'Logged in'), el('p', null, `${name} is ready.`));
+        out.push(el('p', 'title', token ? 'Signed in' : 'Logged in'), el('p', null, token ? `Chats in TRIF’s full sandbox can use ${name} now.` : `${name} is ready.`));
         break;
       case 'failed': {
         tone = 'bad';
-        const agent = L.agent;
-        out.push(el('p', 'title', `Couldn’t log in to ${name}`));
+        const { agent, mode } = L;
+        out.push(el('p', 'title', token ? `Couldn’t sign in to ${name} for TRIF’s full sandbox` : `Couldn’t log in to ${name}`));
         if (L.error) out.push(markdownBlock('', L.error));
-        out.push(actions(button('Try again', 'primary', () => start(agent, name, fix))));
-        out.push(fallback());
+        out.push(actions(button('Try again', 'primary', () => start(agent, name, fix, mode))));
+        if (!token) out.push(fallback());
         break;
       }
       default: // not started
+        if (token) {
+          // (TRIF's full sandbox: its own sign-in; the user's own Claude Code login can't be used in the box)
+          out.push(el('p', 'title', agentInfo?.loginExpired ? `Sign in to ${name} again for TRIF’s full sandbox` : `Sign in to ${name} for TRIF’s full sandbox`));
+          out.push(el('p', null, agentInfo?.loginExpired ? `${name} refused the sign-in TRIF kept (it may have expired, or been signed out elsewhere).`
+            : `Chats in TRIF’s full sandbox can’t use your own ${name} login. Sign in once with your account; TRIF keeps the sign-in in your Mac’s Keychain.`));
+          out.push(actions(button('Sign in', 'primary', () => start(agentInfo.id, name, '', 'token')), ...more));
+          break;
+        }
         out.push(el('p', 'title', `${name} isn’t logged in`));
         if (agentInfo?.canLogin) {
           out.push(el('p', null, intro));

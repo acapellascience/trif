@@ -177,7 +177,7 @@ async function setup() {
   };
   ext.hello();
   await ext.waitForSocket(10000);
-  fixture = { home, code, ws, priv, keychainDir, ext, anthropic, openai, anthropicScript, openaiScript };
+  fixture = { home, code, ws, priv, keychainDir, kc, ext, anthropic, openai, anthropicScript, openaiScript };
   return fixture;
 }
 
@@ -306,6 +306,60 @@ test('Claude Code in TRIF\'s full sandbox: without TRIF\'s pinned copy (missing,
     assert.ok(events.some((e) => e.kind === 'error' && /TRIF's own copy of Claude Code wasn't started: it has changed since it was downloaded\./.test(e.message)), info);
   } finally { fs.unlinkSync(markFile); fs.writeFileSync(markFile, mark); }
   assert.equal(f.anthropic.requests.length, asked, 'no model call');
+});
+
+// Step 6b (docs/WHOLE-BOX-PROGRESS.md): Claude Code's own login is out of the box's reach, so a boxed run signs
+// in with a saved API key (the key proxy: the tests above) or the token `claude setup-token` gives (the
+// keyring; claudetoken.js prepareBoxed). A stand-in token, a stand-in keychain, a stand-in Anthropic.
+test('Claude Code in TRIF\'s full sandbox, signed in with setup-token\'s token: no sign-in → "sign in" (mode token); the token → a run; refused → "sign in again"', { skip: !process.env.TRIF_WHOLE_BOX ? 'TRIF_WHOLE_BOX=1 only' : skipWhy(CLAUDE, 'Claude Code') }, async () => {
+  const f = await setup();
+  const ct = require('../helper/lib/claudetoken');
+  const TOKEN = 'sk-ant-oat01-' + 'Stand_in-boxed-'.repeat(5) + 'AA';
+  await keys.removeAgentKey('claude', { env: f.kc.env });
+  try {
+    // Neither an API key nor a token: the run stops before Claude Code starts, as a sign-in for the box.
+    let asked = f.anthropic.requests.length;
+    let r = await runAgent(f, { agent: 'claude', site: 'example.com', tabId: 12 });
+    let info = `events: ${JSON.stringify(r.events)}\nhelper.log:\n${helperLog(f)}`;
+    assert.equal(r.done.ok, false, info);
+    assert.deepStrictEqual(r.done.error && [r.done.error.kind, r.done.error.mode, r.done.error.refused], ['login', 'token', false], info);
+    assert.ok(r.events.some((e) => e.kind === 'error' && e.reason === 'login' && e.mode === 'token' && /need you to sign in to Claude Code for TRIF first/.test(e.message)), info);
+    assert.equal(f.anthropic.requests.length, asked, 'no model call');
+    // The token in the keyring: the run signs in with it (Bearer, no API key), and it's nowhere else.
+    await ct.storeToken(TOKEN, { env: f.kc.env });
+    setScript(f.anthropicScript, [{ say: 'Signed in, boxed.' }]);
+    asked = f.anthropic.requests.length;
+    r = await runAgent(f, { agent: 'claude', site: 'example.com', tabId: 12 });
+    info = `events: ${JSON.stringify(r.events).slice(0, 3000)}\nhelper.log:\n${helperLog(f)}`;
+    assert.equal(r.done.ok, true, info);
+    const calls = f.anthropic.requests.slice(asked).filter((x) => x.method === 'POST' && /\/v1\/messages/.test(x.url));
+    assert.ok(calls.length, `a model call:\n${info}`);
+    for (const c of calls) {
+      assert.equal(c.headers.authorization, `Bearer ${TOKEN}`, info);
+      assert.equal(c.headers['x-api-key'], undefined, 'no API key with it');
+    }
+    const logs = fs.readdirSync(f.priv).filter((n) => /\.(log|jsonl)$/.test(n)).map((n) => fs.readFileSync(path.join(f.priv, n), 'utf8')).join('\n');
+    assert.ok(!JSON.stringify(r.events).includes(TOKEN) && !logs.includes(TOKEN), 'the token in no event, no log');
+    // Anthropic refuses it (expired, revoked): "sign in again", mode token, and Settings hears of it.
+    setScript(f.anthropicScript, [{ status: 401, message: 'OAuth token has expired' }]);
+    const since = f.ext.messages.length;
+    r = await runAgent(f, { agent: 'claude', site: 'example.com', tabId: 12 });
+    info = `events: ${JSON.stringify(r.events).slice(0, 3000)}\nhelper.log:\n${helperLog(f)}`;
+    assert.equal(r.done.ok, false, info);
+    assert.deepStrictEqual(r.done.error && [r.done.error.kind, r.done.error.mode, r.done.error.refused], ['login', 'token', true], info);
+    assert.match(r.done.error.message, /refused TRIF's full sandbox sign-in/, info);
+    const wb = await f.ext.next((m) => m.type === 'wholeBox' && m.wholeBox.refused, { timeout: 10000, since });
+    assert.deepStrictEqual([wb.wholeBox.signedIn, wb.wholeBox.token], [false, true]);
+    // Sign out (Settings): the token leaves the keyring.
+    const out = await extRequest(f.ext, 'wholeBox.signOut');
+    assert.equal(out.ok, true, out.error);
+    assert.deepStrictEqual([out.result.signedIn, out.result.token], [false, false]);
+    assert.deepStrictEqual(await ct.readToken({ env: f.kc.env }), { value: null, error: null });
+  } finally {
+    await ct.removeToken({ env: f.kc.env }).catch(() => {});
+    await keys.setAgentKey('claude', KEY, { env: f.kc.env });
+    setScript(f.anthropicScript, [{ say: 'ok' }]);
+  }
 });
 
 test('Codex: real `trif` commands work in a side-panel run\'s sandbox; the private folder, config.json, the keychain, TRIF\'s other files and the network stay out of reach', { skip: skipWhy(CODEX, 'Codex') }, async () => {

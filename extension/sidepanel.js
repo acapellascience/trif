@@ -42,7 +42,7 @@ const ui = {
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), agentLogin: $('#agent-login'), withoutSandbox: $('#without-sandbox'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
-  wholeBoxRow: $('#whole-box-row'), wholeBox: $('#whole-box'), wholeBoxNote: $('#whole-box-note'), wholeBoxActions: $('#whole-box-actions'), wholeBoxRetry: $('#whole-box-retry'),
+  wholeBoxRow: $('#whole-box-row'), wholeBox: $('#whole-box'), wholeBoxNote: $('#whole-box-note'), wholeBoxActions: $('#whole-box-actions'), wholeBoxRetry: $('#whole-box-retry'), wholeBoxSignIn: $('#whole-box-sign-in'), wholeBoxSignOut: $('#whole-box-sign-out'),
   autoUpdate: $('#auto-update'), watchDownloads: $('#watch-downloads'), downloadsNote: $('#downloads-note'), downloadOffer: $('#download-offer'), pauseAll: $('#pause-all'), pausedAll: $('#paused-all'), updateNote: $('#update-note'), modsFeedNote: $('#mods-feed-note'), update: $('#update'),
   starter: $('#starter'), starterList: $('#starter-list'), starterErr: $('#starter-err'),
   siteStarter: $('#site-starter'), siteStarterLink: $('#site-starter-link'), siteStarterErr: $('#site-starter-err'),
@@ -233,7 +233,15 @@ function currentAgent() {
   const list = view.agents?.agents || [];
   if (robotless()) return { id: '', info: null, list };
   const id = chatSettings().agent || view.agents?.default || '';
-  return { id, info: list.find((a) => a.id === id) || null, list };
+  return { id, info: boxedInfo(list.find((a) => a.id === id) || null), list };
+}
+// With Settings' "Run chats in TRIF's full sandbox" on, Claude Code's chats sign in with TRIF's own sign-in
+// (helper/lib/wholeboxsetting.js signedIn: a saved API key, or `claude setup-token`'s token), not the
+// user's own login: so that's what "logged in" means here, and Log in starts that sign-in (mode "token").
+function boxedInfo(info) {
+  const w = view.status?.helper?.connected ? view.status.wholeBox : null;
+  if (!info || info.id !== 'claude' || !w?.available || !w.on) return info;
+  return { ...info, loggedIn: w.signedIn, loginExpired: !!w.refused, canLogin: true, loginFix: '', loginMode: 'token' };
 }
 
 // ---- tab following ------------------------------------------------------------------------------
@@ -834,7 +842,8 @@ function problemLine(problem, agentInfo) {
       // Besides Log in: another agent that's logged in, or no agent (loginOthers).
       const others = loginOthers(agentInfo).map(([text, go]) => link(text, go));
       const more = others.flatMap((a) => [' · ', a]);
-      if (agentInfo?.canLogin) p.append(`${name} isn’t logged in. `, link('Log in', () => login.start(agentInfo.id, name, fix)), ...more);
+      if (agentInfo?.loginMode === 'token') p.append(`${name} needs you to sign in for TRIF’s full sandbox. `, link('Sign in', () => login.start(agentInfo.id, name, '', 'token')), ...more);
+      else if (agentInfo?.canLogin) p.append(`${name} isn’t logged in. `, link('Log in', () => login.start(agentInfo.id, name, fix)), ...more);
       else {
         const block = markdownBlock('', `${name} isn’t logged in.${fix ? ` To log in, ${fix}.` : ''}`);
         if (others.length) { const q = el('p'); q.append(...others.flatMap((a, i) => (i ? [' · ', a] : [a]))); block.append(q); }
@@ -4452,7 +4461,21 @@ function renderWholeBox() {
   const note = view.wholeBoxError || wholeBoxNote(w);
   if (ui.wholeBoxNote.textContent !== note) ui.wholeBoxNote.textContent = note;
   ui.wholeBoxNote.classList.toggle('error', !!view.wholeBoxError || (w.on && w.pin === 'failed'));
-  ui.wholeBoxActions.hidden = !(w.on && w.pin === 'failed');
+  ui.wholeBoxRetry.hidden = !(w.on && w.pin === 'failed');
+  // (its sign-in, when it's TRIF's own token: Sign out; a saved API key is Settings' API key's)
+  const signIn = w.on ? wholeBoxSignInNote(w) : '';
+  if (ui.wholeBoxSignIn.textContent !== signIn) ui.wholeBoxSignIn.textContent = signIn;
+  ui.wholeBoxSignIn.hidden = !signIn;
+  ui.wholeBoxSignOut.hidden = !(w.on && w.token);
+  ui.wholeBoxSignOut.disabled = !!view.wholeBoxBusy;
+  ui.wholeBoxActions.hidden = ui.wholeBoxRetry.hidden && ui.wholeBoxSignOut.hidden;
+}
+function wholeBoxSignInNote(w) {
+  if (w.signedIn === null || w.signedIn === undefined) return '';
+  if (w.key) return 'Its chats use your saved Anthropic API key.';
+  if (w.token && w.refused) return 'Claude Code refused TRIF’s sign-in: sign in again from a chat.';
+  if (w.token) return 'Signed in to Claude Code for TRIF’s full sandbox (kept in your Mac’s Keychain).';
+  return 'Not signed in yet: a chat will ask you to sign in.';
 }
 async function wholeBoxRequest(msg) {
   view.wholeBoxBusy = true; view.wholeBoxError = null; renderWholeBox();
@@ -4462,6 +4485,7 @@ async function wholeBoxRequest(msg) {
 }
 ui.wholeBox?.addEventListener('change', () => wholeBoxRequest({ type: 'wholeBox.set', on: ui.wholeBox.checked }));
 ui.wholeBoxRetry?.addEventListener('click', () => wholeBoxRequest({ type: 'wholeBox.retry' }));
+ui.wholeBoxSignOut?.addEventListener('click', () => wholeBoxRequest({ type: 'wholeBox.signOut' }));
 
 ui.autoUpdate.addEventListener('change', async () => {
   const on = ui.autoUpdate.checked;

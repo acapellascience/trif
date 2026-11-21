@@ -66,15 +66,21 @@ if (argv[0] !== 'setup-token') { process.stderr.write('unexpected ' + argv.join(
 if (!process.stdin.isTTY) { process.stdout.write('\\n'); setInterval(() => {}, 1000); return; }
 // (a terminal UI reads keys: Return is \\r, nothing echoed)
 process.stdin.setRawMode(true);
-process.stdout.write('Opening browser to sign in…\\n');
-process.stdout.write("If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&state=SECRETSTATE\\n");
-process.stdout.write('Paste code here if prompted > ');
+// (drawn as the real one does, round 3's CI probe: Ink's cursor moves for spaces, a logo, spinners, a box)
+// (ink(text, at): text drawn from column "at" (0-based), each word placed by an absolute column move)
+const ink = (t, at = 0) => t.split(' ').map((w, i, a) => (i ? '\\x1b[' + (at + a.slice(0, i).join(' ').length + 2) + 'G' : '') + w).join('');
+process.stdout.write('\\x1b7\\x1b8' + ink('Welcome to Claude Code v2.1.330') + '\\r\\n*█████▓▓░\\r\\n\\x1b[1C' + ink('· Opening browser to sign in…', 1) + '\\r\\n✢\\r✳\\r\\n');
+process.stdout.write(ink("Browser didn't open? Use the url below to sign in (c to copy)") + '\\r\\n\\r\\n\\x1b]8;;https://claude.ai/oauth/authorize?code=true&state=SECRETSTATE\\x07https://claude.ai/oauth/authorize?code=true&state=SECRETSTATE\\x1b]8;;\\x07\\r\\n\\r\\n');
+process.stdout.write(ink('Paste code here if prompted') + '\\r\\n╭──────╮\\r\\n│ │\\r\\n╰──────╯\\x1b(B\\x0f');
 let buf = '';
 process.stdin.on('data', (d) => { buf += d; if (!buf.includes('\\r')) return;
   const code = buf.trim();
-  if (code === 'BADCODE') { process.stderr.write('OAuth error: invalid code\\n'); process.exit(1); }
+  // (a code it doesn't take: it says so and waits for Return, round 3's CI probe)
+  if (code === 'BADCODE') { process.stdout.write('\\r\\x1b[1C\\x1b[1A✘\\x1b[4G' + ink("OAuth error: That code wasn't accepted. Sign in again to get a new code.", 3) + '\\r\\r\\n\\x1b[2G' + ink('Press Enter to retry', 1) + '\\r\\n'); buf = ''; return; }
   if (code === 'NOTOKEN') { process.stdout.write('\\nDone.\\n'); process.exit(0); }
-  process.stdout.write('\\n✓ Long-lived authentication token created successfully!\\n\\nYour OAuth token (valid for 1 year):\\n\\n${FAKE_TOKEN}\\n\\nStore this token securely. You won\\'t be able to see it again.\\n\\nUse this token by setting: export CLAUDE_CODE_OAUTH_TOKEN=<token>\\n');
+  process.stdout.write('\\r\\n✓ ' + ink('Long-lived authentication token created successfully!', 2) + '\\r\\n\\r\\n' + ink('Your OAuth token (valid for 1 year):') + '\\r\\n\\r\\n${FAKE_TOKEN}\\r\\n\\r\\n' + ink("Store this token securely. You won't be able to see it again.") + '\\r\\n');
+  // (GOODWAIT: it waits after showing the token: TRIF ends it)
+  if (code === 'GOODWAIT') { setInterval(() => {}, 1000); return; }
   process.exit(0);
 });
 `, { mode: 0o755 });
@@ -120,7 +126,9 @@ test('the panel\'s sign-in, mode "token": TRIF\'s copy runs setup-token; the tok
   assert.match(r.call.env.CLAUDE_CONFIG_DIR, /trif-setup-token-/, 'a config folder of its own');
   assert.strictEqual(fs.existsSync(r.call.env.CLAUDE_CONFIG_DIR), false, 'removed after');
   assert.strictEqual(r.call.env.DISABLE_AUTOUPDATER, '1');
-  assert.deepStrictEqual(r.events.filter((e) => e.kind === 'login'), [{ kind: 'login', url: 'https://claude.com/cai/oauth/authorize?code=true&state=SECRETSTATE' }]);
+  assert.deepStrictEqual(r.events.filter((e) => e.kind === 'login'), [{ kind: 'login', url: 'https://claude.ai/oauth/authorize?code=true&state=SECRETSTATE' }]);
+  // (only its words, as on screen: no logo, spinners, box, nor its own instructions)
+  assert.deepStrictEqual(r.events.filter((e) => e.kind === 'text').map((e) => e.text), ['Long-lived authentication token created successfully!', 'Your OAuth token (valid for 1 year):', 'Store this token securely. You won\'t be able to see it again.']);
   assert.deepStrictEqual(r.events.at(-1), { kind: 'done', ok: true, login: true, mode: 'token' });
   assert.strictEqual(r.call.tty, true, 'under a pseudo-terminal');
   assert.strictEqual(r.call.columns, 4000, 'wide: nothing wrapped');
@@ -136,7 +144,11 @@ test('the panel\'s sign-in, mode "token": TRIF\'s copy runs setup-token; the tok
 test('setup-token failing, or printing no token: done not ok, a message, nothing kept; without TRIF\'s copy: refused', async () => {
   const bad = await tokenLogin('BADCODE');
   assert.deepStrictEqual(bad.events.at(-1), { kind: 'done', ok: false, login: true, mode: 'token' });
-  assert.match(bad.events.find((e) => e.kind === 'error').message, /^Signing in to Claude Code for TRIF's full sandbox failed: OAuth error: invalid code/);
+  assert.match(bad.events.find((e) => e.kind === 'error').message, /^Signing in to Claude Code for TRIF's full sandbox failed: OAuth error: That code wasn't accepted\. Sign in again to get a new code\.$/);
+  assert.ok(bad.events.some((e) => e.kind === 'text' && /That code wasn't accepted/.test(e.text)), 'the panel sees it while checking');
+  const waits = await tokenLogin('GOODWAIT');
+  assert.deepStrictEqual(waits.events.at(-1), { kind: 'done', ok: true, login: true, mode: 'token' }, 'it waited after the token: ended, signed in');
+  assert.strictEqual(waits.token.value, FAKE_TOKEN);
   assert.strictEqual(bad.token.value, null);
   const none = await tokenLogin('NOTOKEN');
   assert.match(none.events.find((e) => e.kind === 'error').message, /didn't find a sign-in token/);
@@ -145,4 +157,53 @@ test('setup-token failing, or printing no token: done not ok, a message, nothing
   const logins = new Logins({ getWorkspace: () => ({ home: fresh('empty'), bin: '/nowhere', config: {} }) });
   assert.throws(() => logins.start({ agent: 'claude', mode: 'token' }), /TRIF's own copy of Claude Code isn't downloaded yet/);
   assert.throws(() => logins.start({ agent: 'codex', mode: 'token' }), /has no sign-in token|can't log in from the side panel/);
+});
+
+test('a boxed run\'s sign-in (prepareBoxed): a saved API key\'s proxy first; else the token, through the allowlist proxy; neither: "sign in"', async () => {
+  const kc = makeFakeKeychain(fresh('kc'));
+  // A saved API key: the claude adapter's own prepare (the key proxy), untouched.
+  const keyed = { env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:1/', ANTHROPIC_API_KEY: 'placeholder' }, secrets: ['k'] };
+  assert.strictEqual(await ct.prepareBoxed({ keyPrep: async () => keyed, env: kc.env }), keyed);
+  // Neither: an error the run turns into a sign-in offer.
+  await assert.rejects(ct.prepareBoxed({ keyPrep: async () => ({}), env: kc.env }), (e) => e.signIn === 'token' && /need you to sign in to Claude Code for TRIF first/.test(e.message));
+  // The token: CLAUDE_CODE_OAUTH_TOKEN; what would outrank it unset; Anthropic through the allowlist proxy.
+  await ct.storeToken(FAKE_TOKEN, { env: kc.env });
+  let closed = 0;
+  const p = await ct.prepareBoxed({ keyPrep: async () => ({}), env: kc.env, startProxy: async (o) => { assert.deepStrictEqual(o, {}); return { port: 4567, close: async () => { closed++; } }; } });
+  assert.deepStrictEqual(p.env, { CLAUDE_CODE_OAUTH_TOKEN: FAKE_TOKEN, HTTPS_PROXY: 'http://127.0.0.1:4567' });
+  for (const v of [...ct.OUTRANKS, 'ANTHROPIC_BASE_URL']) assert.ok(p.unsetEnv.includes(v), v);
+  assert.deepStrictEqual(p.secrets, [FAKE_TOKEN], 'redacted from everything the run says');
+  assert.deepStrictEqual(p.state, { signIn: 'token' });
+  await p.cleanup();
+  assert.strictEqual(closed, 1);
+  // (tests: TRIF_ANTHROPIC_URL, a stand-in on this computer, instead of the proxy)
+  const s = await ct.prepareBoxed({ keyPrep: async () => ({}), env: { ...kc.env, TRIF_ANTHROPIC_URL: 'http://127.0.0.1:9/' }, startProxy: () => { throw new Error('not used'); } });
+  assert.deepStrictEqual(s.env, { CLAUDE_CODE_OAUTH_TOKEN: FAKE_TOKEN, ANTHROPIC_BASE_URL: 'http://127.0.0.1:9/' });
+  assert.ok(!s.unsetEnv.includes('ANTHROPIC_BASE_URL') && s.unsetEnv.includes('ANTHROPIC_API_KEY'));
+  assert.strictEqual(s.cleanup, null);
+  // A keyring item that isn't a token: "sign in again", the item's text never in the message.
+  const kc2 = makeFakeKeychain(fresh('kc'));
+  await require('../helper/lib/keyring').setKey(ct.ACCOUNT, 'sk-ant-api03-not-a-setup-token-xx', { service: ct.SERVICE, env: kc2.env });
+  await assert.rejects(ct.prepareBoxed({ env: kc2.env }), (e) => e.signIn === 'token' && /sign in again/.test(e.message) && !e.message.includes('sk-ant'));
+});
+
+test('the pseudo-terminal (macOS): the program sees a wide terminal, gets what is typed with Return, its exit status comes back; cancelled, it ends', { skip: process.platform !== 'darwin' && 'macOS only' }, async () => {
+  const { spawn } = require('child_process');
+  const prog = path.join(fresh('pty'), 'prog');
+  fs.writeFileSync(prog, `#!${process.execPath}\nprocess.stdout.write(JSON.stringify({ tty: process.stdin.isTTY, cols: process.stdout.columns }) + '\\nname> ');\nprocess.stdin.setRawMode(true);\nlet b = '';\nprocess.stdin.on('data', (d) => { b += d; if (b.includes('\\r')) { process.stdout.write('got ' + b.trim() + '\\n'); process.exit(b.startsWith('wait') ? 0 : 7); } });\n`, { mode: 0o755 });
+  assert.strictEqual(ct.ptyCommand(prog, [], { platform: 'win32' }), null);
+  const run = (typed, { cancel = false } = {}) => new Promise((resolve) => {
+    const c = ct.ptyCommand(prog, []);
+    const child = spawn(c.file, c.args, { stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; if (/name> $/.test(out)) { if (cancel) process.kill(-child.pid, 'SIGTERM'); else child.stdin.write(typed); } });
+    child.on('close', (code, signal) => resolve({ out, code, signal }));
+  });
+  const r = await run('abc\r');
+  assert.match(r.out, /"tty":true,"cols":4000/);
+  assert.match(r.out, /got abc/);
+  assert.strictEqual(r.code, 7, 'the program\'s exit status');
+  const c = await run('', { cancel: true });
+  assert.strictEqual(c.signal, 'SIGTERM');
+  assert.doesNotMatch(c.out, /got/);
 });

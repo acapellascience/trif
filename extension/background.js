@@ -2535,6 +2535,10 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
       if (!fromPanel) throw new Error('only the side panel can change this');
       return helperRequest('wholeBox.retry', {}, 15000);
     }
+    case 'wholeBox.signOut': {
+      if (!fromPanel) throw new Error('only the side panel can change this');
+      return helperRequest('wholeBox.signOut', {}, 15000);
+    }
     // Mod files in the user's downloads (helper/lib/downloads.js): the Settings switch, and the card's buttons.
     // The panel's alone: each is a click there.
     case 'downloads.setWatch': {
@@ -2836,6 +2840,8 @@ async function stopAgent(runId) {
 /** Log the agent in: the helper runs its login command; events arrive under the loginId (the panel opens the URL). */
 async function startLogin(msg) {
   const args = msg.agent ? { agent: String(msg.agent) } : {};
+  // (mode "token": TRIF's full sandbox's own sign-in, `claude setup-token`; helper/lib/logins.js)
+  if (msg.mode === 'token') args.mode = 'token';
   const r = await helperRequest('agent.login', args);
   if (!r?.loginId) throw new Error('the helper did not return a login id');
   state.logins.add(r.loginId);

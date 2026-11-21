@@ -34,19 +34,27 @@ function fakePin({ key = 'darwin-arm64' } = {}) {
   f.fail = (m) => f.pending.reject(new Error(m));
   return f;
 }
+// A stand-in for the sign-in's keyring (claudetoken.js) and the saved API key (agentkeys.js): never a real keychain.
+function fakeSignIn() {
+  const k = { token: false, key: false, removed: 0 };
+  k.ct = { hasToken: async () => ({ stored: k.token, error: null }), removeToken: async () => { k.removed++; const had = k.token; k.token = false; return { removed: had }; } };
+  k.hasKey = async () => ({ stored: k.key });
+  return k;
+}
 function setting(f, extra = {}) {
   const ws = { home: fresh('home'), config: {} };
+  const k = extra.signIn || fakeSignIn();
   const sent = [];
   const writes = [];
   const s = createWholeBoxSetting({ getWorkspace: () => ws, setConfigKey: (home, k, v) => writes.push([k, v]), onChange: (st) => sent.push(st),
-    cp: f.cp, platform: 'darwin', arch: 'arm64', everyMs: 0, ...extra });
-  return { s, ws, sent, writes };
+    cp: f.cp, platform: 'darwin', arch: 'arm64', everyMs: 0, ct: k.ct, hasKey: k.hasKey, ...extra });
+  return { s, ws, sent, writes, k };
 }
 
 test('off by default; on: the config key, a background download with its progress, then ready (older copies pruned)', async () => {
   const f = fakePin();
   const { s, ws, sent, writes } = setting(f);
-  assert.deepStrictEqual(s.status(), { available: true, on: false, pin: 'missing', version: '2.1.999' });
+  assert.deepStrictEqual(s.status(), { available: true, on: false, pin: 'missing', version: '2.1.999', signedIn: null, token: false, key: false });
   s.start();
   assert.strictEqual(f.calls, 0, 'off: nothing downloaded');
   const st = s.set(true);
@@ -59,10 +67,10 @@ test('off by default; on: the config key, a background download with its progres
   assert.strictEqual(f.calls, 1);
   f.finish();
   await tick(); await tick();
-  assert.deepStrictEqual(sent.at(-1), { available: true, on: true, pin: 'ready', version: '2.1.999' });
+  assert.deepStrictEqual(sent.at(-1), { available: true, on: true, pin: 'ready', version: '2.1.999', signedIn: false, token: false, key: false });
   assert.strictEqual(f.pruned, 1);
   // off: the key removed, the copy kept
-  assert.deepStrictEqual(s.set(false), { available: true, on: false, pin: 'ready', version: '2.1.999' });
+  assert.deepStrictEqual(s.set(false), { available: true, on: false, pin: 'ready', version: '2.1.999', signedIn: false, token: false, key: false });
   assert.deepStrictEqual(writes.at(-1), ['wholeBox', undefined]);
   assert.strictEqual(isOn(ws), false);
 });
@@ -75,7 +83,7 @@ test('a failed download says why; Try again downloads again; a helper starting w
   assert.strictEqual(f.calls, 1, 'started: the missing copy is fetched');
   f.fail('https://registry.npmjs.org/… answered HTTP 503');
   await tick(); await tick();
-  assert.deepStrictEqual(sent.at(-1), { available: true, on: true, pin: 'failed', version: '2.1.999', error: 'https://registry.npmjs.org/… answered HTTP 503' });
+  assert.deepStrictEqual(sent.at(-1), { available: true, on: true, pin: 'failed', version: '2.1.999', error: 'https://registry.npmjs.org/… answered HTTP 503', signedIn: false, token: false, key: false });
   s.retry();
   assert.strictEqual(f.calls, 2);
   assert.strictEqual(s.status().pin, 'downloading');
@@ -156,7 +164,7 @@ test('the helper: sent on hello; only the extension\'s connection switches it; o
   const mac = process.platform === 'darwin';
   assert.deepStrictEqual([first.wholeBox.available, first.wholeBox.on, first.wholeBox.pin], [mac, false, 'missing']);
   await ext.waitForSocket();
-  for (const cmd of ['wholeBox.set', 'wholeBox.retry', 'wholeBox.status']) {
+  for (const cmd of ['wholeBox.set', 'wholeBox.retry', 'wholeBox.status', 'wholeBox.signOut']) {
     for (const extra of [{}, { token: 'a-run' }]) {
       const r = await sockAsk({ id: 's', cmd, args: { on: false }, ...extra });
       assert.strictEqual(r.ok, false, cmd);
@@ -175,11 +183,38 @@ test('the helper: sent on hello; only the extension\'s connection switches it; o
   assert.deepStrictEqual([on.result.on, on.result.pin], [true, 'downloading']);
   assert.strictEqual(JSON.parse(fs.readFileSync(path.join(privDir(home), 'config.json'), 'utf8')).wholeBox, true);
   const ready = await ext.next((m) => m.type === 'wholeBox' && m.wholeBox.pin === 'ready', { timeout: 20000, since });
-  assert.deepStrictEqual(ready.wholeBox, { available: true, on: true, pin: 'ready', version: '2.1.999' });
+  // (its sign-in: the stand-in extension's keychain doesn't exist, so: not signed in, and why)
+  assert.deepStrictEqual({ ...ready.wholeBox, signInError: !!ready.wholeBox.signInError }, { available: true, on: true, pin: 'ready', version: '2.1.999', signedIn: false, token: false, key: false, signInError: true });
   const progress = ext.messages.slice(since).filter((m) => m.type === 'wholeBox' && m.wholeBox.got);
   assert.ok(progress.every((m) => m.wholeBox.total === body.length), 'the size, with the progress');
   assert.ok(cp.installedPinned(home, { env: { TRIF_CLAUDE_CODE_PIN: pinFile } }), 'installed in the workspace');
   const off = await ask('wholeBox.set', { on: false });
   assert.deepStrictEqual([off.result.on, off.result.pin], [false, 'ready'], 'off: the copy kept');
   assert.strictEqual(JSON.parse(fs.readFileSync(path.join(privDir(home), 'config.json'), 'utf8')).wholeBox, undefined);
+});
+
+test('the sign-in (step 6b): a saved API key or the setup-token token; a refused token says so until the next sign-in; Sign out removes it', async () => {
+  const f = fakePin();
+  const { s, sent, k } = setting(f);
+  f.installed = true;
+  s.set(true);
+  await tick(); await tick();
+  assert.deepStrictEqual([sent.at(-1).signedIn, sent.at(-1).token, sent.at(-1).key], [false, false, false], 'checked when switched on: none');
+  k.token = true;
+  let st = await s.refreshSignIn();
+  assert.deepStrictEqual([st.signedIn, st.token, st.refused], [true, true, undefined]);
+  st = s.noteRefused();
+  assert.deepStrictEqual([st.signedIn, st.refused], [false, true], 'a boxed run\'s token refused: sign in again');
+  assert.strictEqual(sent.at(-1).refused, true, 'sent to the panel');
+  st = await s.refreshSignIn();
+  assert.deepStrictEqual([st.signedIn, st.refused], [false, true], 'still, until a sign-in');
+  st = await s.signedIn();
+  assert.deepStrictEqual([st.signedIn, st.refused], [true, undefined], 'a new sign-in');
+  k.key = true;
+  s.noteRefused();
+  st = await s.refreshSignIn();
+  assert.strictEqual(st.signedIn, true, 'a saved API key: runs use it (the key proxy) whatever the token');
+  k.key = false;
+  st = await s.signOut();
+  assert.deepStrictEqual([k.removed, st.signedIn, st.token, st.refused], [1, false, false, undefined]);
 });

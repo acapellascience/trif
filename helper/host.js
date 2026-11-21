@@ -585,7 +585,7 @@ const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.histo
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
 // sandboxes have no network and can't write the private folder, where the consent is kept.
 const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'downloads.status', 'downloads.setWatch', 'downloads.take', 'downloads.done', 'downloads.ignore',
-  'wholeBox.status', 'wholeBox.set', 'wholeBox.retry']);
+  'wholeBox.status', 'wholeBox.set', 'wholeBox.retry', 'wholeBox.signOut']);
 // Helper-local too, but a run may use them, on its own site's mods only (lib/trash.js siteInScope; runMod below).
 // (mod.code and mod.diff only read: a mod's text, a waiting change against the version that ran)
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore', 'mod.code', 'mod.diff']);
@@ -651,6 +651,12 @@ function onAgentEvent(runId, event) {
     if (held.length) event.held = held;
   }
   // (A run that found the agent logged out: runs.js tells lib/agents, so agent.list says so.)
+  // (TRIF's full sandbox's own sign-in, lib/wholeboxsetting.js: a token sign-in that worked, a boxed run
+  // whose token Claude Code refused, or one with no sign-in at all; Settings and the panel's offer follow.)
+  if (event && event.kind === 'done' && event.login && event.mode === 'token' && event.ok) wholeBoxSetting().signedIn().catch(() => {});
+  if (event && event.kind === 'done' && event.error && event.error.kind === 'login' && event.error.mode === 'token') {
+    if (event.error.refused) wholeBoxSetting().noteRefused(); else wholeBoxSetting().refreshSignIn().catch(() => {});
+  }
   // Every run goes to the extension (panels ignore runs they didn't start).
   if (state.stdoutOpen) {
     try { sendToExtension({ type: 'agentEvent', runId, event }); } catch (e) { logger.warn(`could not send agent event: ${e.message}`); }
@@ -1091,7 +1097,8 @@ function sendWholeBox(status) {
 }
 function wholeBoxCommand(cmd, args) {
   switch (cmd) {
-    case 'wholeBox.status': return wholeBoxSetting().status();
+    case 'wholeBox.status': return wholeBoxSetting().refreshSignIn();
+    case 'wholeBox.signOut': return wholeBoxSetting().signOut();
     case 'wholeBox.set': {
       if (typeof args.on !== 'boolean') throw new Error('on must be true or false');
       return wholeBoxSetting().set(args.on);

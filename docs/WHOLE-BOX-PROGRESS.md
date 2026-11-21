@@ -66,12 +66,19 @@ managed policy; a normal run works; the fallback happens only on the person's ch
     the relay or a port on this computer; plain http elsewhere and their own proxies noted; command hooks'
     scripts readable); runs.js gives them to the relay and the box, logs `orgNetwork`; a key-signed run
     gets the relay too when they name hosts. docs/IT-ADMINS.md (draft).
-  - [ ] **5b.** CI's first look (round 7) answered how Claude Code routes them (Findings): make the org
-    test strict on it, then the open points: managed `apiKeyHelper`, Bedrock /
-    Vertex credentials, a managed HTTPS_PROXY (chain the relay to it?), plain-http collectors; resuming a
-    chat across modes (round 6's finding).
-- [ ] **2. Daily CI against the latest Claude Code** (scheduled workflow), so a break is known before the
-  pin moves; and the pin refresh as a release.js step gated on the box tests.
+  - [x] **5b.** *(round 8)* The org CI test strict on round 7's findings. Their own proxy (any proxy
+    variable in managed `env`) or a cloud sign-in Claude Code would read from this computer's files → the
+    chat doesn't start in the box: the older-protection card, with its reason (`orgProxy` / `orgSignIn`).
+    Their own sign-in (managed `apiKeyHelper`, a key in their `env`, Bedrock / Vertex / Foundry with
+    credentials in their settings) works in the box: no TRIF sign-in asked, the token not given, the cloud
+    hosts through the relay. A chat's session follows it between the box and the older protection
+    (claudesessions.js). Open (For Tim, round 8): plain-http collectors elsewhere; credential files; a
+    proxy on this computer; carrying a boxed chat's turns back out.
+- [x] **2. Daily CI against the latest Claude Code** *(round 8)*: whole-box-latest.yml (daily 06:17 UTC,
+  by hand, or when it changes) runs all of whole-box.yml on npm's newest Claude Code in place of the pin and
+  records what passed (artifact `claude-code-tested`); `node scripts/release.js claude-pin <version>`
+  moves the pin only when a passed run tested exactly the packages the registry gives now. GitHub runs a
+  schedule only from the default branch: daily once it's on main.
 
 ### Windows
 
@@ -279,6 +286,79 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   a real TLS session through the relay); the relay fuzzed with 200k inputs; managed settings with hooks
   and telemetry (`TRIF_TEST_MANAGED=org`). Locally ~380 tests across the suites, no regressions.
 
+### Round 8 (11-21): step 5b (an organization's proxy, sign-in and clouds; sessions across modes), step 2 (daily CI, the pin step)
+
+- **The org test strict** (whole-box.test.js `hooks and telemetry`): both hook events ran boxed, the hook's
+  curl got nowhere (000), the HTTP hook and the OTLP logs went through the relay (made-up hosts: `failed`,
+  not refused), the hook's curl to example.com refused by the relay, the metrics at the collector on this
+  computer. Passed on CI.
+- **Their own proxy** (claude-managed.js `orgNetwork().stops`, kind `proxy`): any of `HTTPS_PROXY`,
+  `HTTP_PROXY`, `ALL_PROXY` (either case) in managed `env`, on another computer or this one → runs.js
+  `_boxUnavailable(run, 'orgProxy', …)` before anything starts: the older-protection card, its why line
+  from claude.js `boxOrgMessage`. Not chained: **CI showed Claude Code applies the managed `env` over the
+  run's own** (it went to their TEST-NET proxy, not TRIF's relay; the box refused it: "Unable to connect to
+  API (EPERM)"), and Seatbelt can't name another computer, so the relay can't sit between. (`HTTP_PROXY`
+  too: Claude Code's https falls back to it.) `NO_PROXY` of theirs: noted.
+- **Their own sign-in** (`signIn`): managed `apiKeyHelper` (its script readable in the box; it runs there
+  like a hook), `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` in their env, a cloud provider. Then
+  claudetoken.prepareBoxed `orgSignIn`: no TRIF sign-in asked, TRIF's token not given (unset), Anthropic and
+  their hosts through the relay; the run's `signIn` line says `organization`, `managed settings`. A sign-in
+  of theirs failing in the box is a plain error saying so (not the panel's sign-in notice, which wouldn't
+  help). CI: the pinned Claude Code ran the managed helper in the box and every request carried its key.
+- **Clouds** (`cloud()`): Bedrock (`bedrock-runtime.<region>.amazonaws.com`, `bedrock.<region>…`, from
+  `AWS_REGION` / `AWS_DEFAULT_REGION` / the small model's region, checked as region names), Vertex
+  (`<region>-aiplatform.googleapis.com`, `aiplatform.googleapis.com` for global, each `VERTEX_REGION_*`),
+  Foundry (`<resource>.services.ai.azure.com`); a base URL of theirs replaces the runtime host. Credentials
+  in their settings work (keys in env, `awsCredentialExport`'s script, `CLAUDE_CODE_SKIP_*_AUTH`); else
+  (this computer's ~/.aws, gcloud, Azure sign-in; a credentials file their env names) → a stop, kind
+  `cloudSignIn` → `orgSignIn`. Unit-tested only (no cloud account on CI, as the rules say).
+- **The card** (sidepanel.js): for `org…` reasons, "You can run this chat with the older protection: …"
+  without "wait", and "Nothing ran." for Not now (drafts, WHOLE-BOX-STRINGS.md).
+- **Sessions across modes** (helper/lib/claudesessions.js; runs.js `_spawn`, before the prompt): the
+  session newest in the run's own config folder → resumed; newer in the user's (~/.claude or
+  $CLAUDE_CONFIG_DIR) and the run is boxed → copied into the box's folder (its tool-output folder too,
+  links left out, 0600); newer in the box's and the run isn't boxed → a new session (logged `session`
+  `fresh`; the model gets the full context, not the reminder), nothing written outside. Carrying the box's
+  turns out is For Tim.
+- **Step 2**: `.github/workflows/whole-box-latest.yml` (daily 06:17 UTC; by hand with `-f claude-code=<v>`;
+  when the file changes on whole-box) calls whole-box.yml (now also `workflow_call`, input `claude-code`)
+  which then pins that version as the release step does (`claudepin.js pin`, the registry's checksums)
+  before every step, and on success uploads `claude-code-tested` (version, the pin file, commit).
+  `node scripts/release.js claude-pin <version> [--dry-run]`: newer than the pin, makePins from the
+  registry, then a passed whole-box-latest run whose record names exactly those packages and checksums
+  (`pinTestedProblem`), else it stops saying how to run the tests; writes helper/claude-code.json (commit
+  it; the next release ships it). whole-box.yml's concurrency group now has the workflow's name, so the two
+  don't cancel each other. **GitHub runs a schedule only from the default branch**, so it's daily once
+  merged into main (Tim's); until then by push or by hand (`gh workflow run` needs it on main too).
+- The real-Seatbelt unit test flaked in the first daily run (no report reached the log in 10 s while the
+  step's own probe saw them): now up to three shells, 6 s each.
+- Tests: wholebox-org.test.js (+3: proxies, sign-in and clouds, runs.js's stop and org sign-in),
+  claudetoken.test.js (orgSignIn), claudesessions.test.js (2), release-claudepin.test.js (1); CI only:
+  `apiKeyHelper` (TRIF_TEST_MANAGED=keyhelper), `own proxy` (TRIF_TEST_MANAGED=proxy, the real network:
+  nothing reached it). Locally the touched suites pass (~280 tests); tests/update.test.js's web-ext part
+  needs node_modules, which this worktree doesn't have (CI's `tests` workflow passes it).
+
+## For Tim (round 8): not blocking, the loop goes on
+
+1. **Plain-http telemetry collectors on other computers** (`http://collector.corp:4318`). The relay only
+   carries `CONNECT` tunnels, so they're refused (noted in the run's log). Carrying them means TRIF
+   forwarding plain HTTP to a host the organization named: the relay would read and pass on unencrypted
+   requests. Recommendation: keep refusing; organizations can use https or a collector on the computer.
+2. **Cloud sign-in files** (~/.aws, gcloud's application-default credentials, a
+   `GOOGLE_APPLICATION_CREDENTIALS` file). The box doesn't open them, so such chats don't start in the box
+   (the card offers the older protection). Opening them would put cloud credentials where the run's tools
+   could read them (unlike the setup-token token, which is only in the environment). Recommendation: keep
+   as is until an organization asks.
+3. **A proxy on this computer** (a company's local agent, 127.0.0.1:port). The box could open that port, but
+   then the proxy's own rules, not TRIF's, decide where a chat can connect. Recommendation: keep stopping
+   (with the card), as for a proxy elsewhere.
+4. **A boxed chat's turns back to your own Claude Code.** When a chat that ran in the box runs with the
+   older protection, it starts a new Claude Code session (the full context is given again, the earlier
+   turns aren't). Copying them out would let what a boxed run wrote steer a Claude Code outside the box.
+   Recommendation: keep the new session; maybe a line in the chat saying so (words to draft).
+5. Words: the round-8 drafts in WHOLE-BOX-STRINGS.md (the proxy / cloud why lines, the card's no-wait text,
+   the org sign-in error).
+
 ## For Tim (round 4): answered 11-21, "yes, the recommendation" (done in round 5, step 7a)
 
 **Should a chat in TRIF's full sandbox still ask "Use Claude Code anyway" when a company's Claude Code
@@ -303,6 +383,17 @@ company's settings loosen Claude Code's rules; TRIF's full sandbox still holds")
 question with nothing to decide.
 
 ## Findings
+
+- **Round 8, an organization's own proxy** (CI, pinned 2.1.330 in the box, managed `env` `HTTPS_PROXY` =
+  `http://192.0.2.1:3128`, TRIF's relay as the run's own `HTTPS_PROXY`): the relay saw nothing; Claude Code
+  ended at once with "API Error: Unable to connect to API (EPERM)". So the managed `env` wins over the run's
+  environment (proxies too), and the box refused the proxy. Hence a stop, not a chain.
+- **Round 8, an organization's apiKeyHelper** (CI, managed `apiKeyHelper` = a script in /Library/Application
+  Support/ClaudeCode printing a made-up key, no `ANTHROPIC_API_KEY`): Claude Code ran it inside the box and
+  both requests to the stand-in carried that key; the run worked (exit 0).
+- (CI's stand-in runs print "Ignoring 6 permissions.allow entries from .claude/settings.json: this workspace
+  has not been trusted": the test harness's own project settings file, not TRIF's run settings, which come
+  by --settings.)
 
 - **Round 7, the relay on the real network** (CI run 44882307668, pinned 2.1.330 in the box, a made-up
   setup-token token, `HTTPS_PROXY` = the relay): Claude Code went to `api.anthropic.com:443` (160.79.104.10)
@@ -426,14 +517,24 @@ question with nothing to decide.
 
 ## Next
 
-Round 8: step 5b. Read CI's org run (what the pinned Claude Code sends where: telemetry to the local
-collector and through the relay, the HTTP hook, the command hook's lines) and make that test strict; then
-the open points: an org's own proxy in managed `env` (chain the relay to it, or a clear stop), `apiKeyHelper`
-and cloud credentials, plain-http collectors elsewhere (only a stop with words, unless Tim wants an
-http-forwarding relay: that would be a new decision), resuming a chat across modes (round 6). Then step 2
-(daily CI against the latest Claude Code; the pin refresh in release.js).
+Round 9: Windows, step 9 (can the boxed claude.exe reach the relay without the loopback exemption: a named
+pipe the AppContainer is granted, or another no-admin path, on windows-latest; else the one-time admin
+prompt), then 9b's first parts (the pinned claude.exe, Credential Manager for the token). The For Tim
+(round 8) points don't block it. The daily run starts once whole-box-latest.yml is on main.
 
 ## CI
+
+- Round 8: [whole-box 44883531774](https://github.com/acapellascience/trif/actions/runs/44883531774) (ab3e6e2,
+  5b) **passed** (macos, windows): the org test strict; **an organization's apiKeyHelper run in the box, its
+  key on every request**; **their own proxy taken over TRIF's relay and refused by the box** (Findings);
+  every earlier step unchanged. 98a595e (step 2): whole-box
+  [44883703284](https://github.com/acapellascience/trif/actions/runs/44883703284) passed; the first
+  whole-box-latest run (44883703363, npm latest = 2.1.330 = the pin) failed only on the real-Seatbelt unit
+  test's flake (fixed, 6324f86). 6324f86: [whole-box-latest
+  44884256188](https://github.com/acapellascience/trif/actions/runs/44884256188) **passed** (its
+  `claude-code-tested` record uploaded), [whole-box 44884256091](https://github.com/acapellascience/trif/actions/runs/44884256091)
+  passed, `tests` [44884256083](https://github.com/acapellascience/trif/actions/runs/44884256083) passed (and
+  for ab3e6e2, 98a595e).
 
 - Round 7: [run 44882307668](https://github.com/acapellascience/trif/actions/runs/44882307668) (whole-box.yml,
   f92935c) macos **passed**: unit tests (relay, wholebox-org added); **the pinned Claude Code in the box

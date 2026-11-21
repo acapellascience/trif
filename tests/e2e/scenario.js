@@ -1409,6 +1409,7 @@ class Scenario {
       await r.check('an expired login (a stand-in Claude Code): the login notice and one plain line, not the raw error; the message back in the box', () => this.expiredLoginCheck(win));
       await r.check('a style mod: TRIF\'s own code applies its CSS, hides, replaces and filters (also what appears later); one that would load from an address is refused, not sent', () => this.rulesModCheck(win));
       await r.check('a style section (helper/lib/stylesection.js): a free mod\'s and a boxed mod\'s CSS applied by TRIF, their settings as trif.style; the code finds no trace of the section; a change to the section alone runs without asking; a code change waits as before, the version that runs meanwhile wearing the new style', () => this.styleSectionCheck(win));
+      await r.check('a mod that changes kind in its file (boxed, style, boxed, free, boxed): registered as each, never "World ID can only be specified for USER_SCRIPT worlds", and runs as it now is', () => this.kindChangeCheck(win));
       await r.check('groups: "Free mods" off on a site from the panel stops its free mods there (style mods keep running, other sites\' free mods untouched); on again, back', () => this.groupsCheck(win));
       await r.check('boxed mods: a hostile one fails at every escape (network, code from strings, inline code, other windows and the page\'s globals, synthetic input, navigation, clipboard, cookies and storage, messages), with nothing reaching the server or the page; a good one restyles, hides, adds, rewrites text, draws, uses timers and settings, and watches; errors and logs reported; the two sample ports work; timing', () => this.sandboxedCheck(win));
       await r.check('a boxed mod as a free mod (how a browser without the sandbox runs one the user allowed): the same API works in the page\'s world', () => this.sandboxPageFormCheck(win));
@@ -2844,6 +2845,51 @@ process.exitCode = 1;
       return `CSS, hide list and trif.style applied (free and boxed), no trace of the section in what the code can read; a style edit registered without asking (${two.colour}, ${two.spacing}); a code edit waits, the version before running in the new style (${three.colour})`;
     } finally {
       for (const f of [free, boxed]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+    }
+  }
+
+  // ---- a mod that changes kind in its file (11-20: a run rewrote a boxed mod as a style mod; userScripts.update
+  // kept its sandbox worldId, which Chrome takes only in a USER_SCRIPT world, and refused it at every sync)
+
+  async kindChangeCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    const file = path.join(this.trif, 'sites', site, 'e2e-kind.js');
+    const status = async () => (await this.cli(['status'], { timeoutMs: 20000 })).stdout;
+    const line = (st) => (st.split('\n').find((l) => /\/e2e-kind\s/.test(l)) || '').trim();
+    const head = (extra) => `// ==WebMod==\n// @name E2E kind\n// @match *://127.0.0.1/*\n// @run-at document-start\n${extra}// ==/WebMod==\n`;
+    const css = (px) => `#title { word-spacing: ${px}px }`;
+    const kinds = [
+      ['boxed', (px) => head('// @boxed\n') + `trif.css(${JSON.stringify(css(px))});\n`],
+      ['style', (px) => head('// @style\n') + JSON.stringify({ css: css(px) }) + '\n'],
+      ['boxed', (px) => head('// @boxed\n') + `trif.css(${JSON.stringify(css(px))});\n`],
+      ['free', (px) => head('') + `(document.head || document.documentElement).append(Object.assign(document.createElement('style'), { textContent: ${JSON.stringify(css(px))} }));\n`],
+      ['boxed', (px) => head('// @boxed\n') + `trif.css(${JSON.stringify(css(px))});\n`],
+    ];
+    const spacing = async () => (await this.cli(['run', '--tab', String(win.tabId), "getComputedStyle(document.getElementById('title')).wordSpacing"], { timeoutMs: 20000 })).stdout.trim().replace(/^"|"$/g, '');
+    let n = 0;
+    const seen = [];
+    try {
+      // (TRIF's own page to ask the browser from, again if a check skipped before left it elsewhere: TRIF_E2E_ONLY)
+      if (!(await this.ext(`async () => !!(globalThis.chrome && chrome.tabs)`).catch(() => false))) this.control = await this.d.openTab(`${this.d.origin}/onboarding.html`);
+      for (const [i, [kind, text]] of kinds.entries()) {
+        const px = 11 + i;
+        fs.writeFileSync(file, text(px));
+        const want = kind === 'boxed' ? /\sregistered \(boxed/ : /\sregistered(?! \(boxed)/;
+        let last = '';
+        try {
+          await waitFor(`${kind} registered`, async () => { last = line(await status()); return want.test(' ' + last.replace(/^\S+/, '')) ? last : null; }, { timeoutMs: 25000, intervalMs: 500 });
+        } catch { throw new Error(`as a ${kind} mod (step ${i + 1}): ${last || 'not listed'}`); }
+        await waitFor(`${kind} runs`, async () => {
+          await this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}/?e2e=kind-${++n}`]);
+          await sleep(1200);
+          return (await spacing()) === `${px}px` || null;
+        }, { timeoutMs: 25000, intervalMs: 300 });
+        seen.push(`${kind} ${px}px`);
+      }
+      return seen.join(', ');
+    } finally {
+      try { fs.unlinkSync(file); } catch { /* gone */ }
     }
   }
 

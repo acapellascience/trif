@@ -26,11 +26,14 @@ function mockUserScripts() {
     if (typeof s.id !== 'string' || s.id.startsWith('_')) throw new Error(`Invalid ID '${s.id}'.`);
     if (!Array.isArray(s.matches) || !s.matches.length) throw new Error(`Script '${s.id}' must specify matches.`);
     for (const m of s.matches) if (m !== '<all_urls>' && !/^(\*|https?|file):\/\//.test(m)) throw new Error(`Invalid match pattern '${m}'`);
+    // (Chrome's rule, on register and on update's merged script alike: a worldId only in a USER_SCRIPT world,
+    // the default one)
+    if (s.worldId !== undefined && (s.world ?? 'USER_SCRIPT') !== 'USER_SCRIPT') throw new Error('World ID can only be specified for USER_SCRIPT worlds.');
   };
   return {
     scripts,
     calls,
-    async getScripts() { return structuredClone(scripts); },
+    async getScripts(filter) { return structuredClone(filter?.ids ? scripts.filter((x) => filter.ids.includes(x.id)) : scripts); },
     async register(list) {
       calls.push(['register', list.map((s) => s.id)]);
       for (const s of list) {
@@ -44,8 +47,11 @@ function mockUserScripts() {
       for (const s of list) {
         const i = scripts.findIndex((x) => x.id === s.id);
         if (i < 0) throw new Error(`Script with ID '${s.id}' does not exist.`);
-        validate({ ...scripts[i], ...s });
-        scripts[i] = { ...scripts[i], ...structuredClone(s) };
+        // (merged: what the update doesn't give stays as registered, as in Chrome: a worldId too, and one
+        // given as undefined, which never reaches Chrome)
+        const given = Object.fromEntries(Object.entries(structuredClone(s)).filter(([, v]) => v !== undefined));
+        validate({ ...scripts[i], ...given });
+        scripts[i] = { ...scripts[i], ...given };
       }
     },
     async unregister(filter) {
@@ -3612,6 +3618,80 @@ test('sandboxed mods: TRIF\'s own world, their code as text for SES; the sandbox
   r = await lib.syncUserScripts(us, { mods: [page], runtimeCode: 'RT', applied: r.applied, known: r.known });
   assert.ok(!us.scripts.some((s) => s.id === sbx.SANDBOX_RUNTIME_ID));
   assert.deepStrictEqual(us.scripts.map((s) => s.id), [lib.RUNTIME_ID, 'x.com/page']);
+});
+
+// A mod that changes kind under the same id (a run rewrote Tim's boxed youtube.com/desaturate as a style mod,
+// 11-20): update() merges with what's registered, so a mod leaving TRIF's sandbox world kept its worldId and
+// Chrome refused it ("World ID can only be specified for USER_SCRIPT worlds."), at every sync after.
+const KINDS = {
+  free: (id) => mod(id, { code: `/* free ${id} */` }),
+  style: (id) => mod(id, { rules: { hide: ['.x'] }, code: `/* style ${id} */` }),
+  boxed: (id) => mod(id, { sandboxed: true, code: `trif.css("/* boxed ${id} */");` }),
+  'boxed as a page script': (id) => mod(id, { sandboxed: true, unsandboxed: true, code: `trif.css("/* page ${id} */");` }),
+};
+const kindWorld = (kind) => (kind === 'boxed' ? ['USER_SCRIPT', 'trif-sandbox'] : ['MAIN', undefined]);
+
+for (const id of ['x.com/m', 'phone~x.com/m']) {
+  for (const from of Object.keys(KINDS)) {
+    for (const to of Object.keys(KINDS)) {
+      if (from === to) continue;
+      test(`a mod that changes kind registers as its new kind: ${from} -> ${to}${id.startsWith('phone~') ? ' (a phone twin)' : ''}`, async () => {
+        for (const known of [true, false]) { // (the background's known ids, and after a restart: the browser asked)
+          const us = mockUserScripts();
+          const other = mod('y.com/other');
+          let r = await lib.syncUserScripts(us, { mods: [KINDS[from](id), other], runtimeCode: 'RT' });
+          assert.deepStrictEqual(r.errors, []);
+          const now = { ...KINDS[to](id), hash: 'h2' };
+          r = await lib.syncUserScripts(us, { mods: [now, other], runtimeCode: 'RT', applied: r.applied, known: known ? r.known : null });
+          assert.deepStrictEqual(r.errors, [], `${from} -> ${to} (known: ${known})`);
+          assert.deepStrictEqual(r.registered, [id, 'y.com/other']);
+          const s = us.scripts.find((x) => x.id === id);
+          assert.deepStrictEqual([s.world, s.worldId], kindWorld(to));
+          assert.deepStrictEqual(s.js.map((j) => j.code).join('\n'), lib.modToUserScript(now).js.map((j) => j.code).join('\n'));
+          // and settled: the next sync leaves it be
+          us.calls.length = 0;
+          r = await lib.syncUserScripts(us, { mods: [now, other], runtimeCode: 'RT', applied: r.applied, known: r.known });
+          assert.deepStrictEqual(us.calls, []);
+          assert.deepStrictEqual(r.errors, []);
+        }
+      });
+    }
+  }
+}
+
+test('a mod stuck in its old kind (a sync before this one failed to move it) recovers at the next sync, by itself', async () => {
+  const sbx = await import('../extension/sandbox.js');
+  const us = mockUserScripts();
+  const boxed = mod('youtube.com/desaturate', { sandboxed: true, code: 'trif.css("html { filter: grayscale(1) }");' });
+  const other = mod('youtube.com/other');
+  let r = await lib.syncUserScripts(us, { mods: [boxed, other], runtimeCode: 'RT' });
+  // as the last sync left it: still registered boxed (in TRIF's world), its change refused, the browser to be asked
+  const style = mod('youtube.com/desaturate', { rules: { css: 'html { filter: grayscale(1) }' }, code: '/* style */', hash: 'h2' });
+  const stuck = { ...r.applied };
+  delete stuck['youtube.com/desaturate'];
+  r = await lib.syncUserScripts(us, { mods: [style, other], runtimeCode: 'RT', applied: stuck, known: null });
+  assert.deepStrictEqual(r.errors, []);
+  assert.ok(r.registered.includes('youtube.com/desaturate'));
+  const s = us.scripts.find((x) => x.id === 'youtube.com/desaturate');
+  assert.strictEqual(s.world, 'MAIN');
+  assert.strictEqual(s.worldId, undefined);
+  assert.match(s.js.at(-1).code, /\/\* style \*\//);
+  assert.ok(!us.scripts.some((x) => x.id === sbx.SANDBOX_RUNTIME_ID), 'no boxed mod left: the sandbox runtime went');
+});
+
+test('a mod whose update the browser refuses for another reason keeps its registration and says why', async () => {
+  const us = mockUserScripts();
+  let r = await lib.syncUserScripts(us, { mods: [mod('x.com/a', { code: '/* old */' })], runtimeCode: 'RT' });
+  const before = structuredClone(us.scripts.find((x) => x.id === 'x.com/a'));
+  // (a pattern the browser won't take, though the runtime's union went through)
+  const real = us.update;
+  us.update = async (list) => { if (list.some((s) => s.id === 'x.com/a')) throw new Error('Invalid match pattern'); return real(list); };
+  const realRegister = us.register;
+  us.register = async (list) => { if (list.some((s) => s.id === 'x.com/a' && s.js[0].code.includes('new'))) throw new Error('Invalid match pattern'); return realRegister(list); };
+  r = await lib.syncUserScripts(us, { mods: [mod('x.com/a', { code: '/* new */', hash: 'h2' })], runtimeCode: 'RT', applied: r.applied, known: r.known });
+  assert.deepStrictEqual(r.errors.map((e) => e.id), ['x.com/a']);
+  assert.match(r.errors[0].error, /Invalid match pattern/);
+  assert.deepStrictEqual(us.scripts.find((x) => x.id === 'x.com/a'), before, 'the version before still runs');
 });
 
 test('sandboxed mods: if the sandbox runtime can\'t be registered, its mods say why and aren\'t registered', async () => {

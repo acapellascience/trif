@@ -163,6 +163,18 @@ export function phoneGate(phone, code) {
   return `if (${phone ? '' : '!'}${PHONE_MARK_TEST}) ${code}`;
 }
 
+// A mod that changes kind can change world: a boxed mod runs in TRIF's sandbox world, any other (and a boxed
+// one run as a page script) in the page's. userScripts.update() merges with what's registered, keeping what it
+// isn't given, so a mod leaving TRIF's world would keep its worldId, which Chrome takes only in a USER_SCRIPT
+// world ("World ID can only be specified for USER_SCRIPT worlds."), and be refused at every sync. One whose
+// world changes is unregistered and registered afresh instead: here when the browser said what's registered
+// (getScripts), else once the update is refused (syncUserScripts reregister).
+const worldOf = (s) => `${s.world || 'USER_SCRIPT'}|${s.world === 'MAIN' ? '' : s.worldId || ''}`;
+function worldMoved(registeredAs, mod) {
+  if (!registeredAs || !('world' in registeredAs)) return false; // (known ids only, or a browser that doesn't say: not known)
+  return worldOf(registeredAs) !== worldOf(inSandboxWorld(mod) ? { world: 'USER_SCRIPT', worldId: SANDBOX_WORLD } : { world: 'MAIN' });
+}
+
 /** Whether a mod registers in TRIF's sandbox world: sandboxed, in a browser that has the world. */
 export function inSandboxWorld(mod) { return !!(mod && mod.sandboxed && !mod.unsandboxed); }
 
@@ -344,15 +356,30 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
   const next = {};
   const registered = [];
   let unsure = false; // a register or update failed: what's registered is then for the browser to say
+  // (update: true, or 'replace', for one whose world changed: unregistered and registered afresh, worldMoved)
   const registerMod = async (mod, update) => {
     try {
-      if (update) await us.update([modToUserScript(mod)]);
-      else await us.register([modToUserScript(mod)]);
+      if (update === 'replace') await reregister(mod);
+      else if (update) {
+        try { await us.update([modToUserScript(mod)]); } catch { await reregister(mod); }
+      } else await us.register([modToUserScript(mod)]);
       next[mod.id] = mod.hash ?? null;
       registered.push(mod.id);
     } catch (e) {
       unsure = true;
       errors.push({ id: mod.id, error: errMsg(e) });
+    }
+  };
+  // An update the browser refused: the mod unregistered and registered afresh (a change of world, when what's
+  // registered wasn't known: worldMoved), and if it won't go that way either, what was registered put back,
+  // so the version before runs on, as after a refused update.
+  const reregister = async (mod) => {
+    let old = null;
+    try { old = (await us.getScripts({ ids: [mod.id] })).find((s) => s.id === mod.id) || null; } catch { /* (the new one may still go) */ }
+    await us.unregister({ ids: [mod.id] });
+    try { await us.register([modToUserScript(mod)]); } catch (e) {
+      if (old) await us.register([old]).catch(() => {});
+      throw e;
     }
   };
   const knownNow = () => (unsure ? null : [RUNTIME_ID, ...(sandboxUp ? [SANDBOX_RUNTIME_ID] : []), ...registered]);
@@ -391,12 +418,16 @@ export async function syncUserScripts(us, { mods, runtimeCode, applied = {}, dis
   await syncSandboxRuntime(false);
   const fresh = [];
   const changed = [];
+  const moved = [];
+  const registeredAs = new Map(existing.map((s) => [s.id, s]));
   for (const mod of desired) {
     if (inSandboxWorld(mod) && !sandboxUp) continue; // (reported above)
     if (!existingIds.has(mod.id)) fresh.push(mod);
     else if (mod.hash && applied[mod.id] === mod.hash) { next[mod.id] = mod.hash; registered.push(mod.id); }
+    else if (worldMoved(registeredAs.get(mod.id), mod)) moved.push(mod);
     else changed.push(mod);
   }
+  for (const mod of moved) await registerMod(mod, 'replace');
   await registerMods(changed, true);
   await registerMods(fresh, false);
   const order = new Map(desired.map((m, i) => [m.id, i]));

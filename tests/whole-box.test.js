@@ -165,7 +165,9 @@ test('macOS: a program in the box reads only the copy and writes only its own si
 });
 
 // ---------------------------------------------------------------- the real Claude Code, loosest settings
-const claudeBin = mac && !process.env.TRIF_TEST_NO_REAL_CLAUDE && findExecutable('claude', [path.join(os.homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', ...String(process.env.PATH || '').split(path.delimiter)]);
+// (CI: TRIF's pinned Claude Code, the one boxed runs use, installed by `node helper/lib/claudepin.js ensure <dir>`)
+const pinned = mac && process.env.TRIF_TEST_CLAUDE_PIN_HOME ? require('../helper/lib/claudepin').installedPinned(process.env.TRIF_TEST_CLAUDE_PIN_HOME) : null;
+const claudeBin = pinned ? pinned.bin : mac && !process.env.TRIF_TEST_NO_REAL_CLAUDE && findExecutable('claude', [path.join(os.homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', ...String(process.env.PATH || '').split(path.delimiter)]);
 
 // Everything Claude Code can be told to allow: its own sandbox off, every tool allowed, no asking, the
 // home folder as an extra working folder. More than an organization's managed settings can loosen.

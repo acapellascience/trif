@@ -1,0 +1,37 @@
+{
+  "_": "TRIF's own Claude Code for runs in TRIF's full sandbox (lib/claudepin.js). From the npm registry; moved by `node helper/lib/claudepin.js pin <version>` after the box tests pass on it, never by hand.",
+  "version": "2.1.330",
+  "macTeam": "Q6L2SF6YDW",
+  "packages": {
+    "darwin-arm64": {
+      "name": "@anthropic-ai/claude-code-darwin-arm64",
+      "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-code-darwin-arm64/-/claude-code-darwin-arm64-2.1.330.tgz",
+      "integrity": "sha512-rgzAjrRJJsIdZXGF9CCFFbURxKuJNobRr+krV3dNmqNJWIws74rLD0CABe4+nXlx/9WwRECTrveprWB96mubqw=="
+    },
+    "darwin-x64": {
+      "name": "@anthropic-ai/claude-code-darwin-x64",
+      "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-code-darwin-x64/-/claude-code-darwin-x64-2.1.330.tgz",
+      "integrity": "sha512-XenTNj2zXaFrnLmf47n25vChfFhlfeyaAR/vW5SFsEnLGwd2U1vDUY97+5etHBZu3xWBnlK8HhBVxzRi9YTUDw=="
+    },
+    "win32-x64": {
+      "name": "@anthropic-ai/claude-code-win32-x64",
+      "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-code-win32-x64/-/claude-code-win32-x64-2.1.330.tgz",
+      "integrity": "sha512-P3aamhGb7lZUsgj6kQzdZAKh3fNFoXvawxZFuUz+pC5HVLwEtX5eWgO6kpxzT9+qfHaPhoepZ9KU8K1sz3b2yw=="
+    },
+    "win32-arm64": {
+      "name": "@anthropic-ai/claude-code-win32-arm64",
+      "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-code-win32-arm64/-/claude-code-win32-arm64-2.1.330.tgz",
+      "integrity": "sha512-UBG8oi9gyi2hBGrKYkNfXSAqEyC3wJ2CsmSfQw8XLNWM/GOlUWAqELJOW9eBaAlWsusvwhHKtiQeS0UEQ+skxQ=="
+    },
+    "linux-x64": {
+      "name": "@anthropic-ai/claude-code-linux-x64",
+      "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-x64/-/claude-code-linux-x64-2.1.330.tgz",
+      "integrity": "sha512-9Gn+V7DtJ8M1nztP9CeDVl9g3RtrepI7rOFTyPRRnZe8D6zebIHKmC7OvBauucuAP0X0k85SDN/LPVZyjsGezQ=="
+    },
+    "linux-arm64": {
+      "name": "@anthropic-ai/claude-code-linux-arm64",
+      "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-code-linux-arm64/-/claude-code-linux-arm64-2.1.330.tgz",
+      "integrity": "sha512-V4yanAY5EA5UpwwRPtjSfqDbNqAlUJeVn3NYZw2AgmRHjdpSsLtHAzbxRXfkAnbjwTXzE0uedjQxUY02ARPcsA=="
+    }
+  }
+}

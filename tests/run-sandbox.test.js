@@ -68,6 +68,7 @@ function scratch() {
 }
 
 let fixture = null;
+let fixturePinned = null; // (TRIF_WHOLE_BOX: the pinned Claude Code folder in the workspace)
 async function setup() {
   if (fixture) return fixture;
   const S = scratch();
@@ -116,6 +117,36 @@ async function setup() {
   // Another site's mods: read-only to runs (the sandbox's doing, runs.js runLimits readOnly).
   fs.mkdirSync(path.join(ws, 'sites', 'other.net'), { recursive: true });
   fs.writeFileSync(path.join(ws, 'sites', 'other.net', 'keep.js'), '// ==WebMod==\n// @name Keep\n// @match https://other.net/*\n// ==/WebMod==\n');
+  // TRIF's full sandbox runs TRIF's pinned Claude Code (claudepin.js), never the one on PATH: on CI the real
+  // pin, installed by `node helper/lib/claudepin.js ensure <dir>` (TRIF_TEST_CLAUDE_PIN_HOME); else a
+  // stand-in pin of the Claude Code installed here, recorded as claudepin does (its version, its SHA-256).
+  if (process.env.TRIF_WHOLE_BOX && CLAUDE) {
+    const cp = require('../helper/lib/claudepin');
+    const key = `${process.platform}-${process.arch}`;
+    let from;
+    let name;
+    if (process.env.TRIF_TEST_CLAUDE_PIN_HOME) {
+      from = cp.installedPinned(process.env.TRIF_TEST_CLAUDE_PIN_HOME).dir;
+      name = path.basename(from);
+    } else {
+      const v = versionOf(CLAUDE, { PATH: '/usr/bin:/bin', HOME: home });
+      env.TRIF_CLAUDE_CODE_PIN = path.join(S, 'claude-pin.json');
+      fs.writeFileSync(env.TRIF_CLAUDE_CODE_PIN, JSON.stringify({ version: v, packages: { [key]: { name: 'stand-in' } } }));
+      from = path.join(S, 'pin-src');
+      fs.mkdirSync(from);
+      fs.copyFileSync(CLAUDE, path.join(from, 'claude'));
+      fs.writeFileSync(path.join(from, cp.MARK), JSON.stringify({ version: v, binSha256: crypto.createHash('sha256').update(fs.readFileSync(CLAUDE)).digest('hex') }));
+      name = cp.dirName(key, { version: v });
+    }
+    const to = path.join(ws, 'runtime', name);
+    fs.mkdirSync(to, { recursive: true });
+    // (a hard link where it can be: the binary is 364 MB)
+    for (const n of fs.readdirSync(from)) { try { fs.linkSync(path.join(from, n), path.join(to, n)); } catch { fs.copyFileSync(path.join(from, n), path.join(to, n)); } }
+    // Nothing on PATH is used: the agents folder's claude is a stand-in that would say so.
+    fs.unlinkSync(path.join(agentBin, 'claude'));
+    fs.writeFileSync(path.join(agentBin, 'claude'), '#!/bin/sh\necho "the user\'s own claude was started" >&2\nexit 3\n', { mode: 0o755 });
+    fixturePinned = to;
+  }
   await keys.setAgentKey('claude', KEY, { env: kc.env });
   await keys.setAgentKey('codex', OAI_KEY, { env: kc.env });
   // Stand-in models: each POST takes the next step of its script (filled in by each test).
@@ -249,6 +280,32 @@ test('Claude Code: real `trif` commands work in a side-panel run\'s sandbox; the
   checkRefused(named.slice(commands.length), refused, info);
   assert.ok(!fs.existsSync(path.join(f.ws, 'sites', 'other.net', 'probe.js')));
   assert.ok(!JSON.stringify(f.anthropic.requests.map((x) => x.body)).includes(SECRET), `something secret reached the model:\n${info}`);
+});
+
+test('Claude Code in TRIF\'s full sandbox: without TRIF\'s pinned copy (missing, or changed) the run stops and says so; the user\'s own is never started', { skip: !process.env.TRIF_WHOLE_BOX ? 'TRIF_WHOLE_BOX=1 only' : skipWhy(CLAUDE, 'Claude Code') }, async () => {
+  const f = await setup();
+  const asked = f.anthropic.requests.length;
+  const hidden = `${fixturePinned}.away`;
+  fs.renameSync(fixturePinned, hidden);
+  try {
+    const { done, events } = await runAgent(f, { agent: 'claude', site: 'example.com', tabId: 12 });
+    const info = `events: ${JSON.stringify(events)}\nhelper.log:\n${helperLog(f)}`;
+    assert.equal(done.ok, false, info);
+    assert.ok(events.some((e) => e.kind === 'error' && /TRIF's own copy of Claude Code isn't downloaded yet/.test(e.message)), info);
+    assert.doesNotMatch(JSON.stringify(events) + helperLog(f), /the user's own claude was started/, info);
+  } finally { fs.renameSync(hidden, fixturePinned); }
+  // changed since it was downloaded (its record says another SHA-256): not started either
+  const markFile = path.join(fixturePinned, require('../helper/lib/claudepin').MARK);
+  const mark = fs.readFileSync(markFile, 'utf8');
+  fs.unlinkSync(markFile); // (a hard link on CI: a new file, not the shared one)
+  fs.writeFileSync(markFile, JSON.stringify({ ...JSON.parse(mark), binSha256: '0'.repeat(64) }));
+  try {
+    const { done, events } = await runAgent(f, { agent: 'claude', site: 'example.com', tabId: 12 });
+    const info = `events: ${JSON.stringify(events)}\nhelper.log:\n${helperLog(f)}`;
+    assert.equal(done.ok, false, info);
+    assert.ok(events.some((e) => e.kind === 'error' && /TRIF's own copy of Claude Code wasn't started: it has changed since it was downloaded\./.test(e.message)), info);
+  } finally { fs.unlinkSync(markFile); fs.writeFileSync(markFile, mark); }
+  assert.equal(f.anthropic.requests.length, asked, 'no model call');
 });
 
 test('Codex: real `trif` commands work in a side-panel run\'s sandbox; the private folder, config.json, the keychain, TRIF\'s other files and the network stay out of reach', { skip: skipWhy(CODEX, 'Codex') }, async () => {

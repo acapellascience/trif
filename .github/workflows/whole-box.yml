@@ -26,8 +26,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # (the user's own Claude Code: npm's newest, for today's sandbox; boxed runs use TRIF's pin, below)
       - run: npm install -g @anthropic-ai/claude-code
       - run: claude --version; ls -la "$(command -v claude)"; file "$(readlink -f "$(command -v claude)")" || true
+      - name: TRIF's pinned Claude Code, unit tests (a stand-in registry)
+        run: node --test tests/claudepin.test.js
+      # TRIF's pinned Claude Code (helper/claude-code.json), installed as the helper does: from the npm
+      # registry, its sha512 checked against the pin, Anthropic's signature checked.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/claude-pin
+          key: claude-pin-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('helper/claude-code.json') }}
+      - name: Install TRIF's pinned Claude Code
+        run: |
+          node helper/lib/claudepin.js ensure "$RUNNER_TEMP/claude-pin"
+          ls -la "$RUNNER_TEMP"/claude-pin/runtime/*/
+          "$RUNNER_TEMP"/claude-pin/runtime/claude-code-*/claude --version
+          echo "TRIF_TEST_CLAUDE_PIN_HOME=$RUNNER_TEMP/claude-pin" >> "$GITHUB_ENV"
       - name: The box, and the loosest Claude Code in it
         run: node --test --test-timeout=300000 tests/whole-box.test.js
       - name: A side-panel run, every trif command (today's sandbox)

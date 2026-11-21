@@ -781,9 +781,38 @@ class Runs {
     // (TRIF_RUN_MODS_DIR: where the run's `trif` reads and writes mods, its copy's sites/; TRIF_RUN_LIVE_MODS_DIR:
     // the mods folder, a path into which `trif` takes as the same path in the copy)
     const env = { ...agents.agentEnv(ws), TRIF_RUN_TOKEN: run.token, TRIF_RUN_BOX: run.box, TRIF_RUN_SCREENSHOTS: run.screenshots, TRIF_RUN_MODS_DIR: run.stage.sites, TRIF_RUN_LIVE_MODS_DIR: ws.modsDir };
+    // TRIF's full sandbox (docs/WHOLE-BOX.md; for now TRIF_WHOLE_BOX=1, macOS, staged Claude Code runs): the
+    // whole agent process in TRIF's own box, and the agent is TRIF's pinned Claude Code (claudepin.js), the
+    // version the box was tested with, never the user's own. Checked unchanged since it was downloaded.
+    run.wholeBox = require('./wholebox').enabled(process.env) && process.platform === 'darwin' && run.agent === 'claude';
+    if (run.wholeBox) {
+      const cp = require('./claudepin');
+      cp.checkPinned(ws.home).then((pin) => {
+        if (run.stopped || run.finished) return this._finish(run, { code: null, signal: null });
+        // (WHOLE-BOX-STRINGS.md; the offer of the older protection instead: step 4)
+        if (!pin || pin.problem) {
+          const message = !pin ? "TRIF's own copy of Claude Code isn't downloaded yet, so this chat can't run in TRIF's full sandbox."
+            : `TRIF's own copy of Claude Code wasn't started: ${pin.problem}.`;
+          if (pin) this.logger.warn(`agent run ${run.id}: the pinned Claude Code (${pin.bin}): ${pin.problem}`);
+          this._emit(run, { kind: 'error', message });
+          return this._finish(run, { code: null, signal: null });
+        }
+        this._withAgent(run, { available: true, path: pin.bin, version: pin.version, note: '', pinned: true }, env);
+      }, (e) => {
+        this._emit(run, { kind: 'error', message: `couldn't check TRIF's own copy of Claude Code: ${e.message}` });
+        this._finish(run, { code: null, signal: null });
+      });
+      return;
+    }
     // (with its version: an agent older than the one whose sandbox settings TRIF writes isn't started, as it
     // may not understand them; asked once per binary, util.js versionOf)
-    const found = adapter.detect({ dirs: agents.searchDirs(ws), env: agents.agentEnv(ws), version: true });
+    this._withAgent(run, adapter.detect({ dirs: agents.searchDirs(ws), env: agents.agentEnv(ws), version: true }), env);
+  }
+
+  // The run, once its agent program is known (`found`: adapter.detect's, or TRIF's pinned Claude Code).
+  _withAgent(run, found, env) {
+    const { adapter } = run;
+    const ws = run.ws;
     if (!found.available) {
       this._emit(run, { kind: 'error', message: found.path && found.note ? found.note : adapter.missing });
       return this._finish(run, { code: null, signal: null });
@@ -842,7 +871,7 @@ class Runs {
     let limits;
     try {
       limits = runLimits(ws, run);
-      if (require('./wholebox').enabled(process.env) && run.stage && process.platform === 'darwin' && run.agent === 'claude') limits.wholeBox = true;
+      if (run.wholeBox) limits.wholeBox = true; // (_launch: TRIF's pinned Claude Code, `found`)
     } catch (e) {
       this._emit(run, { kind: 'error', message: e.message });
       return this._finish(run, { code: null, signal: null });

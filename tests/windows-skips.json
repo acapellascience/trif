@@ -129,7 +129,8 @@
       "a remote run: the phone's page and screenshot are its files; only the phone twin reaches the mods folder": "phone-link",
       "a site with no desktop folder yet: a remote run can't make one": "phone-link",
       "the mark is the helper's: a start message that says \"remote\" is an ordinary run": "phone-link",
-      "a remote run has no tab here: only the helper's own commands, and only its own phone mods to delete": "phone-link"
+      "a remote run has no tab here: only the helper's own commands, and only its own phone mods to delete": "phone-link",
+      "the run's limits: the phone twin to write, the desktop folders to read, the private folder (the phone link's files) denied": "limits"
     },
     "phone-link-server.test.js": {
       "no listener at all: a new install, the link on with nobody paired, and after the window closes": "phone-link",

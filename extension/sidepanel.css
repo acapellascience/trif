@@ -737,9 +737,9 @@ body:is(.site-off, .no-site) .robotless-line { display: none; }
 .group-toggle .chev { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transform: rotate(90deg); transition: transform .15s ease; }
 .mod-list li.mod-group.collapsed .chev { transform: none; }
 .mod-list li.mod-group.collapsed .mod-group-note { display: none; }
-.mod-list[data-collapsed~="rules"] > li[data-group="rules"]:not(.mod-group),
-.mod-list[data-collapsed~="sandboxed"] > li[data-group="sandboxed"]:not(.mod-group),
-.mod-list[data-collapsed~="page"] > li[data-group="page"]:not(.mod-group) { display: none; }
+.mod-list[data-collapsed~="rules"] > li[data-group="rules"]:not(.mod-group, .folded),
+.mod-list[data-collapsed~="sandboxed"] > li[data-group="sandboxed"]:not(.mod-group, .folded),
+.mod-list[data-collapsed~="page"] > li[data-group="page"]:not(.mod-group, .folded) { display: none; }
 @media (prefers-reduced-motion: reduce) { .group-toggle .chev { transition: none; } }
 /* A tier's On and Off buttons: the pressed one filled (green for On), the other plain */
 .group-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
@@ -1054,6 +1054,17 @@ body.chat-empty .mod-list { max-height: calc(70vh - 40px); }
 .mods-fold-btn .chev { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.15s ease; }
 .mods-fold.open .mods-fold-btn .chev { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { .mods-fold-btn .chev { transition: none; } }
+/* Opened, its mods right under it (Tim, 11-20): a plain list, no tiers' headings (the stripe and the switch give
+   each row's tier), one line each: no grip (they keep the tiers' order) and no description; </> and the bin at the
+   right of the switch. */
+.mod-list li.folded { padding: 5px 0; border-top: 0; }
+.mod-list li.mods-fold + li.folded { margin-top: 4px; }
+.mod-list li.folded .mod-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+.mod-list li.folded .mod-row > .mod-grip, .mod-list li.folded .mod-row > .mod-desc { display: none; }
+.mod-list li.folded .mod-row > .mod-main { grid-column: 1; }
+.mod-list li.folded .mod-row > .mod-right { grid-column: 2; }
+.mod-list li.folded .mod-row > .mod-tools { grid-column: 3; grid-row: 1; margin: 0; }
+.mod-list li[data-mod][data-group].folded::before { top: 5px; bottom: 5px; }
 /* The update's question about sensitive hosts your mods reach (background.js "sensitive sites on upgrade") */
 .sensitive-note { flex: none; margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--raised); font-size: 12px; }
 .sensitive-note[hidden] { display: none; }

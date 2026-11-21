@@ -265,10 +265,12 @@ function busyPorts() {
   return new Set(r.stdout.split(/\s+/).filter(Boolean).map(Number));
 }
 
-/** setup({already}) -> {ok, ports, declined?, error?, status}: the ports chosen, then the one elevated step. */
-function setup({ already = false, sid = containerSid(CONTAINER), dir } = {}) {
+/** setup({already, ports}) -> {ok, ports, declined?, error?, status}: the ports (given; else the ones the
+ *  rules already have; else chosen: not excluded, nothing listening), then the one elevated step. (Choose
+ *  before TRIF's own relay listens: it would count as busy.) */
+function setup({ already = false, sid = containerSid(CONTAINER), dir, ports: given = null } = {}) {
   const now = status({ sid });
-  const ports = now.ports && !now.problems.includes('rulesChanged') ? now.ports : choosePorts(excludedPorts(), busyPorts());
+  const ports = given || (now.ports && !now.problems.includes('rulesChanged') ? now.ports : choosePorts(excludedPorts(), busyPorts()));
   if (!ports) return { ok: false, error: 'no free ports for TRIF\'s relay', status: now };
   const r = runElevated((resultFile) => setupScript({ sid, ports, resultFile }), { already, dir });
   const after = status({ sid });

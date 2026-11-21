@@ -214,12 +214,12 @@ function parseStream(stdout) {
   verdict['before the step: TRIF\'s relay port closed to the box'] = o['TRIF\'s relay port, 127.0.0.1'] !== 'echo ok';
 
   // 3
-  const set = winbox.setup({ already: true, dir: base });
+  const set = winbox.setup({ already: true, dir: base, ports });
   console.log(`\nwinbox.setup: ${JSON.stringify(set)}`);
   verdict['winbox.setup: ok, the ports as chosen, status ready'] = set.ok && set.status.ready && JSON.stringify(set.ports) === JSON.stringify(ports);
   show('the rules as Windows has them', ps(`Get-NetFirewallRule -Group '${winbox.RULE_GROUP}' -PolicyStore ActiveStore | ForEach-Object { $_.Name; ($_ | Get-NetFirewallPortFilter | Format-List Protocol, RemotePort | Out-String).Trim(); ($_ | Get-NetFirewallAddressFilter).RemoteAddress -join ' '; ($_ | Get-NetFirewallApplicationFilter).Package }`).stdout);
   show('CheckNetIsolation LoopbackExempt -s', spawnSync(sys('CheckNetIsolation.exe'), ['LoopbackExempt', '-s'], { encoding: 'utf8' }).stdout);
-  const again = winbox.setup({ already: true, dir: base });
+  const again = winbox.setup({ already: true, dir: base }); // (no ports given: the rules' own, though TRIF's ports are busy now)
   verdict['winbox.setup a second time: the same ports, ready'] = again.ok && again.status.ready && JSON.stringify(again.ports) === JSON.stringify(ports);
 
   // 4, 5

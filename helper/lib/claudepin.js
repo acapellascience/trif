@@ -146,9 +146,18 @@ function winSignatureProblem(out, signer) {
 
 async function checkSignatureWin(bin, signer) {
   const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  const r = await run(ps, ['-NoProfile', '-NonInteractive', '-Command', WIN_SIG_SCRIPT], { env: { ...process.env, TRIF_SIGNED_FILE: bin } });
-  if (r.code) return `its code signature couldn't be read (exit ${r.code})`;
-  return winSignatureProblem(r.out, signer);
+  // (no PSModulePath: one PowerShell 7 set, as a pwsh parent does, makes Windows PowerShell load 7's
+  // Microsoft.PowerShell.Security, which fails, and the signature reads as nothing: seen on windows-latest)
+  const env = { ...process.env, TRIF_SIGNED_FILE: bin };
+  for (const k of Object.keys(env)) if (k.toUpperCase() === 'PSMODULEPATH') delete env[k];
+  const r = await new Promise((resolve) => {
+    execFile(ps, ['-NoProfile', '-NonInteractive', '-Command', WIN_SIG_SCRIPT], { env, timeout: 60000, windowsHide: true }, (error, stdout, stderr) => {
+      resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') });
+    });
+  });
+  if (r.code) return `its code signature couldn't be read (exit ${r.code}: ${r.stderr.trim().slice(0, 200)})`;
+  const bad = winSignatureProblem(r.stdout, signer);
+  return bad && r.stderr.trim() ? `${bad}; PowerShell said: ${r.stderr.trim().replace(/\s+/g, ' ').slice(0, 200)}` : bad;
 }
 
 const inFlight = new Map(); // dest folder -> { promise, listeners }: one download at a time per pin

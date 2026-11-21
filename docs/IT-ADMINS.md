@@ -83,27 +83,33 @@ them.
 
 ## Windows (in progress; draft)
 
-*(Round 10: on Windows' own test machines the firewall rules below don't filter connections inside the
-computer, so this part is changing: TRIF's own WFP filters, made in the same administrator step, for the
-ports on the computer. This section will say what they are and how to list them.)*
+*(Draft: whether the firewall rules stay is still open; the WFP filters are what keep the box to TRIF's ports.)*
 
 On Windows the box is an AppContainer (Windows' app sandbox): one container for every boxed chat,
-`TRIF.FullSandbox`, with no network capability; each chat's own folders are opened to a capability only that
-chat holds. A container can't reach anything on the computer by itself, so turning the setting on asks once
-for an administrator (Windows' own prompt) to make one change:
+`TRIF.FullSandbox`, with Windows' "home and work networks" capability (`privateNetworkClientServer`; with no
+network capability Windows refuses every connection, TRIF's own included) and no internet capability; each
+chat's own folders are opened to a capability only that chat holds. A container can't reach anything on the
+computer by itself, so turning the setting on asks once for an administrator (Windows' own prompt) to make
+one change:
 
 - a **loopback exemption** for that container (`CheckNetIsolation LoopbackExempt -a -p=<its SID>`);
-- three **Windows Firewall block rules** naming it, group `TRIF full sandbox` (block rules win over any
-  allow rule): TCP to every port but TRIF's two (its relay and its key proxy, two adjacent ports chosen at
-  setup, written in the rules' description), TCP to those two anywhere but 127.0.0.1, and all UDP.
+- **Windows Filtering Platform filters** of TRIF's (provider "TRIF", sublayer "TRIF full sandbox", weight
+  65535, persistent): for that container, TCP to 127.0.0.1 at TRIF's two ports (its relay and its key
+  proxy, two adjacent ports chosen at setup) is permitted, and every other connection, inbound connection
+  and listening socket is blocked (IPv4 and IPv6). WFP is what Windows Firewall is built on; a block in
+  TRIF's sublayer holds whatever else allows, the firewall off included;
+- four **Windows Firewall block rules** naming it, group `TRIF full sandbox` (the ports in their
+  description): TCP to every port but TRIF's two, TCP to those two anywhere but 127.0.0.1, all UDP, all
+  inbound. (Windows Firewall rules don't filter connections inside the computer: the filters above do.)
 
 So a boxed chat reaches TRIF's relay (and through it only Anthropic's hosts, and the hosts your managed
 settings name) and nothing else: no other server on the computer, nothing on your network, not the internet.
 
-To see it: `Get-NetFirewallRule -Group 'TRIF full sandbox'` and `CheckNetIsolation LoopbackExempt -s`.
-Before every boxed chat TRIF reads the rules from the **active** policy store and needs every firewall
-profile on: if Windows Firewall is off, a rule is disabled or changed, or your policy doesn't apply local
-rules (`AllowLocalFirewallRules` off), the chat doesn't start in the box (the person is told why and may
-choose the older protection). A collector on the computer itself isn't reachable directly from the box
-on Windows (the rules leave only TRIF's ports); use `https`. Turning the setting off takes the exemption and
-the rules out again (the administrator prompt again).
+To see it: `netsh wfp show filters` (as an administrator; TRIF's are named "TRIF full sandbox: …"),
+`Get-NetFirewallRule -Group 'TRIF full sandbox'` and `CheckNetIsolation LoopbackExempt -s`. Before every
+boxed chat TRIF reads the exemption, the filters and the rules (the rules from the **active** policy store)
+and needs every firewall profile on: if something is missing or changed, Windows Firewall is off, or your
+policy doesn't apply local rules (`AllowLocalFirewallRules` off), the chat doesn't start in the box (the
+person is told why and may choose the older protection). A collector on the computer itself isn't
+reachable directly from the box on Windows (only TRIF's ports are); use `https`. Turning the setting off
+takes the exemption, the filters and the rules out again (the administrator prompt again).

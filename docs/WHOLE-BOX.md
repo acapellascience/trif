@@ -251,6 +251,36 @@ block filters at the connect layer for the container's package ID, loopback addr
 TRIF's two). Whether WFP lets a filter of its own block loopback that the exemption allows is the next
 round's question; if it can't, W3 isn't possible and the choice is W1 or W2 (For Tim then).
 
+### TRIF's own WFP filters: W3 holds (round 11)
+
+`helper/lib/win/wfp.cs` (P/Invoke to fwpuclnt.dll): a persistent provider and sublayer of TRIF's at the top
+weight (65535), seven persistent filters for the container's package SID: at connect (IPv4) a permit for TCP
+to 127.0.0.1 at TRIF's two ports (weight 15) over a hard block of everything else (weight 1); hard blocks at
+connect (IPv6), accept and listen (both). Added and removed in the same one administrator step (the source
+travels gzipped on the elevated command line and is compiled there with Add-Type: nothing run as an
+administrator is read from a file; the command line is about 24,000 of Windows' 32,767 characters);
+`status` reads them back with the compiled `wfp.exe`. [Run 44953977628](https://github.com/acapellascience/trif/actions/runs/44953977628):
+
+| From inside TRIF's container (the exemption + `privateNetworkClientServer`) | Result |
+|---|---|
+| **The rules + TRIF's filters** | TRIF's relay and key proxy open; **every other port on 127.0.0.1, this computer's own address (both ports), ::1: refused (EACCES); UDP: nothing comes back; the internet refused** |
+| The filters, **no firewall rules** | the same |
+| The filters, no rules, **the firewall off** | the same |
+| `internetClient` in place of the capability, with the filters | 127.0.0.1's other ports and the internet refused |
+| claude.exe: a normal run (stand-in API at the key proxy's port), the `trif` MCP tool; the real Anthropic through the relay (401) | work (the listen/accept blocks don't get in its way) |
+| `wfp status` after setup / after remove | the sublayer (weight 65535) and the seven filters as made / all gone |
+
+So **WFP blocks what the exemption allows**: W3 is the Mac's reach. And the filters hold alone: the
+firewall rules add nothing on this computer or off it. Keeping them means Windows Firewall must be on
+(`firewallOff`), which it often isn't when another security product is the firewall. Dropping them (and
+the `firewallOff` check) leaves the same reach with one mechanism: for Tim (PROGRESS "For Tim (round 11)").
+`status` without an administrator: WFP lets only administrators read filters by default, so a Basic User
+read them as missing ([run 44954832561](https://github.com/acapellascience/trif/actions/runs/44954832561));
+TRIF's objects now let signed-in users read them, and status is ready as a Basic User
+([run 44955244776](https://github.com/acapellascience/trif/actions/runs/44955244776)). Still open: naming
+WFP's refusals in a failed run's error (step 3 on Windows: WFP's net events, if a non-administrator can
+read them).
+
 ## Enterprise: what managed settings can still do
 
 Tested for real on GitHub's macOS runner: the workflow writes

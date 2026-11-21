@@ -99,10 +99,13 @@ managed policy; a normal run works; the fallback happens only on the person's ch
       remove (one elevated step: the exemption + four block rules) / status (active store, every profile
       on, the rules as made); the box's capability `privateNetworkClientServer` (with none, nothing
       connects). On windows-latest: the stand-in run and the real Anthropic through the relay at its port.
-    - [ ] **Windows Firewall rules don't filter loopback** (round 10): with the exemption the box reaches
-      every port on this computer, rules or not (they do close the internet and the network). Next: TRIF's
-      own WFP filters for the loopback part, same administrator step (WHOLE-BOX.md "W3 on windows-latest").
-      If WFP can't either: For Tim (W1 or W2).
+    - [x] **Windows Firewall rules don't filter loopback** (round 10) → *(round 11)* **TRIF's own WFP
+      filters hold it** (helper/lib/win/wfp.cs, same administrator step): with the exemption the box reaches
+      127.0.0.1 at TRIF's two ports and nothing else (this computer's other ports and address, ::1, UDP, the
+      internet), with or without the firewall rules, the firewall on or off. Status reads them back without
+      an administrator (TRIF's WFP objects readable by signed-in users). WHOLE-BOX.md "TRIF's own WFP filters".
+    - [ ] Open (For Tim, round 11, not blocking): keep the firewall rules (Windows Firewall must be on) or
+      drop them (the filters alone).
 - [ ] **9b. Windows half of the rest:** pinned claude.exe (1), Credential Manager for the token (6), `trif`
   over MCP, no Bash (7), refusal errors (3), fallback (4), relay (8), managed settings in
   `C:\Program Files\ClaudeCode` (5), daily CI (2).
@@ -111,6 +114,13 @@ managed policy; a normal run works; the fallback happens only on the person's ch
     the pin file; Windows PowerShell's Get-AuthenticodeSignature without a PowerShell 7 PSModulePath). On CI.
   - [x] **(2)** *(round 10, nothing to build)* whole-box-latest.yml calls all of whole-box.yml, so the
     Windows probes (the W3 one included) run daily on the newest claude.exe too.
+  - [x] **(8)** *(round 11)* The relay as on the Mac (platform-neutral): relay.test.js on windows-latest;
+    the W3 probe's claude.exe reaches the real Anthropic through it at winbox's fixed port.
+  - [ ] **(3)** Refusal errors on Windows: no Seatbelt reports; WFP's net events (drops by TRIF's filter
+    IDs) if a non-administrator can read them, else the run's own EACCES lines; file refusals: none logged
+    by Windows (the run's own errors).
+  - [ ] **(4), (5)** need the Windows run code (branch windows: helper/lib/win/fence.js, runs.js): when the
+    branches meet; winbox.status's problems map to the card's why lines (WHOLE-BOX-STRINGS.md).
   - [ ] **(6)** Nothing to build here: claudetoken.js uses keyring.js's setKey/getKey, which on the windows
     branch are Credential Manager (credman.js, same signatures; a setup-token token fits its 2560 bytes).
     Test when the branches meet.
@@ -363,6 +373,27 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   nothing reached it). Locally the touched suites pass (~280 tests); tests/update.test.js's web-ext part
   needs node_modules, which this worktree doesn't have (CI's `tests` workflow passes it).
 
+### Round 11 (11-21): step 9b' (W3 holds: TRIF's own WFP filters), 9b(8)
+
+- **helper/lib/win/wfp.cs** (P/Invoke to fwpuclnt.dll; `add <sid> <relay> <keyProxy>` / `remove` / `status`,
+  one JSON line; `TrifWfp.Run` for Add-Type): a persistent provider + sublayer (weight 65535) of TRIF's,
+  seven persistent filters on the container's package SID: connect4 permit TCP 127.0.0.1 at the two ports
+  (weight 15) over a hard block (weight 1); hard blocks at connect6, accept4/6, listen4/6. One transaction;
+  fixed keys. Security descriptor: system and administrators all, signed-in users read (WFP's default:
+  administrators only, so status as the person read nothing: windows-latest, run 44954832561).
+- **winbox.js**: the elevated setup/remove scripts carry wfp.cs (comments dropped, gzip, base64) and
+  compile it with Add-Type (nothing run as an administrator read from a file); the elevated command line
+  ~24,000 of 32,767 characters (unit-tested < 30,000), the outer non-elevated script now on stdin (encoding
+  it twice would pass the limit). status({wfpExe}) / parseWfp: `filtersMissing`, `filtersChanged` (a block
+  narrowed, a permit widened, not hard, another sublayer…), `filtersUnknown` (couldn't read: also a read
+  refused); the rules' ports and the filters' must agree.
+- **win-w3-probe.js** strict again (continue-on-error gone): plus the filters alone (rules out), the filters
+  with the firewall off, status as a Basic User (runas /trustlevel:0x20000; Administrators deny-only).
+  Results: WHOLE-BOX.md "TRIF's own WFP filters: W3 holds".
+- Words: why lines for the filters changed / unreadable (WHOLE-BOX-STRINGS.md); IT-ADMINS.md Windows: the
+  filters, how to list them.
+- Tests: winbox.test.js 7/7 locally and on both CI jobs; relay.test.js on windows-latest too.
+
 ### Round 10 (11-21): step 9b' (W3: built; the firewall rules don't hold loopback), drafts
 
 - **helper/lib/winbox.js** (platform-neutral text + parsing; PowerShell on Windows): `containerSid` /
@@ -403,6 +434,18 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   every Windows probe uses it.
 - Tests: claudepin.test.js (+1, the signature lines; the pin file's winSigner), 11 pass locally with
   release-claudepin.test.js. CI as below.
+
+## For Tim (round 11): not blocking (the loop goes on with the rules kept)
+
+**Windows: keep the firewall rules, or drop them?** TRIF's own network filters (round 11) keep a chat in
+the full sandbox to TRIF's connection by themselves: tested with the firewall rules taken out, and with
+Windows Firewall turned off. The firewall rules on top add nothing we could measure, but they need Windows
+Firewall on, so on a computer where another security product is the firewall (Windows Firewall off),
+TRIF's full sandbox wouldn't start there (the card offers the older protection).
+
+- **Keep both (as now):** two layers; the full sandbox needs Windows Firewall on.
+- **Drop the rules (recommended):** the same protection with one mechanism (the filters), works whatever
+  firewall the computer uses; less to set up, check and explain (IT-ADMINS.md gets shorter).
 
 ## For Tim (round 9): answered 11-21, "W3" (built in round 10, step 9b')
 
@@ -616,14 +659,22 @@ question with nothing to decide.
 
 ## Next
 
-**Step 9b', the loopback part:** TRIF's own WFP filters (a small C# tool like fence.cs, P/Invoke to
-fwpuclnt.dll: a persistent provider + sublayer of TRIF's, block filters at ALE_AUTH_CONNECT_V4/V6 for the
-container's package ID with loopback remote addresses and every port but TRIF's two, and UDP / inbound
-likewise), added and removed in winbox.js's one elevated step and checked by status (`netsh wfp show
-filters` or FwpmFilterEnum). Try on windows-latest with win-w3-probe.js (then strict again). If WFP can't
-block what the exemption allows: stop with For Tim (W1 or W2). Then 9b's (3), (4), (5), (8) on Windows.
+**9b(3) on Windows, refusal errors:** can a non-administrator read WFP's net events for TRIF's filter IDs
+(FwpmNetEventEnum; the drop events name the remote address and port)? If yes, the run's error names the
+connections refused; if not, the run's own EACCES lines. Then 9b(4)/(5) need the Windows run code from
+branch windows (when the branches meet: winbox.status before each boxed run, its problems → the card's
+why lines; managed settings in `C:\Program Files\ClaudeCode`). If Tim answers round 11's question: drop
+the rules and `firewallOff` (winbox.js, the probe, IT-ADMINS.md, the strings).
 
 ## CI
+
+- Round 11: whole-box [44953977628](https://github.com/acapellascience/trif/actions/runs/44953977628) (79a5abc)
+  **passed** (macos, windows): the W3 probe strict, **TRIF's WFP filters hold the loopback part**, with
+  and without the rules, the firewall off too. [44954832561](https://github.com/acapellascience/trif/actions/runs/44954832561)
+  (88b5865): macos passed; windows failed one check: status as a Basic User read the filters as missing
+  (WFP's default security: administrators only; fixed in d033810). [44955244776](https://github.com/acapellascience/trif/actions/runs/44955244776)
+  (d033810) **passed** (macos, windows): status as a Basic User ready, the filters read; winbox and relay
+  unit tests 15/15 on windows-latest. `tests` passed for d033810 (44955244720).
 
 - Round 10: whole-box [44952181864](https://github.com/acapellascience/trif/actions/runs/44952181864)
   (6d8976f): macos passed; windows failed: setup counted the probe's own listeners as busy (the rules named

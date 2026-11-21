@@ -204,6 +204,11 @@ A chat when the change isn't in force any more (the older-protection card, its w
 - Changed (a rule disabled or edited, or a policy that ignores this computer's own rules):
   **The firewall rules TRIF made for its full sandbox have been changed, or a policy on this computer
   overrides them, so this chat can't run in TRIF's full sandbox.** (then as for the change gone)
+- (round 11) TRIF's network filters changed or missing (`filtersChanged` / `filtersMissing`; missing alone
+  reads as "the change gone" above): **The network filters TRIF made for its full sandbox have been changed,
+  so this chat can't run in TRIF's full sandbox.** (then as for the change gone) Couldn't read them
+  (`filtersUnknown`): **TRIF couldn't check its full sandbox's network filters ({why}), so this chat can't
+  run in it.**
 - TRIF's port taken by another program: **Another program is using the port TRIF's full sandbox
   connects through ({port}), so this chat can't run in TRIF's full sandbox.**
 - Then the card's usual "You can wait …" or, as these won't change by waiting, the round-8 text ("You can run

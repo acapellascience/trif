@@ -116,11 +116,24 @@ managed policy; a normal run works; the fallback happens only on the person's ch
     Windows probes (the W3 one included) run daily on the newest claude.exe too.
   - [x] **(8)** *(round 11)* The relay as on the Mac (platform-neutral): relay.test.js on windows-latest;
     the W3 probe's claude.exe reaches the real Anthropic through it at winbox's fixed port.
-  - [ ] **(3)** Refusal errors on Windows: no Seatbelt reports; WFP's net events (drops by TRIF's filter
-    IDs) if a non-administrator can read them, else the run's own EACCES lines; file refusals: none logged
-    by Windows (the run's own errors).
-  - [ ] **(4), (5)** need the Windows run code (branch windows: helper/lib/win/fence.js, runs.js): when the
+  - [x] **(3)** *(round 12)* Refusal errors on Windows, the parts that don't need the run code:
+    boxrefusals.js `fromRunOutput` (what the box's programs were told: EPERM/EACCES lines, Claude Code's
+    atomic `.tmp.<pid>.<hex>` writes named as the file, Claude Code's "Refusing to read …: where it leads on
+    disk could not be determined", PowerShell's "Access to the path … is denied"; tool results and stderr
+    only, never the model's words) and `fromNetEvents` (TRIF's filters' drops, `wfp events`); same words,
+    same error line. On windows-latest the stand-in run's refusals are all named (the secret's and the other
+    run's reads, the other site's and the home folder's writes) and nothing it was allowed. **WFP's net
+    events: an administrator only** (as the person: access denied), so a run's connection refusals come
+    from its own lines and the relay's (For Tim round 12, not blocking). Wiring into the Windows run's
+    `_finish` when the branches meet.
+  - [ ] **(4)** needs the Windows run code (branch windows: helper/lib/win/fence.js, runs.js): when the
     branches meet; winbox.status's problems map to the card's why lines (WHOLE-BOX-STRINGS.md).
+  - [x] **(5)** *(round 12, the reading part)* claude-managed.js reads Windows' sources where Claude Code
+    does (code.claude.com/docs/en/managed-settings): `C:\Program Files\ClaudeCode\` (file + drop-ins),
+    `Settings` under `HKLM\SOFTWARE\Policies\ClaudeCode` and `HKCU\…` (each its own source); Windows paths
+    in command hooks. On windows-latest the pinned claude.exe used the file, then HKLM over it, then HKCU
+    alone, and TRIF's check listed each. The box's grants for them (read on `C:\Program Files\ClaudeCode`,
+    as the probes do) come with the Windows run code.
   - [ ] **(6)** Nothing to build here: claudetoken.js uses keyring.js's setKey/getKey, which on the windows
     branch are Credential Manager (credman.js, same signatures; a setup-token token fits its 2560 bytes).
     Test when the branches meet.
@@ -373,6 +386,25 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   nothing reached it). Locally the touched suites pass (~280 tests); tests/update.test.js's web-ext part
   needs node_modules, which this worktree doesn't have (CI's `tests` workflow passes it).
 
+### Round 12 (11-21): 9b(3) (refusal errors on Windows), 9b(5) (an organization's policy on Windows, reading)
+
+- **helper/lib/win/wfp.cs `events <minutes>`**: FwpmNetEventEnum0 (x64 layouts in the file), classify-drop
+  events of TRIF's seven filters only (by the IDs their keys have now), each {time, filter, layer, protocol,
+  remote, remotePort, localPort, app}; also whether Windows collects net events and the events' DACL. An
+  access refused → `denied`. winbox.js `netEvents` / `parseEvents`; `node winbox.js events [minutes]`.
+- **helper/lib/boxrefusals.js**: `fromNetEvents(events, {since})` and `fromRunOutput({stdout, stderr})` (the
+  run's own lines, above), `dedupe`; `describe` gains **opening {path}** and **a connection from {where}**;
+  `~` for Windows homes. Draft words: WHOLE-BOX-STRINGS.md (the refusal line, Windows).
+- **helper/lib/agents/claude-managed.js**: Windows' sources (above); `parseReg`, `readReg` (reg.exe, by full
+  path), a test folder's `registry-hklm.json` / `registry-hkcu.json` stand for the values.
+- **tests/whole-box/win-w3-probe.js** (strict): `wfp events` as an administrator after step 4 names the
+  drops (1.1.1.1:443, another port on 127.0.0.1, …); as the person (Basic User) learned; the stand-in run's
+  refusals named. **tests/whole-box/win-managed-probe.js** (new, strict; whole-box.yml windows job, with the
+  Windows unit tests): the file / HKLM / HKCU, which one claude.exe used, TRIF's check.
+- docs/IT-ADMINS.md Windows: where the policy is read; how refusals are named.
+- Tests: wholebox-refusals.test.js +1 (Windows), winbox.test.js +1 (net events), claude-managed.test.js +1
+  (Windows sources); locally 94 across the box's suites, no regressions; on windows-latest too.
+
 ### Round 11 (11-21): step 9b' (W3 holds: TRIF's own WFP filters), 9b(8)
 
 - **helper/lib/win/wfp.cs** (P/Invoke to fwpuclnt.dll; `add <sid> <relay> <keyProxy>` / `remove` / `status`,
@@ -434,6 +466,20 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   every Windows probe uses it.
 - Tests: claudepin.test.js (+1, the signature lines; the pin file's winSigner), 11 pass locally with
   release-claudepin.test.js. CI as below.
+
+## For Tim (round 12): not blocking (nothing built for it)
+
+**Windows: let the person read Windows' network-event log?** On the Mac, a boxed chat that fails names the
+connections the box refused (from macOS's own reports). On Windows, TRIF's filters' refusals are in
+Windows' network-event log, which only administrators can read (windows-latest: refused as the person).
+TRIF names them anyway from what the programs in the box were told and from TRIF's relay, so for Claude
+Code's own connections (always through the relay) nothing is lost; a tool's direct connection is named only
+if its error says where (Node's usually does).
+
+- **Leave it (recommended):** nothing changes on the computer; the error names what the programs said.
+- **Open the log to signed-in users** (one more change in the same administrator step): every program's
+  blocked connections, not only TRIF's, become readable by anyone signed in to that computer. A privacy
+  change for the whole computer, for a small gain in the error's words.
 
 ## For Tim (round 11): not blocking (the loop goes on with the rules kept)
 
@@ -509,6 +555,21 @@ company's settings loosen Claude Code's rules; TRIF's full sandbox still holds")
 question with nothing to decide.
 
 ## Findings
+
+- **Round 12, refusals on Windows** (windows-latest, run 44956934539, pinned claude.exe 2.1.330 in TRIF's
+  container after the W3 step): Windows collects net events (FWPM_ENGINE_COLLECT_NET_EVENTS on); as an
+  administrator `wfp events` read 8 drops by TRIF's filters for step 4's probe (node.exe: listening on a
+  port, 127.0.0.1 and this computer's address at other ports, ::1 and this computer's address at the relay
+  port, UDP, 1.1.1.1:443), each with the program's path (`\device\harddiskvolume3\…\node.exe`); as the
+  person (Basic User): `FwpmNetEventCreateEnumHandle0` → 5, access denied (the events' DACL: administrators,
+  Network Configuration Operators and a few services). Node in the box is told just `EACCES` for a refused
+  connect. claude.exe's refused Write: "EPERM: operation not permitted, open '<file>.tmp.<pid>.<hex>'"
+  (its atomic write); its refused Read: "Refusing to read <path>: where it leads on disk could not be
+  determined (…)" (it can't examine the path); both now named as the file.
+- **Round 12, an organization's policy on Windows** (same run, claude.exe not boxed): with
+  `C:\Program Files\ClaudeCode\managed-settings.json` alone Claude Code used it; with HKLM's `Settings` too,
+  HKLM (first wins, as the docs say); with only HKCU's, HKCU. Each time its managed `env` ANTHROPIC_BASE_URL
+  won over the process's.
 
 - **Round 9, Windows' network** (windows-latest, pinned claude.exe 2.1.330, the fence's lpac container):
   Node's default pipe and a pipe not naming the container: EPERM; a pipe whose access list names the
@@ -659,14 +720,21 @@ question with nothing to decide.
 
 ## Next
 
-**9b(3) on Windows, refusal errors:** can a non-administrator read WFP's net events for TRIF's filter IDs
-(FwpmNetEventEnum; the drop events name the remote address and port)? If yes, the run's error names the
-connections refused; if not, the run's own EACCES lines. Then 9b(4)/(5) need the Windows run code from
-branch windows (when the branches meet: winbox.status before each boxed run, its problems → the card's
-why lines; managed settings in `C:\Program Files\ClaudeCode`). If Tim answers round 11's question: drop
-the rules and `firewallOff` (winbox.js, the probe, IT-ADMINS.md, the strings).
+**Everything left of the Windows half needs branch windows's run code** (9b(4) the fallback card from
+winbox.status's problems; wiring 9b(3)'s refusals into the run's error, 9b(5)'s grants for the policy
+paths, the status check before each boxed run, 9b(6) Credential Manager for the token, the per-run
+capability in the real fence.cs; then 7 and 8 end to end on Windows). That needs whole-box and windows to
+meet: **a merge is Tim's call**. Open questions for Tim (not blocking): round 11 (firewall rules), round 12
+(the network-event log). After the merge: step 10 (Codex) once Claude Code is solid on both.
 
 ## CI
+
+- Round 12: round 11's whole-box run [44956109515](https://github.com/acapellascience/trif/actions/runs/44956109515)
+  (4d1318a) **passed** (macos, windows), its `tests` run 44956109643 passed. whole-box
+  [44956934539](https://github.com/acapellascience/trif/actions/runs/44956934539) (1b525e7) **passed** (macos,
+  windows): `wfp events` read as an administrator, refused as the person; the stand-in run's refusals as
+  words; the Windows unit tests; win-managed-probe strict, all nine checks. The last commit's runs: below
+  (it makes the refusal checks strict).
 
 - Round 11: whole-box [44953977628](https://github.com/acapellascience/trif/actions/runs/44953977628) (79a5abc)
   **passed** (macos, windows): the W3 probe strict, **TRIF's WFP filters hold the loopback part**, with

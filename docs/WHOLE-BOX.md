@@ -408,3 +408,13 @@ check (claude-managed.js reads no Windows locations yet).
 - `tests/run-sandbox.test.js`: passes `TRIF_WHOLE_BOX` through, so the same full run is checked in the box.
 - `tests/whole-box/win-probe.js`, `fence.cs`, `mcp-echo.js`: the Windows probe.
 - `.github/workflows/whole-box.yml`: both, on this branch only.
+
+## Refusals named on Windows (round 12, step 9b(3))
+
+No Seatbelt reports on Windows, and Windows records no AppContainer file refusals. TRIF's filters' drops are
+in WFP's net events (helper/lib/win/wfp.cs `events`, TRIF's filter IDs only), readable by administrators
+only (windows-latest: access denied as a Basic User). So a boxed run's error on Windows names what the
+programs in the box were told (boxrefusals.js `fromRunOutput`: EPERM/EACCES lines in tool results and
+stderr, Claude Code's own "Refusing to read …" and its atomic writes' temp names mapped back to the file)
+plus the relay's refusals. Opening the net events to signed-in users would be a computer-wide change: For
+Tim (round 12), recommended against.

@@ -229,6 +229,9 @@ test('boxrefusals on Windows (9b(3)): the run\'s own lines, TRIF\'s filters\' dr
     // the model's own words never count
     { type: 'assistant', message: { content: [{ type: 'text', text: "EPERM: operation not permitted, open 'C:\\model\\said.txt'" }] } },
     { type: 'user', message: { content: [{ type: 'tool_result', is_error: true, content: "EPERM: operation not permitted, open 'C:\\Users\\runneradmin\\wb3-planted.txt'" }] } },
+    // (what the pinned claude.exe said on windows-latest, round 12)
+    { type: 'user', message: { content: [{ type: 'tool_result', is_error: true, content: "EPERM: operation not permitted, open 'C:\\Users\\runneradmin\\wb3\\a\\stage\\sites\\other.com\\evil.user.js.tmp.3076.7a7f28b52c56'" }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', is_error: true, content: 'Refusing to read C:\\Users\\runneradmin\\wb3-secret.txt: where it leads on disk could not be determined (a link on the way could not be examined, or the links do not resolve).' }] } },
     { type: 'user', message: { content: [{ type: 'tool_result', content: [{ type: 'text', text: "Error: EACCES: permission denied, mkdir 'C:\\stage\\sites\\other.com'\nconnect EACCES 1.1.1.1:443\nconnect EACCES 1.1.1.1:443" }] }] } },
     { type: 'user', message: { content: [{ type: 'tool_result', content: "Get-Content : Access to the path 'C:\\secret.txt' is denied.\nError: spawn C:\\x\\tool.exe EPERM\nspawn EPERM" }] } },
     { type: 'result', result: "connect EACCES 9.9.9.9:443 (the model's summary)" },
@@ -236,6 +239,8 @@ test('boxrefusals on Windows (9b(3)): the run\'s own lines, TRIF\'s filters\' dr
   const own = br.fromRunOutput({ stdout: lines.map((l) => JSON.stringify(l)).join('\r\n'), stderr: "listen EACCES: permission denied 127.0.0.1:5555\nscandir 'x'" });
   assert.deepStrictEqual(own.map((r) => [r.op, r.target]), [
     ['file-open', 'C:\\Users\\runneradmin\\wb3-planted.txt'],
+    ['file-write', 'C:\\Users\\runneradmin\\wb3\\a\\stage\\sites\\other.com\\evil.user.js'],
+    ['file-read', 'C:\\Users\\runneradmin\\wb3-secret.txt'],
     ['file-write', 'C:\\stage\\sites\\other.com'],
     ['network-outbound', '1.1.1.1:443'],
     ['process-exec', 'C:\\x\\tool.exe'],
@@ -245,8 +250,10 @@ test('boxrefusals on Windows (9b(3)): the run\'s own lines, TRIF\'s filters\' dr
   ]);
   assert.ok(own.every((r) => r.kind === 'own'));
   assert.equal(br.describe(own[0], { home }), 'opening ~\\wb3-planted.txt');
-  assert.equal(br.describe(own[1], { home }), 'writing C:\\stage\\sites\\other.com');
-  assert.equal(br.describe(own[2], { home }), 'a connection to 1.1.1.1:443');
+  assert.equal(br.describe(own[1], { home }), 'writing ~\\wb3\\a\\stage\\sites\\other.com\\evil.user.js');
+  assert.equal(br.describe(own[2], { home }), 'reading ~\\wb3-secret.txt');
+  assert.equal(br.describe(own[3], { home }), 'writing C:\\stage\\sites\\other.com');
+  assert.equal(br.describe(own[4], { home }), 'a connection to 1.1.1.1:443');
   assert.deepStrictEqual(br.fromRunOutput({ stdout: 'not json\n{"type":"user"}\n', stderr: '' }), []);
   assert.deepStrictEqual(br.fromRunOutput({}), []);
 

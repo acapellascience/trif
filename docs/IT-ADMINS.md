@@ -113,3 +113,16 @@ policy doesn't apply local rules (`AllowLocalFirewallRules` off), the chat doesn
 person is told why and may choose the older protection). A collector on the computer itself isn't
 reachable directly from the box on Windows (only TRIF's ports are); use `https`. Turning the setting off
 takes the exemption, the filters and the rules out again (the administrator prompt again).
+
+Your Claude Code policy on Windows is read where Claude Code reads it: `C:\Program Files\ClaudeCode\`
+(`managed-settings.json` and `managed-settings.d\`), the `Settings` value (REG_SZ JSON) under
+`HKLM\SOFTWARE\Policies\ClaudeCode`, and the person's own `HKCU\SOFTWARE\Policies\ClaudeCode` (which
+Claude Code uses only when no admin source is present; TRIF checks it as well), plus the server-managed
+settings Claude Code caches. TRIF doesn't read the old `C:\ProgramData\ClaudeCode` path (Claude Code no
+longer does). What TRIF does with each setting is as on the Mac (above). *(Draft: the box's grants for those
+paths come with the Windows run code.)*
+
+When the box refuses a connection or a file, the chat's error says what (as on the Mac). On Windows TRIF
+takes it from what the programs in the box were told (Windows records no refusals of an AppContainer's file
+access) and from its relay. Its filters' drops are in Windows' network-event log, which only administrators
+read (`netsh wfp show netevents`); TRIF doesn't change who may read it.

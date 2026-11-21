@@ -234,9 +234,13 @@ function fromNetEvents(events, { since = null } = {}) {
 // opening (open's mode isn't in the line).
 const READS = /^(scandir|lstat|stat|readlink|access|realpath|read|opendir|watch)$/;
 const WRITES = /^(mkdir|rename|unlink|rmdir|rm|copyfile|symlink|link|chmod|chown|utime|write|cp|truncate|futime)$/;
+const ATOMIC = /\.tmp\.\d+\.[0-9a-f]{6,}$/;
 const RUN_LINES = [
   // EPERM: operation not permitted, open 'C:\x'  /  EACCES: permission denied, mkdir 'C:\x'
-  { re: /\b(EPERM|EACCES): (?:operation not permitted|permission denied), (\w+) '([^'\r\n]{1,400})'/g, make: (m) => ({ op: READS.test(m[2]) ? 'file-read' : WRITES.test(m[2]) ? 'file-write' : 'file-open', target: m[3] }) },
+  // (Claude Code's Write goes through "<file>.tmp.<pid>.<hex>": CI round 12, so that's the file it was writing)
+  { re: /\b(EPERM|EACCES): (?:operation not permitted|permission denied), (\w+) '([^'\r\n]{1,400})'/g, make: (m) => (ATOMIC.test(m[3]) ? { op: 'file-write', target: m[3].replace(ATOMIC, '') } : { op: READS.test(m[2]) ? 'file-read' : WRITES.test(m[2]) ? 'file-write' : 'file-open', target: m[3] }) },
+  // Claude Code's Read when the box won't let it look at the path (the pinned 2.1.330 on Windows, CI rounds 9, 12)
+  { re: /Refusing to read ([^\r\n]{1,400}?): where it leads on disk could not be determined/g, make: (m) => ({ op: 'file-read', target: m[1] }) },
   // connect EACCES 1.1.1.1:443 (Node's words for a refused connect; listen likewise)
   { re: /\bconnect (?:EACCES|EPERM) (\[?[0-9A-Fa-f:.]+\]?:\d{1,5})/g, make: (m) => ({ op: 'network-outbound', target: m[1] }) },
   { re: /\blisten (?:EACCES|EPERM)(?:: permission denied)? (\[?[0-9A-Fa-f:.]+\]?:\d{1,5})/g, make: (m) => ({ op: 'network-bind', target: m[1] }) },

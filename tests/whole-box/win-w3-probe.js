@@ -308,7 +308,7 @@ function parseStream(stdout) {
   show('wfp events as an administrator', JSON.stringify({ ...evAdmin, events: evAdmin.events.slice(0, 12) }, null, 1));
   const evAdminR = br.fromNetEvents(evAdmin.events, { since: t4 });
   console.log(`  in the run's words: ${br.summary(evAdminR) || '(none)'}`);
-  verdict['wfp events as an administrator: read'] = evAdmin.ok === true;
+  verdict['wfp events as an administrator: read, the step-4 drops named'] = evAdmin.ok === true && evAdminR.some((x) => x.target === `1.1.1.1:443`) && evAdminR.some((x) => x.target === `127.0.0.1:${srv.other.port}`);
   learned['net events collected (FWPM_ENGINE_COLLECT_NET_EVENTS)'] = evAdmin.collecting;
   learned['net events: who may read them (DACL)'] = evAdmin.sddl || '(not read)';
   learned['TRIF\'s filters\' drops in step 4 (administrator)'] = evAdminR.length;
@@ -358,10 +358,12 @@ function parseStream(stdout) {
   const ownR = br.fromRunOutput({ stdout: r.stdout, stderr: r.stderr });
   console.log(`  its own lines, as refusals: ${JSON.stringify(ownR)}`);
   console.log(`  in the run's words: ${br.summary(ownR, { home: os.homedir() }) || '(none)'}`);
-  learned['the run\'s own lines name the home folder\'s write'] = ownR.some((x) => /wb3-planted\.txt$/i.test(x.target));
-  learned['the run\'s own lines name the other site\'s write'] = ownR.some((x) => /other\.com/i.test(x.target));
-  learned['the run\'s own lines name the secret\'s read'] = ownR.some((x) => x.target && x.target.toLowerCase() === secretFile.toLowerCase());
-  learned['the run\'s own lines name the other run\'s folder'] = ownR.some((x) => x.target && x.target.toLowerCase().startsWith(B.stage.toLowerCase()));
+  // (9b(3), strict since round 12's CI showed what claude.exe says)
+  verdict['refusals named: the home folder\'s write'] = ownR.some((x) => x.op === 'file-write' && /\\wb3-planted\.txt$/i.test(x.target));
+  verdict['refusals named: the other site\'s write'] = ownR.some((x) => x.op === 'file-write' && /\\other\.com\\evil\.user\.js$/i.test(x.target));
+  verdict['refusals named: the secret\'s read'] = ownR.some((x) => x.op === 'file-read' && x.target.toLowerCase() === secretFile.toLowerCase());
+  verdict['refusals named: the other run\'s folder'] = ownR.some((x) => x.op === 'file-read' && x.target.toLowerCase().startsWith(B.stage.toLowerCase()));
+  verdict['refusals named: nothing the run was allowed'] = !ownR.some((x) => /new\.user\.js$|\\x\.com\\a\.user\.js$/i.test(x.target) && x.target.toLowerCase().startsWith(A.stage.toLowerCase()));
   verdict['a normal run in the box (stand-in API): its own mod read and written, the trif tool'] = !!(p.result && !p.result.is_error) && String(got[0] || '').includes('COPY-OK a') && ownWritten && String(got[6] || '').includes('mcp-trif-ok');
   await api.close();
 

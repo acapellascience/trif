@@ -194,8 +194,8 @@ async function extRequest(ext, cmd, args = {}) {
   ext.send({ type: 'request', id, cmd, args });
   return ext.next((m) => m.type === 'response' && m.id === id);
 }
-async function runAgent(f, { agent, site, tabId, model }) {
-  const r = await extRequest(f.ext, 'agent.start', { agent, site, url: `https://${site}/page`, tabId, prompt: 'probe the sandbox', ...(model ? { model } : {}) });
+async function runAgent(f, { agent, site, tabId, model, extra = {} }) {
+  const r = await extRequest(f.ext, 'agent.start', { agent, site, url: `https://${site}/page`, tabId, prompt: 'probe the sandbox', ...(model ? { model } : {}), ...extra });
   assert.equal(r.ok, true, r.error);
   const done = await f.ext.next((m) => m.type === 'agentEvent' && m.runId === r.result.runId && m.event.kind === 'done', { timeout: 100000 });
   const events = f.ext.messages.filter((m) => m.type === 'agentEvent' && m.runId === r.result.runId).map((m) => m.event);
@@ -300,6 +300,16 @@ test('Claude Code in TRIF\'s full sandbox: without TRIF\'s pinned copy (missing,
     assert.equal(done.ok, false, info);
     assert.ok(events.some((e) => e.kind === 'error' && /TRIF's own copy of Claude Code isn't downloaded yet/.test(e.message)), info);
     assert.doesNotMatch(JSON.stringify(events) + helperLog(f), /the user's own claude was started/, info);
+    // (step 4: the panel's card, never a fallback by itself)
+    assert.ok(events.some((e) => e.kind === 'error' && e.reason === 'boxUnavailable' && e.why === 'missing'), info);
+    assert.deepStrictEqual(done.error && [done.error.kind, done.error.why], ['boxUnavailable', 'missing'], info);
+    // The person's choice on that card, "Run this chat with the older protection": the user's own Claude
+    // Code (here the agents folder's stand-in, which says it was started), not TRIF's box.
+    const older = await runAgent(f, { agent: 'claude', site: 'example.com', tabId: 12, extra: { olderProtection: true } });
+    const olderInfo = `events: ${JSON.stringify(older.events)}\nhelper.log:\n${helperLog(f)}`;
+    assert.match(JSON.stringify(older.events), /the user's own claude was started/, olderInfo);
+    assert.ok(older.done.olderProtection && !older.events.some((e) => e.reason === 'boxUnavailable'), olderInfo);
+    assert.ok(runLog(f, older.runId).some((x) => x.webmods === 'olderProtection'), olderInfo);
   } finally { fs.renameSync(hidden, fixturePinned); }
   // changed since it was downloaded (its record says another SHA-256): not started either
   const markFile = path.join(fixturePinned, require('../helper/lib/claudepin').MARK);

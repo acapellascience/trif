@@ -197,13 +197,17 @@ test('the pseudo-terminal (macOS): the program sees a wide terminal, gets what i
     const child = spawn(c.file, c.args, { stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     let out = '';
     child.stdout.on('data', (d) => { out += d; if (/name> $/.test(out)) { if (cancel) process.kill(-child.pid, 'SIGTERM'); else child.stdin.write(typed); } });
-    child.on('close', (code, signal) => resolve({ out, code, signal }));
+    // (a watchdog: the repo's whole suite once hung here for 180 s, round 6; now it fails saying what it saw)
+    const timer = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } resolve({ out, code: null, signal: null, hung: true }); }, 30000);
+    child.on('close', (code, signal) => { clearTimeout(timer); resolve({ out, code, signal }); });
   });
   const r = await run('abc\r');
+  assert.ok(!r.hung, `hung (typed): ${JSON.stringify(r.out)}`);
   assert.match(r.out, /"tty":true,"cols":4000/);
   assert.match(r.out, /got abc/);
   assert.strictEqual(r.code, 7, 'the program\'s exit status');
   const c = await run('', { cancel: true });
+  assert.ok(!c.hung, `hung (cancelled): ${JSON.stringify(c.out)}`);
   assert.strictEqual(c.signal, 'SIGTERM');
   assert.doesNotMatch(c.out, /got/);
 });

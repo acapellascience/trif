@@ -43,17 +43,19 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   - [x] **7a.** *(round 5; Tim answered 11-21: "yes, the recommendation")* In the box, settings that only
     loosen Claude Code's rules aren't asked about and the chat isn't marked; they're in the run's log.
     Settings that let a run use any command → no shell, the `trif` tool. Breaks still stop the chat.
-- [ ] **3. Clear refusal errors.** When the box refuses something, the run's error names it (Seatbelt
+- [x] **3. Clear refusal errors.** When the box refuses something, the run's error names it (Seatbelt
   violation reports from the log / the relay's refusal), not a mystery failure.
   - [x] **3a.** *(round 5)* Every deny in the run's profile carries the run's tag; `log stream` on the tag
     (started before the agent) collects Seatbelt's reports; with the allowlist proxy's refusals, a failed
     boxed run gets an error line naming them (reason "box"; `done.boxRefused`), and every boxed run logs
     them (`boxRefused`). Draft words in WHOLE-BOX-STRINGS.md.
-  - [ ] **3b.** What every boxed run is refused (round 5's CI list, Findings) left out of the error,
-    kept in the log; a real failed run on CI (a run the box makes fail, e.g. a host an organization's
-    settings name, step 5); the relay's refusals (step 8) the same way.
-- [ ] **4. Informed fallback, never silent.** If the box can't start, the panel offers "Run this chat with
-  the older protection" as the person's own choice. Draft the words.
+  - [x] **3b.** *(round 6)* What every boxed run is refused (round 5's CI list) left out of the error,
+    kept in the log (`routine`); a real failed run on CI (an organization's settings sending Claude Code
+    to a gateway host the box doesn't let it reach: the error names that connection and nothing else).
+    The relay's refusals (step 8) go through the same path as the allowlist proxy's (`fromProxy`).
+- [x] **4. Informed fallback, never silent.** *(round 6)* If the box can't start, nothing runs; the panel's
+  card offers "Run this chat with the older protection" as the person's own choice (the chat keeps it
+  until a new chat; its chip). Draft words in WHOLE-BOX-STRINGS.md.
 - [ ] **8. The network relay.** CONNECT-only to Anthropic's hosts on 443 (plus org-named hosts, step 5), no
   TLS termination; own unit tests + a fuzz-style test of its parsing; wired into runs for token logins.
 - [ ] **5. Organisations' policies inside the box.** Managed settings already readable; hooks run inside
@@ -174,6 +176,57 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   out. fake-anthropic-server.js: `{status}` steps. Locally: agents, agent-keys, helper, extension,
   sandboxlint, claudetoken, wholebox-setting, claudepin, explain, agent-tools (286 pass).
 - Not looked at in a browser: the panel's sign-in notice and Settings' line (words are drafts anyway).
+
+### Round 6 (11-21): step 3b (only what matters in a failed run's error), step 4 (the informed fallback)
+
+- **3b:** boxrefusals.js `ROUTINE`, `routine(r, ctx)`, `routineContext` (the run's homes: $HOME's and the
+  account's, as macOS's `security` reads the account's; the private folder; the workspace; Claude Code's
+  temporary folder; /private/… as /…). Narrow rules from round 5's CI list: the notification centre's
+  shared memory; ~/.CFUserTextEncoding and the global preferences; the services analyticsd,
+  SecurityServer, securityd.xpc, FSEvents; Xcode's / the Command Line Tools' `usr/lib(/libxcrun.dylib)`;
+  `claude` listening on `cc-socks/<n>.sock` / `srt-mux-<n>-<n>.sock` in its own temporary folder, writing
+  `agent-config/claude/plugins`, `~/Library/Caches/claude-cli-nodejs`, `~/.claude`, `~/.config` (the
+  folders themselves); `node` (trif) reading config.json, helper.log, preinstalled.json. runs.js `_finish`:
+  the log line has `refused` (the rest) and `routine`; the error and `done.boxRefused` only the rest; a
+  failed run refused only routine things gets no box line. The watcher's duplicates are now per program
+  (Claude Code's Read of config.json is no longer folded into trif's routine one). Seatbelt's network
+  targets (`remote:*:80`: it often gives no address) read **a connection to port 80**.
+- zsh's here-documents: claude.js gives runs `TMPPREFIX=<the run's temp folder>/zsh` (zsh ignores TMPDIR
+  for them; round 5's CI saw zsh refused /private/tmp/zsh…, which would fail any heredoc in the box).
+- **CI's real failed run:** managed settings `{"env":{"ANTHROPIC_BASE_URL":"http://192.0.2.1:80",
+  "CLAUDE_CODE_MAX_RETRIES":"0"}}` (an organization's LLM gateway; TEST-NET). Claude Code takes the managed
+  `env` over the run's, the box refuses the connection, the run fails in 1.2 s with Claude Code's "API
+  Error: Unable to connect to API (EPERM)" and then **TRIF's full sandbox refused a connection to port 80
+  (claude).**, nothing routine named. This is also step 5's case (a gateway the org's settings name: the
+  relay will let it through); the helper doesn't read managed `env` yet.
+- **4:** runs.js `_boxUnavailable(run, why, message)`: the pinned copy missing / downloading / changed /
+  its check failing, or sandbox-exec's own `sandbox-exec: …` line before the agent began → an error with
+  reason `boxUnavailable` and `why`, `done.error` `{kind: 'boxUnavailable', why}`; nothing runs, never a
+  fallback by itself. `agent.start` `olderProtection: true` → that run with TRIF's rules for the user's own
+  Claude Code, as with the setting off (logged `olderProtection`, `done.olderProtection`). host.js takes it
+  from the extension's connection only (the socket: refused with a message, a run's token or not).
+  background.js: `agent.start` with it from the panel page only (`isPanelPage`, else refused; only `true`);
+  the error becomes a `boxFallback` card message; choosing it sets `chat.olderProtection` and every later
+  message in that chat sends it, until a new chat; `chat.boxFallbackCard` (Not now). sidepanel.js
+  `boxFallbackCard` (styled as the sandbox card), the `older protection` chip (sidepanel.html).
+- Tests: wholebox-refusals.test.js +1 (routine: round 5's whole list yes; the same files to other programs,
+  inside ~/.claude, other runs' folders, other homes, the probes, heredocs: no; odd characters in paths)
+  and the end of a run with routine refusals (mixed: only the rest named; only routine: no line);
+  agents.test.js +1 (the real helper, the setting on, no pinned copy: boxUnavailable, the fake user's
+  claude not started; the socket refused, with and without a run token; the extension's olderProtection
+  → the user's claude ran, `done.olderProtection`; the next run boxed again); extension.test.js +1 (the
+  card, refused from a content script / another page / non-true, the chat's olderProtection sent with
+  later messages, a new chat without it, Not now). run-sandbox.test.js (CI): the LLM-gateway run, and the
+  missing-pin test now checks the card's reason and then the older protection starting the user's own
+  (stand-in) Claude Code. Locally 330 tests across the agents, extension, wholebox-*, claudetoken,
+  claudepin, agent-tools, run-folders, hardening, sandboxlint, agent-keys, explain, claude-managed suites.
+- Not looked at in a browser: the card and the chip (drafts anyway).
+- Finding: a chat whose earlier turns ran in the box keeps their session id, and the older protection's
+  run resumes it with the user's own Claude Code, whose config folder (~/.claude) doesn't have it (boxed
+  runs use TRIF's agent-config/claude): `--resume` would fail. The same happens today when the setting is
+  switched on or off mid-chat. Most fallbacks come first in a chat (the copy still downloading), so it's
+  left for a later step: the helper could start a fresh session when the session isn't in the config
+  folder the run uses.
 
 ## For Tim (round 4): answered 11-21, "yes, the recommendation" (done in round 5, step 7a)
 
@@ -306,11 +359,26 @@ question with nothing to decide.
 
 ## Next
 
-Round 6: step 3b (look at round 5's CI print of what a normal boxed run is refused; a real failed run named
-on CI; noise out of the error if needed), then step 4 (the informed fallback: "Run this chat with the older
-protection", draft words).
+Round 7: step 8 (the network relay: CONNECT-only to Anthropic's hosts on 443, no TLS termination; its own
+unit tests and a fuzz-style test of its parsing; wired into token runs in place of the allowlist proxy),
+then step 5 (organisations' policies: managed `env` such as ANTHROPIC_BASE_URL and OTEL endpoints → those
+hosts through the relay; hooks inside the box; docs/IT-ADMINS.md). The resume-across-modes finding (round 6)
+fits with step 5 or after.
 
 ## CI
+
+- Round 6: [run 44879684946](https://github.com/acapellascience/trif/actions/runs/44879684946) (whole-box.yml,
+  9668cc9: 3b and 4) **passed** (macos and windows): **the LLM-gateway run failed in 1.6 s with "TRIF's full
+  sandbox refused a connection to port 80 (claude)." and nothing else named**; the loosest-settings and
+  loosen-shell runs' `refused` now hold only the probes (config.json read by the Read tool, the keychain
+  file, `ls` of the private folder, another site's write), everything else under `routine`; zsh's /tmp
+  refusal gone (TMPPREFIX). Before it, 10d2ace's run 44879165944 failed only on the words (Seatbelt said
+  `remote:*:80`, read then as "a connection to remote:*:80"). The repo's `tests` workflow for 9668cc9
+  ([44879684954](https://github.com/acapellascience/trif/actions/runs/44879684954)) failed: every
+  claudetoken.test.js subtest but the last passed, then the file hung to its 180 s limit in the pty test
+  (untouched since round 3, passed in every run before: a flake under the whole suite's load; it now has
+  a 30 s watchdog that fails saying what it saw). 10d2ace's `tests` run (44879165967) passed. The last
+  push of the round (the missing-pin test's step-4 check, CI only) was still running at the round's end.
 
 - Round 5, 7a: [run 44876683949](https://github.com/acapellascience/trif/actions/runs/44876683949) (whole-box.yml,
   a394c4f) **passed** (macos and windows): with the loosest managed settings (`Bash(*)`, bypass mode,

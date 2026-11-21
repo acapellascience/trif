@@ -33,6 +33,10 @@ In code now (helper/lib/runs.js):
   is one of: **it has changed since it was downloaded** · **its record .trif-claude-code.json is missing**
   · **it can't be read ({code})**
 - Checking it failed: **couldn't check TRIF's own copy of Claude Code: {error}**
+- sandbox-exec itself refused to start (round 6; e.g. a helper that is itself sandboxed): **TRIF's full
+  sandbox couldn't start on this Mac ({sandbox-exec's own line}).**
+
+Each of these now comes with the card below (step 4), not a plain error line.
 
 - An organization forces Claude Code's own sandbox on (it can't start inside TRIF's box, so the chat runs
   with no shell and the `trif` tool) **and** its settings take that tool away (round 4, claude.js
@@ -59,8 +63,33 @@ nothing: no "Use Claude Code anyway" card, no "no TRIF sandbox" chip.
   **the system service {name}** · **starting {path}** · **another program ({operation})** · otherwise
   Seatbelt's own operation name and target; then the program's name in brackets, e.g. **reading
   ~/.netrc (claude)**. Paths in the home folder start with ~.
+  Since round 6 (step 3b) it names only what a run that worked isn't refused: what every boxed run is
+  refused along the way (macOS's preferences and keychain lookups, Xcode's `git` finding its tools,
+  Claude Code's own sockets and cache folders, `trif` looking for files it does without: boxrefusals.js
+  ROUTINE) is in the run's log only. A failed run refused only those gets no such line.
 
-The offer that follows these (step 4, "Run this chat with the older protection"): not written yet.
+### The card when TRIF's full sandbox can't start (round 6, step 4; sidepanel.js `BOX_FALLBACK`)
+
+In place of the plain error line, a card in the chat (styled like the "Use Claude Code anyway" card):
+
+- Title: **TRIF's full sandbox couldn't start for this chat.**
+- Then why, the run's message above (e.g. **TRIF's own copy of Claude Code is still downloading (Settings
+  shows how far), so this chat can't run in TRIF's full sandbox yet.**)
+- Then: **You can wait and send your message again, or run this chat with the older protection: your own
+  Claude Code, with TRIF's rules for what its commands and file tools may touch, as before you turned on
+  the full sandbox. Claude Code itself isn't in TRIF's box then. New chats use the full sandbox again.**
+- Buttons: **Not now** · **Run this chat with the older protection** (primary)
+- Answered: **Running this chat with the older protection: TRIF sent your message again.** / **Nothing
+  ran. Send your message again when TRIF's full sandbox is ready.**
+- The chat's chip afterwards (beside "no TRIF sandbox"'s place): **older protection**, its hover text:
+  **This chat runs with the older protection (TRIF's rules for your own Claude Code), not TRIF's full
+  sandbox, as you chose. A new chat uses the full sandbox.**
+
+Not for people (CLI): `trif agent run` asking for it is refused: **only a click in TRIF's side panel can run
+a chat with the older protection (or switch off Settings: Run chats in TRIF's full sandbox)**.
+
+Open for Tim: the name "older protection" (Tim's own words in the plan) against the "TRIF's usual protection"
+the two no-shell messages above use; one of them should change so the panel says one thing.
 
 Not shown to people (round 4): a chat that runs with no shell says nothing in the panel; its steps read
 as they do with a shell ("trif status"). The agent is told (agents/index.js `noShellText`, agent-only).

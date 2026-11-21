@@ -1976,3 +1976,46 @@ test('side panel: no model picked reads "Opus (default)" for Claude Code, "Defau
   // the model menu's first entry: the same name for Claude Code (its list has no default of its own)
   assert.match(js, /new Option\(def \? `Default \(\$\{def\.name\}\)` : DEFAULT_MODEL_NAMES\[id\] \|\| 'Default', ''\)/);
 });
+
+// docs/WHOLE-BOX.md step 4: with Settings' "Run chats in TRIF's full sandbox" on and the box unable to start
+// (here: TRIF's own copy of Claude Code not downloaded), nothing runs; the run says so with reason
+// "boxUnavailable" (the panel's card). Only the person's click in the panel ("Run this chat with the older
+// protection", agent.start `olderProtection` from the extension's connection) runs it, with the user's
+// own Claude Code under TRIF's rules as before; a terminal or a run can't ask for that.
+test('TRIF\'s full sandbox unable to start: nothing runs, the panel is told why; the older protection only by the panel\'s choice', { skip: process.platform !== 'darwin' && 'macOS only (the full sandbox is)' }, async () => {
+  const { home, bin } = makeHome({ config: { wholeBox: true } });
+  const pinFile = path.join(home, 'claude-code.json');
+  // (a pin for this computer that can't be fetched: http is refused before anything is asked)
+  fs.writeFileSync(pinFile, JSON.stringify({ version: '2.1.999', packages: { [`${process.platform}-${process.arch}`]: { name: 'x', tarball: 'http://127.0.0.1:9/x.tgz', integrity: 'sha512-AAAA' } } }));
+  const ext = startHost(home, { TRIF_CLAUDE_CODE_PIN: pinFile });
+  ext.hello();
+  await ext.waitForSocket();
+  const r = await extRequest(ext, 'agent.start', { ...START, agent: 'claude', prompt: 'BOXED please' });
+  assert.equal(r.ok, true, r.error);
+  const done = await waitDone(ext, r.result.runId);
+  const events = eventsOf(ext, r.result.runId);
+  const err = events.find((e) => e.kind === 'error' && e.reason === 'boxUnavailable');
+  assert.ok(err, JSON.stringify(events));
+  assert.ok(['missing', 'downloading'].includes(err.why), err.why);
+  assert.match(err.message, /TRIF's own copy of Claude Code (isn't downloaded yet|is still downloading)/);
+  assert.deepStrictEqual([done.ok, done.error && done.error.kind, done.error && done.error.why, !!done.olderProtection], [false, 'boxUnavailable', err.why, false]);
+  assert.equal(callFor(bin, 'BOXED'), undefined, 'the user\'s own Claude Code wasn\'t started by itself');
+  // A terminal (or a run) can't choose it.
+  for (const extra of [{}, { token: 'a-run' }]) {
+    const s = await sockRequest(ext.sock, { id: 'o', cmd: 'agent.start', args: { ...START, agent: 'claude', prompt: 'SOCKET', olderProtection: true }, ...extra });
+    assert.equal(s.ok, false);
+    if (!extra.token) assert.match(s.error, /only a click in TRIF's side panel can run a chat with the older protection/);
+  }
+  assert.equal(callFor(bin, 'SOCKET'), undefined);
+  // The panel's choice: the run goes on with the older protection, said in `done`.
+  const o = await extRequest(ext, 'agent.start', { ...START, agent: 'claude', prompt: 'OLDER please', olderProtection: true });
+  assert.equal(o.ok, true, o.error);
+  const od = await waitDone(ext, o.result.runId);
+  assert.deepStrictEqual([od.ok, od.olderProtection], [true, true], JSON.stringify(eventsOf(ext, o.result.runId)));
+  assert.ok(callFor(bin, 'OLDER'), 'the user\'s own Claude Code, as before the setting');
+  assert.ok(!eventsOf(ext, o.result.runId).some((e) => e.reason === 'boxUnavailable'));
+  // (and it's only for that run: the next one without it is boxed again, so stopped again)
+  const again = await extRequest(ext, 'agent.start', { ...START, agent: 'claude', prompt: 'AGAIN please' });
+  const ad = await waitDone(ext, again.result.runId);
+  assert.equal(ad.error && ad.error.kind, 'boxUnavailable');
+});

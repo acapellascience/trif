@@ -2390,7 +2390,7 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
     case 'agent.openModel.removeKey': return helperRequest('agent.openModel.removeKey', {}, 60000);
     case 'instructions.get': return helperRequest('instructions.get', {}, 10000);
     case 'instructions.set': return helperRequest('instructions.set', { text: String(msg.text ?? '') }, 10000);
-    case 'agent.start': return startAgent(msg);
+    case 'agent.start': return startAgent(msg, { fromPanel });
     case 'agent.stop': return stopAgent(msg.runId);
     case 'agent.login': return startLogin(msg);
     case 'agent.loginCode': return helperRequest('agent.loginCode', { loginId: String(msg.loginId ?? ''), code: String(msg.code ?? '') }, 10000);
@@ -2466,6 +2466,17 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
     case 'agent.logout': {
       if (!fromPanel) throw new Error('only the side panel can change this');
       return helperRequest('agent.logout', { agent: String(msg.agent ?? '') }, 30000);
+    }
+    // "Not now" on the older-protection card: nothing runs; the card says it was answered.
+    case 'chat.boxFallbackCard': {
+      if (!fromPanel) throw new Error('only the side panel can change this');
+      const site = normalizeSite(msg.site);
+      await updateChat(site, (chat) => {
+        const card = chat.messages.find((m) => m.role === 'boxFallback' && m.time === msg.card);
+        if (!card || card.answered) return false;
+        card.answered = 'wait';
+      });
+      return { ok: true };
     }
     // "Stop" on that card: the run stays stopped and nothing is stored; the card says it was answered.
     case 'chat.sandboxCard': {
@@ -2761,7 +2772,10 @@ function answerCard(site, time, choice) {
   });
 }
 
-async function startAgent(msg) {
+async function startAgent(msg, { fromPanel = false } = {}) {
+  // ("Run this chat with the older protection": only a click on the panel's card, docs/WHOLE-BOX.md step 4;
+  // the chat keeps it until a new chat, chat.olderProtection, and the helper takes it from here alone)
+  if (msg.olderProtection !== undefined && (msg.olderProtection !== true || !fromPanel)) throw new Error('only the side panel can choose this');
   // (the phone view's chat: its site's phone twin, phone~x.com, a chat of its own whose run writes the phone twin's
   // folder only and reads the site's desktop mods: phone.js, helper/lib/scope.js)
   const chatSite = normalizeSite(msg.site);
@@ -2778,8 +2792,15 @@ async function startAgent(msg) {
   const agent = msg.agent ? String(msg.agent) : undefined;
   const tabId = Number.isInteger(msg.tabId) ? msg.tabId : undefined;
   const startedAt = Date.now();
+  let older = false;
   await updateChat(chatSite, (chat) => {
     if (chat.run) throw new Error(`already working on ${site}`);
+    if (msg.olderProtection === true && !chat.olderProtection) chat.olderProtection = { at: startedAt };
+    if (msg.olderProtection === true && msg.card !== undefined) {
+      const card = chat.messages.find((m) => m.role === 'boxFallback' && m.time === msg.card);
+      if (card && !card.answered) card.answered = 'older';
+    }
+    older = !!chat.olderProtection;
     chat.messages.push({ role: 'user', text: prompt, time: startedAt });
     chat.run = { runId: null, startedAt };
     chat.last = null;
@@ -2797,6 +2818,7 @@ async function startAgent(msg) {
   if (msg.effort) args.effort = String(msg.effort); // (Settings → Effort, per agent)
   if (msg.openModel && typeof msg.openModel === 'object') args.openModel = pick(msg.openModel, ['provider', 'model', 'baseUrl']); // a chat's own open-model choice
   if (msg.merge) args.merge = String(msg.merge); // merge the new version of this shipped mod (the helper adds how)
+  if (older) args.olderProtection = true;
   let runId;
   state.starting++;
   try {
@@ -3002,6 +3024,13 @@ async function onAgentEvent(runId, event, relay = true) {
             name: String(event.name ?? ''), settingsName: String(event.settingsName ?? event.name ?? ''),
             why: Array.isArray(event.why) ? event.why.map(String).slice(0, 12) : [],
             prompt: run.prompt ?? '', ...(run.merge ? { merge: run.merge } : {}),
+          });
+        } else if (event.reason === 'boxUnavailable') {
+          // TRIF's full sandbox couldn't start, so nothing ran: the panel's card (Wait, or Run this chat
+          // with the older protection, which sends the same message again: the person's own choice).
+          chat.messages.push({
+            role: 'boxFallback', time, text: String(event.message ?? ''), agent: String(event.agent ?? run.agent ?? ''),
+            name: String(event.name ?? ''), why: String(event.why ?? ''), prompt: run.prompt ?? '', ...(run.merge ? { merge: run.merge } : {}),
           });
         } else push('error', event.message || 'Something went wrong.');
         break;

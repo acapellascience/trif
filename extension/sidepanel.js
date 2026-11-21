@@ -49,7 +49,7 @@ const ui = {
   notice: $('#notice'), paused: $('#paused'), tabLock: $('#tab-lock'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsReviewNote: $('#mods-review-note'), modsLive: $('#mods-live'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'),
 
-  noSandbox: $('#no-sandbox'),
+  noSandbox: $('#no-sandbox'), olderProtection: $('#older-protection'),
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
   robotlessLine: $('#robotless-line'), robotlessSettings: $('#robotless-settings'), modelRow: $('#model-row'), effortRow: $('#effort-row'), effort: $('#effort'),
 };
@@ -642,11 +642,57 @@ function renderNoSandbox() {
   const w = view.site ? view.chat.withoutSandbox : null;
   ui.noSandbox.hidden = !w;
   if (w) ui.noSandbox.title = `Your organization’s ${w.settingsName || w.name || 'agent'} settings apply instead of TRIF’s sandbox. Settings → Agents to change this.`;
+  // (the person chose the older protection for this chat: TRIF's full sandbox couldn't start; drafts,
+  // docs/WHOLE-BOX-STRINGS.md)
+  const older = !!(view.site && view.chat.olderProtection);
+  ui.olderProtection.hidden = !older;
+  if (older) ui.olderProtection.title = BOX_FALLBACK.chip;
+}
+
+// TRIF's full sandbox couldn't start (docs/WHOLE-BOX.md step 4): the card's words. Drafts for Tim:
+// docs/WHOLE-BOX-STRINGS.md.
+const BOX_FALLBACK = {
+  title: 'TRIF’s full sandbox couldn’t start for this chat.',
+  text: 'You can wait and send your message again, or run this chat with the older protection: your own Claude Code, with TRIF’s rules for what its commands and file tools may touch, as before you turned on the full sandbox. Claude Code itself isn’t in TRIF’s box then. New chats use the full sandbox again.',
+  wait: 'Not now',
+  go: 'Run this chat with the older protection',
+  older: 'Running this chat with the older protection: TRIF sent your message again.',
+  waited: 'Nothing ran. Send your message again when TRIF’s full sandbox is ready.',
+  chip: 'This chat runs with the older protection (TRIF’s rules for your own Claude Code), not TRIF’s full sandbox, as you chose. A new chat uses the full sandbox.',
+};
+
+/** The card: Not now (nothing runs) or Run this chat with the older protection (the chat keeps it; resend). */
+function boxFallbackCard(li, m) {
+  li.append(el('p', 'sandbox-title', BOX_FALLBACK.title));
+  if (m.text) li.append(el('p', 'sandbox-why', m.text));
+  li.append(el('p', 'sandbox-text', BOX_FALLBACK.text));
+  if (m.answered) { li.append(el('p', 'sandbox-answer', m.answered === 'older' ? BOX_FALLBACK.older : BOX_FALLBACK.waited)); return; }
+  const actions = el('div', 'sandbox-actions');
+  const error = el('p', 'note error');
+  error.hidden = true;
+  const fail = (e) => { waitBtn.disabled = goBtn.disabled = false; error.textContent = String(e?.message ?? e); error.hidden = false; };
+  const site = view.site;
+  const waitBtn = button(BOX_FALLBACK.wait, '', async () => {
+    waitBtn.disabled = goBtn.disabled = true;
+    try { await request({ type: 'chat.boxFallbackCard', site, card: m.time }); } catch (e) { fail(e); }
+  });
+  const goBtn = button(BOX_FALLBACK.go, 'primary', async () => {
+    if (view.chat.run) { fail(new Error('Wait for the chat to finish, then try again.')); return; }
+    waitBtn.disabled = goBtn.disabled = true;
+    try {
+      const tabId = view.tab?.id;
+      const runId = await startRun(m.prompt, { olderProtection: true, card: m.time, ...(m.merge ? { merge: m.merge } : {}) });
+      view.myRuns.set(runId, { prompt: m.prompt, tabId });
+    } catch (e) { fail(e); }
+  });
+  actions.append(waitBtn, goBtn);
+  li.append(actions, error);
 }
 
 function messageNode(m) {
   const li = el('li', `msg ${m.role}`);
   if (m.role === 'sandbox') { sandboxCard(li, m); return li; }
+  if (m.role === 'boxFallback') { li.classList.add('sandbox'); boxFallbackCard(li, m); return li; }
   // (Role 'login': the agent needs logging in, a plain line; the notice above has the Log in button.)
   if (m.role === 'assistant' || m.role === 'error') setMarkdown(li, m.text);
   else li.textContent = m.text;

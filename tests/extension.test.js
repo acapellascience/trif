@@ -1502,6 +1502,78 @@ test('background: an organization\'s settings instead of TRIF\'s sandbox: the ch
   } finally { bg.restore(); }
 });
 
+// docs/WHOLE-BOX.md step 4: TRIF's full sandbox couldn't start, so nothing ran: the card. "Run this chat with
+// the older protection" (from the panel page only) sends the message again with `olderProtection`, the chat
+// keeps it (its chip) until a new chat; "Not now" answers the card and nothing runs.
+test('background: TRIF\'s full sandbox unable to start: the card; the older protection for this chat only from the panel page; Not now', async () => {
+  const bg = await loadBackground();
+  try {
+    const panel = bg.connectPanel();
+    const startP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'claude' });
+    const first = await answerNative(bg.native, 'agent.start', { runId: 'r1' });
+    assert.strictEqual(first.args.olderProtection, undefined, 'not unless chosen');
+    await startP;
+    await settle(10);
+    const message = "TRIF's own copy of Claude Code is still downloading (Settings shows how far), so this chat can't run in TRIF's full sandbox yet.";
+    for (const event of [
+      { kind: 'error', reason: 'boxUnavailable', agent: 'claude', name: 'Claude Code', why: 'downloading', message },
+      { kind: 'done', ok: false, result: message, costUsd: null, changedFiles: [], sessionId: null, error: { kind: 'boxUnavailable', agent: 'claude', why: 'downloading' } },
+    ]) bg.native.emit({ type: 'agentEvent', runId: 'r1', event });
+    await settle(30);
+    let chat = bg.store['chat:x.com'];
+    assert.deepStrictEqual(chat.messages.map((m) => m.role), ['user', 'boxFallback'], 'the card, and no error line besides');
+    const card = chat.messages[1];
+    assert.deepStrictEqual([card.agent, card.why, card.text, card.prompt, card.answered], ['claude', 'downloading', message, 'hide reposts', undefined]);
+    assert.strictEqual(chat.olderProtection, undefined);
+
+    // Not from a content script nor another page using the panel's port name.
+    const before = bg.native.sent.filter((m) => m.cmd === 'agent.start').length;
+    for (const sender of [{ id: lib.EXTENSION_ID, url: 'https://x.com/home', tab: { id: 12 } }, { id: lib.EXTENSION_ID, url: `chrome-extension://${lib.EXTENSION_ID}/onboarding.html` }]) {
+      const sneaky = bg.connectPanel(sender);
+      for (const msg of [{ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'claude', olderProtection: true, card: card.time }, { type: 'chat.boxFallbackCard', site: 'x.com', card: card.time }]) {
+        const r = await sneaky.ask(msg);
+        assert.deepStrictEqual([r.ok, r.error], [false, msg.type === 'agent.start' ? 'only the side panel can choose this' : 'only the side panel can change this'], JSON.stringify(sender));
+      }
+    }
+    // (nor anything but true, from the panel either)
+    assert.strictEqual((await panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'p', agent: 'claude', olderProtection: 'yes' })).ok, false);
+    assert.strictEqual(bg.native.sent.filter((m) => m.cmd === 'agent.start').length, before);
+    assert.strictEqual(bg.store['chat:x.com'].olderProtection, undefined);
+
+    // From the panel: the message again, with olderProtection; the card answered; the chat keeps it.
+    const olderP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'hide reposts', agent: 'claude', olderProtection: true, card: card.time });
+    const req = await answerNative(bg.native, 'agent.start', { runId: 'r2' });
+    assert.strictEqual(req.args.olderProtection, true);
+    await olderP;
+    chat = bg.store['chat:x.com'];
+    assert.strictEqual(chat.messages[1].answered, 'older');
+    assert.ok(chat.olderProtection && chat.olderProtection.at);
+    bg.native.emit({ type: 'agentEvent', runId: 'r2', event: { kind: 'done', ok: true, result: 'done', costUsd: null, changedFiles: [], sessionId: 't1', olderProtection: true } });
+    await settle(30);
+    // The next message in this chat: the older protection still.
+    const nextP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'and the ads', agent: 'claude', sessionId: 't1' });
+    assert.strictEqual((await answerNative(bg.native, 'agent.start', { runId: 'r3' })).args.olderProtection, true);
+    await nextP;
+    bg.native.emit({ type: 'agentEvent', runId: 'r3', event: { kind: 'done', ok: true, result: 'ok', costUsd: null, changedFiles: [], sessionId: 't1', olderProtection: true } });
+    await settle(30);
+    // A new chat: the full sandbox again.
+    assert.strictEqual((await panel.ask({ type: 'chat.clear', site: 'x.com' })).ok, true);
+    const freshP = panel.ask({ type: 'agent.start', site: 'x.com', tabId: 12, url: 'https://x.com/home', prompt: 'new', agent: 'claude' });
+    assert.strictEqual((await answerNative(bg.native, 'agent.start', { runId: 'r4' })).args.olderProtection, undefined);
+    await freshP;
+    bg.native.emit({ type: 'agentEvent', runId: 'r4', event: { kind: 'done', ok: true, result: 'ok', costUsd: null, changedFiles: [], sessionId: 'u1' } });
+    await settle(30);
+
+    // "Not now" on a card: answered, nothing goes to the helper.
+    bg.store['chat:x.com'] = { ...bg.store['chat:x.com'], messages: [...bg.store['chat:x.com'].messages, { role: 'boxFallback', time: 78, agent: 'claude', prompt: 'p' }] };
+    const n = bg.native.sent.length;
+    assert.strictEqual((await panel.ask({ type: 'chat.boxFallbackCard', site: 'x.com', card: 78 })).ok, true);
+    assert.strictEqual(bg.store['chat:x.com'].messages.at(-1).answered, 'wait');
+    assert.strictEqual(bg.native.sent.length, n);
+    assert.strictEqual(bg.store['chat:x.com'].olderProtection, undefined);
+  } finally { bg.restore(); }
+});
+
 test('background: agent.list is forwarded; failures are replied and recorded', async () => {
   const bg = await loadBackground();
   try {

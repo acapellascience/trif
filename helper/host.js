@@ -1558,6 +1558,11 @@ function onClientLine(sock, line) {
   // (no `id`; runId is the loginId for a login), ending with the event whose kind is "done". The client
   // may send more requests on the connection meanwhile (agent.loginCode) and closes it after "done".
   if (AGENT_COMMANDS.has(cmd) || MOD_FILE_COMMANDS.has(cmd)) {
+    // ("Run this chat with the older protection" when TRIF's full sandbox can't start: the person's own
+    // click in the side panel alone, docs/WHOLE-BOX.md step 4; a terminal turns the setting off instead)
+    if (cmd === 'agent.start' && args.olderProtection !== undefined) {
+      return reply(sock, { id, ok: false, error: 'only a click in TRIF\'s side panel can run a chat with the older protection (or switch off Settings: Run chats in TRIF\'s full sandbox)' });
+    }
     runAgentCommand(cmd, args, (e, result) => {
       if (e) return reply(sock, { id, ok: false, error: e.message });
       reply(sock, { id, ok: true, result: result === undefined ? null : result });

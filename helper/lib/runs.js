@@ -534,6 +534,10 @@ function runLimits(ws, { scope, splits = [], box, screenshotsReal, modsReal, sta
  * A run's short temporary folder for Claude Code itself (runLimits agentTmp): /tmp/trif-<the last 8 of the
  * run id>, its random end (newRunId: the start of it is the time, the same for runs started together).
  */
+// sandbox-exec's own complaint (a profile it can't read or apply, sandbox_apply refused: an already
+// sandboxed helper), as opposed to the agent's output.
+const SANDBOX_EXEC_FAILED = /^sandbox-exec: /m;
+
 function shortTmp(box) {
   return path.join('/tmp', `trif-${path.basename(box).replace(/[^\w-]/g, '').slice(-8)}`);
 }
@@ -638,6 +642,10 @@ class Runs {
       phone: args.phone && typeof args.phone === 'object' && typeof args.phone.device === 'string' ? { device: args.phone.device.slice(0, 40), width: Number(args.phone.width) || null } : null,
       agentLevel: ['off', 'look', 'run', 'ask'].includes(args.agentLevel) ? args.agentLevel : null, // ("Agent on this site", from the panel)
       fix: args.fix === true, // (a run Fix it started: its changes are kept in history as a fix's)
+      // ("Run this chat with the older protection", docs/WHOLE-BOX.md step 4: the person's own choice in the
+      // side panel when TRIF's full sandbox couldn't start; host.js takes it from the extension's connection
+      // only, never from a terminal or a run)
+      olderProtection: args.olderProtection === true,
       sessionId: typeof args.sessionId === 'string' && args.sessionId ? checkWord(args.sessionId, 'session id') : null,
       model: typeof args.model === 'string' && args.model.trim() ? checkWord(args.model.trim(), 'model name') : null,
       effort: typeof args.effort === 'string' && /^[a-z]{2,12}$/.test(args.effort) ? args.effort : null, // (the panel's Effort setting)
@@ -791,23 +799,31 @@ class Runs {
     // macOS, staged Claude Code runs): the whole agent process in TRIF's own box, and the agent is TRIF's
     // pinned Claude Code (claudepin.js), the version the box was tested with, never the user's own. Checked
     // unchanged since it was downloaded.
-    run.wholeBox = require('./wholeboxsetting').isOn(ws) && process.platform === 'darwin' && run.agent === 'claude';
+    const boxOn = require('./wholeboxsetting').isOn(ws) && process.platform === 'darwin' && run.agent === 'claude';
+    run.wholeBox = boxOn && !run.olderProtection;
+    // (the setting on, and the person chose the older protection for this chat: today's sandbox, said in
+    // the logs and in `done`, so the chat stays marked)
+    if (boxOn && run.olderProtection) {
+      this.logger.info(`agent run ${run.id}: the older protection (TRIF's sandbox rules for ${adapter.name}, not TRIF's full sandbox), as chosen in the side panel`);
+      this._log(run, { webmods: 'olderProtection', time: Date.now() });
+    }
     if (run.wholeBox) {
       const cp = require('./claudepin');
       cp.checkPinned(ws.home).then((pin) => {
         if (run.stopped || run.finished) return this._finish(run, { code: null, signal: null });
-        // (WHOLE-BOX-STRINGS.md; the offer of the older protection instead: step 4)
+        // (WHOLE-BOX-STRINGS.md; the panel offers the older protection instead: _boxUnavailable)
         if (!pin || pin.problem) {
-          const message = !pin ? (cp.pinning(ws.home) ? "TRIF's own copy of Claude Code is still downloading (Settings shows how far), so this chat can't run in TRIF's full sandbox yet."
+          const downloading = !pin && cp.pinning(ws.home);
+          const message = !pin ? (downloading ? "TRIF's own copy of Claude Code is still downloading (Settings shows how far), so this chat can't run in TRIF's full sandbox yet."
             : "TRIF's own copy of Claude Code isn't downloaded yet, so this chat can't run in TRIF's full sandbox.")
             : `TRIF's own copy of Claude Code wasn't started: ${pin.problem}.`;
           if (pin) this.logger.warn(`agent run ${run.id}: the pinned Claude Code (${pin.bin}): ${pin.problem}`);
-          this._emit(run, { kind: 'error', message });
+          this._boxUnavailable(run, !pin ? (downloading ? 'downloading' : 'missing') : 'changed', message);
           return this._finish(run, { code: null, signal: null });
         }
         this._withAgent(run, { available: true, path: pin.bin, version: pin.version, note: '', pinned: true }, env);
       }, (e) => {
-        this._emit(run, { kind: 'error', message: `couldn't check TRIF's own copy of Claude Code: ${e.message}` });
+        this._boxUnavailable(run, 'check', `couldn't check TRIF's own copy of Claude Code: ${e.message}`);
         this._finish(run, { code: null, signal: null });
       });
       return;
@@ -901,6 +917,21 @@ class Runs {
       return;
     }
     watching.then(() => { if (!run.stopped && !run.finished) this._spawn(run, found, env, {}); });
+  }
+
+  /**
+   * TRIF's full sandbox couldn't start for this run (docs/WHOLE-BOX.md step 4): its pinned Claude Code
+   * isn't there yet, or changed, or sandbox-exec refused to start. An error with reason "boxUnavailable"
+   * (the panel's card offers "Run this chat with the older protection", the person's own choice; nothing
+   * runs until then) and `done.error` {kind: 'boxUnavailable'}. Never falls back by itself.
+   * why: 'downloading' | 'missing' | 'changed' | 'check' | 'start'.
+   */
+  _boxUnavailable(run, why, message) {
+    run.boxUnavailable = why;
+    this.logger.warn(`agent run ${run.id}: TRIF's full sandbox couldn't start (${why}): ${message}`);
+    this._log(run, { webmods: 'boxUnavailable', why, message, time: Date.now() });
+    this._emit(run, { kind: 'error', reason: 'boxUnavailable', agent: run.agent, name: run.adapter.name, why, message });
+    run.agentDone = run.agentDone || { ok: false, result: message };
   }
 
   // TRIF's full sandbox: start watching for the box's refusals of this run (boxrefusals.js; its tag is in
@@ -1246,6 +1277,11 @@ class Runs {
     let done;
     if (d) {
       done = { kind: 'done', ok: !!d.ok && !run.stopped && !run.timedOut, result: d.result ?? null, costUsd: d.costUsd ?? null, changedFiles, ...(Number.isFinite(d.contextTokens) ? { contextTokens: d.contextTokens } : {}), sessionId: (d.discardSession ? run.sessionId : d.sessionId || run.lastSessionId) || null };
+    } else if (run.wholeBox && !run.stopped && !run.timedOut && run.child && !run.lastSessionId && SANDBOX_EXEC_FAILED.test(run.stderr)) {
+      // (sandbox-exec itself refused, before the agent began: the box couldn't start, step 4)
+      const said = run.stderr.split('\n').find((l) => SANDBOX_EXEC_FAILED.test(l)).trim().slice(0, 300);
+      this._boxUnavailable(run, 'start', `TRIF's full sandbox couldn't start on this Mac (${said}).`);
+      done = { kind: 'done', ok: false, result: null, costUsd: null, changedFiles, sessionId: null };
     } else {
       if (!run.stopped && !run.timedOut && run.child) {
         // (without the agent's own notices that say nothing about why it stopped: adapter.stderrNoise)
@@ -1264,6 +1300,9 @@ class Runs {
     // Stopped because an organization's settings replace TRIF's sandbox: the panel's choice card is the
     // error event's; `done` says so too.
     if (run.sandboxRefused && !done.ok) done.error = { kind: 'sandbox', agent: run.agent };
+    // (TRIF's full sandbox couldn't start: the panel's card, "Run this chat with the older protection")
+    if (run.boxUnavailable && !done.ok) done.error = { kind: 'boxUnavailable', agent: run.agent, why: run.boxUnavailable };
+    if (run.olderProtection) done.olderProtection = true;
     if (run.withoutSandbox) {
       done.withoutSandbox = true;
       try { this.withoutSandbox.guard(run.consentsBefore || {}); } catch (e) { this.logger.warn(`after agent run ${run.id}: couldn't check the consents to run without TRIF's sandbox: ${e.message}`); }
@@ -1294,7 +1333,7 @@ class Runs {
       const words = refused.map((r) => br.describe(r));
       const unwatched = run.boxWatch && run.boxWatch.unavailable();
       if (all.length || unwatched) this._log(run, { webmods: 'boxRefused', refused: words, ...(routine.length ? { routine } : {}), ...(unwatched ? { unwatched } : {}), time: Date.now() });
-      if (refused.length && !done.ok && !run.stopped && !run.loginFailed) {
+      if (refused.length && !done.ok && !run.stopped && !run.loginFailed && !run.boxUnavailable) {
         this._emit(run, { kind: 'error', reason: 'box', refused: words.slice(-br.MAX), message: br.summary(refused) });
         done.boxRefused = words.slice(-br.MAX);
       }

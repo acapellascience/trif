@@ -244,9 +244,11 @@
 <!-- Over the message box: which agent and model this chat uses (sidepanel.js renderUsing; a click opens
      settings at the model), then what the agent can do on this site (renderAgentLevel: a button and a menu,
      agentsites.js). The level shows only where there's a chat to have: the site connected and the robot on.
-     Before them, "no TRIF sandbox" when this chat's agent ran under an organization's settings instead. -->
+     Before them, "no TRIF sandbox" when this chat's agent ran under an organization's settings instead, and
+     "older protection" when the person chose it for this chat because TRIF's full sandbox couldn't start. -->
 <div id="using-line" class="using-line">
   <span id="no-sandbox" class="no-sandbox" hidden>no TRIF sandbox</span>
+  <span id="older-protection" class="no-sandbox" hidden>older protection</span>
   <button id="using" class="using" type="button" hidden></button>
   <span id="agent-level-wrap" class="agent-level-wrap" hidden>
     <span class="using-sep" aria-hidden="true">·</span>

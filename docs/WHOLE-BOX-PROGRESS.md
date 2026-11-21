@@ -733,8 +733,9 @@ meet: **a merge is Tim's call**. Open questions for Tim (not blocking): round 11
   (4d1318a) **passed** (macos, windows), its `tests` run 44956109643 passed. whole-box
   [44956934539](https://github.com/acapellascience/trif/actions/runs/44956934539) (1b525e7) **passed** (macos,
   windows): `wfp events` read as an administrator, refused as the person; the stand-in run's refusals as
-  words; the Windows unit tests; win-managed-probe strict, all nine checks. The last commit's runs: below
-  (it makes the refusal checks strict).
+  words; the Windows unit tests; win-managed-probe strict, all nine checks. whole-box
+  [44957900905](https://github.com/acapellascience/trif/actions/runs/44957900905) (8708fee, the refusal checks
+  strict) **passed** (macos, windows); `tests` passed for 1b525e7 (44956934511) and 8708fee (44957900916).
 
 - Round 11: whole-box [44953977628](https://github.com/acapellascience/trif/actions/runs/44953977628) (79a5abc)
   **passed** (macos, windows): the W3 probe strict, **TRIF's WFP filters hold the loopback part**, with

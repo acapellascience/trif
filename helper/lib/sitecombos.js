@@ -120,19 +120,34 @@ function splitsOf(home) {
   return cleanSplits(Object.values(loadSwitches(home)).flatMap((v) => (v && Array.isArray(v.splits) ? v.splits : [])));
 }
 /**
+ * Which sites' mods chats on other sites may not read, as the browsers last said (visibility.js), together:
+ * a site any of them hides is hidden, one is shown only when none hides it; or null when none said. For a
+ * run that comes without its own (the side panel's always has it).
+ */
+function visibilityOf(home) {
+  const all = Object.values(loadSwitches(home)).map((v) => v && v.visibility).filter((v) => v && typeof v === 'object');
+  if (!all.length) return null;
+  const union = (k) => [...new Set(all.flatMap((v) => (Array.isArray(v[k]) ? v[k] : [])))];
+  const hidden = union('hidden');
+  return require('./visibility').cleanVisibility({ hidden, shown: union('shown').filter((x) => !hidden.includes(x)), sensitive: union('sensitive') });
+}
+/**
  * Records what's off in one browser (by its key), and (`splits`) the sensitive sites of their own it knows of.
  * Returns {changed, switchedOn: [ids that were off everywhere and are on now]}, which it also adds to
  * switched-on.json.
  */
-function saveSwitches(home, browser, known, off, splits = null) {
+function saveSwitches(home, browser, known, off, splits = null, visibility = undefined) {
   const wasOff = offFn(home);
   const all = loadSwitches(home);
   const now = Date.now();
   for (const [k, v] of Object.entries(all)) if (!v || now - Number(v.at) > SWITCHES_DAYS * 86400000) delete all[k];
   const was = all[browser];
   const entry = { known: [...new Set(known)].sort(), off: [...new Set(off)].sort(), ...(splits !== null || (was && was.splits) ? { splits: cleanSplits(splits !== null ? splits : was.splits) } : {}) };
+  // (and which sites' mods chats on other sites may not read, visibility.js: for a run that comes without it)
+  const vis = visibility !== undefined ? require('./visibility').cleanVisibility(visibility) : (was && was.visibility) || null;
+  if (vis) entry.visibility = vis;
   const same = was && JSON.stringify(was.known) === JSON.stringify(entry.known) && JSON.stringify(was.off) === JSON.stringify(entry.off)
-    && JSON.stringify(was.splits || []) === JSON.stringify(entry.splits || []);
+    && JSON.stringify(was.splits || []) === JSON.stringify(entry.splits || []) && JSON.stringify(was.visibility || null) === JSON.stringify(entry.visibility || null);
   all[browser] = { at: now, ...entry };
   try {
     const tmp = `${switchesFile(home)}.${process.pid}.tmp`;
@@ -247,5 +262,5 @@ function siteOkFor(mod, mods, allowed = {}, splits = []) {
 
 module.exports = {
   PAGE_WIDE, comboOf, sharesSite, refusedPairs, shapeOf, sitesOf, siteMods, unionOf, keyFor, parseKey, approvedUnion, holding, reach, listsFor, siteNeeds, siteNeed, siteOkFor, clickWordsOf, FLAGS, HEADS,
-  loadSwitches, saveSwitches, offFn, splitsOf, splitOf, switchesFile, loadSwitched, saveSwitchedOn, switchedFile,
+  loadSwitches, saveSwitches, offFn, splitsOf, visibilityOf, splitOf, switchesFile, loadSwitched, saveSwitchedOn, switchedFile,
 };

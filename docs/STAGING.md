@@ -25,6 +25,7 @@ the run and removed when it ends:
   .shipped/                       a copy (merge runs read it)
   sites/<own folder>/             every file, files/ included: the run's site's folders, all-sites/
   sites/<other site>/             every file but files/, to read: read-only to the sandboxes
+                                  (not there at all: a site whose mods chats on other sites may not read)
 ```
 
 The agent's view doesn't change: the same files at the same relative places, `sites/<site>/<mod>.js`, and
@@ -55,6 +56,47 @@ Resuming a chat works from a new working folder: checked with Claude Code 2.1.31
 session wherever it was started and appends to it there; the empty folder it makes in `~/.claude/projects`
 for each later run's working folder is removed after the run, `claude.js` afterRun) and Codex 0.166 (`exec
 resume` takes the current folder as the session's).
+
+## Other sites' mods: who may read them
+
+A run reads other sites' mods (an agent looks at the mods its change will meet), never changes them. Per
+site, the user chooses whether **chats on other sites can read this site's mods**: on by default, off by
+default for a sensitive site (TRIF's list, extension/agentsites.js, or the user's, each sensitive host a site
+of its own). The panel's ⋯ menu over a site's mods has it, and Settings lists the sensitive sites with mods
+and every site chosen for (strings: docs/MOD-VISIBILITY-STRINGS.md). A change applies to the next run: a run
+that's working keeps the copy it started with (the panel says so).
+
+Off is enforced by absence: such a site isn't in another site's run at all, so whatever the run looks with
+(`trif mods`, Read, Glob, Grep, Codex's shell and tools, the Windows fence's file tools) has nothing to find.
+
+- **The copy** (`stage.js`, `hidden`): the site's folder isn't made (not even its name), nor its phone twin
+  (`phone~<site>`) or a `www.` folder of it; nothing in them is followed into the copy later, and a file the
+  run writes there is refused as another site's.
+- **The workspace** (`runs.js hiddenPaths`): runs on macOS read the workspace whole, so for a run that hides
+  a site that has mods, the sandboxes also deny the mods folder itself (everything the run may read of it is
+  in its copy, as on Windows, whose fence only ever gives a run its copy), the hidden sites' `history/` and
+  `trash/` folders, and TRIF's state files that name every site's mods (`held.json`, `allowed.json`,
+  `seen.json`, `switches.json`, `switched-on.json`, `origins.json`, `imported.json`, `active-runs`). Codex's
+  profile denies them (a more specific path wins); Claude Code gets them as Read rules and in its sandbox's
+  `denyRead` (inside the readable workspace, where its sandbox lets `allowRead` win: the Read rules, its
+  refusal of commands outside the run's folder, and `trif`'s own path check are what hold there).
+- **What the helper tells the run**: `ping` and `mods` were its own site's already (docs/SECURITY.md); the
+  extension's `status`, as it goes back to a run, loses the hidden sites (host.js `statusForRun`: their mods'
+  ids and switches, and their names in the site lists, a mod's off-sites, groups off, origins and the mods on
+  the run's page). `trif mods` in a run takes its holds from the helper, not from `held.json`; `trif restore`
+  (the trash) and `trif history` list only sites whose folder is in the copy.
+
+What a run keeps, whatever the choices: its own site's folders (a part of it, `files/` included), its phone
+twin (a phone view's run: its desktop folder too), the sites it's part of (a run on mail.google.com sees
+google.com's mods, which run there, even with google.com set off), and `all-sites/`. A run on a sensitive
+site works as before on its own site, and reads the ordinary sites' mods like any run.
+
+The rule is `helper/lib/visibility.js` (`hiddenFrom`). The extension sends the user's choices and the
+sensitive list's patterns with each run (agent.start `visibility`: `{hidden, shown, sensitive}`), and with
+each `modsApplied`, which the helper keeps per browser in `switches.json` for a run that comes without its
+own (`trif agent` from a terminal, a phone's): a site any browser hides is hidden. Without any (an older
+extension), every site's mods are readable, as before. Tests: `tests/mod-visibility.test.js`, and the real
+agents in `tests/run-sandbox.test.js` (macOS) and the Windows fence tests.
 
 ## The sync
 

@@ -56,11 +56,20 @@ managed policy; a normal run works; the fallback happens only on the person's ch
 - [x] **4. Informed fallback, never silent.** *(round 6)* If the box can't start, nothing runs; the panel's
   card offers "Run this chat with the older protection" as the person's own choice (the chat keeps it
   until a new chat; its chip). Draft words in WHOLE-BOX-STRINGS.md.
-- [ ] **8. The network relay.** CONNECT-only to Anthropic's hosts on 443 (plus org-named hosts, step 5), no
-  TLS termination; own unit tests + a fuzz-style test of its parsing; wired into runs for token logins.
+- [x] **8. The network relay.** *(round 7)* `helper/lib/relay.js`: CONNECT-only to Anthropic's hosts on 443
+  (plus org-named hosts, step 5), no TLS termination; strict parsing; own unit tests + fuzz-style tests of
+  its parsing and of the running relay; token runs use it (wholebox.startProxy is now the relay).
 - [ ] **5. Organisations' policies inside the box.** Managed settings already readable; hooks run inside
   the box; network allowed only to the hosts those settings name (OTEL endpoints etc.) through the relay.
   docs/IT-ADMINS.md: what the box does, what it allows, how an admin sees/controls it.
+  - [x] **5a.** *(round 7)* claude-managed.js `orgNetwork` (managed `env` endpoints, HTTP hooks' URLs →
+    the relay or a port on this computer; plain http elsewhere and their own proxies noted; command hooks'
+    scripts readable); runs.js gives them to the relay and the box, logs `orgNetwork`; a key-signed run
+    gets the relay too when they name hosts. docs/IT-ADMINS.md (draft).
+  - [ ] **5b.** CI's first look (round 7) answered how Claude Code routes them (Findings): make the org
+    test strict on it, then the open points: managed `apiKeyHelper`, Bedrock /
+    Vertex credentials, a managed HTTPS_PROXY (chain the relay to it?), plain-http collectors; resuming a
+    chat across modes (round 6's finding).
 - [ ] **2. Daily CI against the latest Claude Code** (scheduled workflow), so a break is known before the
   pin moves; and the pin refresh as a release.js step gated on the box tests.
 
@@ -228,6 +237,48 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   left for a later step: the helper could start a fresh session when the session isn't in the config
   folder the run uses.
 
+### Round 7 (11-21): step 8 (the relay), step 5a (organizations' network, hooks, IT-ADMINS.md)
+
+- **8:** `helper/lib/relay.js`, replacing the allowlist proxy (wholebox.startProxy now starts it; same
+  `seen`, so the refusal errors of step 3 work unchanged). CONNECT only, no TLS termination (bytes spliced
+  after the 200). Strict parsing, `parseHead` (pure): `CONNECT host:port HTTP/1.x`, CRLF only, `name:
+  value` headers with no control characters and no folding, ≤ 8 KB and 64 lines, checked before the head
+  ends too; not CONNECT → 405 at once (an absolute URL's host is kept, for the error). Targets
+  (`parseTarget`): DNS names in lower case, labels checked, no trailing dot, no number-like names
+  (127.1, 2130706433, 0x7f.0.0.1), dotted-quad IPv4, bracketed IPv6 in one spelling; port 1–65535, no
+  leading zero. Rules: exact host and port, no wildcards (`{host, port, local?}`). The name is looked
+  up once and the relay connects to the checked address; an Anthropic host resolving to loopback,
+  unspecified, link-local or multicast addresses is refused (`local address`, a refusal); an org host
+  may be marked `local`. Limits: 10 s for the head and for connecting, 5 min idle, 64 tunnels. `seen`:
+  {target, allowed, reason, failed, up, down, address}, at most 500; a listed host that can't be
+  reached is `failed`, not a refusal. boxrefusals: "a connection to {host:port} (an address on this
+  computer)", "a request its network relay couldn't read" (drafts, WHOLE-BOX-STRINGS.md).
+- **5a:** claude-managed.js `orgNetwork(settings)` and `check().network`: managed `env` endpoints
+  (`ANTHROPIC_BASE_URL`, the Bedrock/Vertex/Foundry base URLs, `OTEL_EXPORTER_OTLP_*ENDPOINT`) and HTTP
+  hooks' URLs: https → the relay (that host and port); this computer → that port in the box's profile
+  (wholebox.wrap `ports`); plain http elsewhere, not-URLs and their own proxy variables → `notes` (the box
+  refuses them; the run's log says so); command hooks' absolute paths that are files → readable in the box.
+  runs.js: `run.orgNetwork`, an `orgNetwork` log line; claudetoken.prepareBoxed `allow` (token runs:
+  Anthropic + theirs; key runs: a relay with theirs only, `HTTPS_PROXY`; always `NO_PROXY` for this
+  computer). Hooks run in the box already (Claude Code's children); nothing else needed for that.
+- docs/IT-ADMINS.md (draft): what the box does, what it lets through, managed settings in it, what an admin
+  sees (run logs' `orgSettings` / `orgNetwork` / `noShell` / `boxRefused`, helper.log), what's not yet there.
+- **Races (cheap, done):** a run's `done` log line now has `usage` (input/output/cache tokens, turns,
+  Claude Code's own ms and API ms: claude.js `usageOf`), `wallMs` and `boxed` (and `olderProtection`). Tim's
+  race: the same prompt with the setting on and off, then compare the two runs' `done` lines in
+  `~/Library/Application Support/TRIF/runs/<id>.jsonl`.
+- The pty test's flake (rounds 6–7: "hung (typed)"): the stand-in program set raw mode after printing its
+  prompt, so text typed at once was still cooked (Return → newline) and it waited for ever. Fixed in the
+  test; the real setup-token flow types much later.
+- Tests: tests/relay.test.js (8: targets, parseHead, local addresses, the server's tunnels and refusals, DNS
+  to this computer, limits/cap/close, a fuzz of the parser (20k inputs, seeded; prefix-consistency: a
+  request split anywhere can't read as another) and of the running relay (connects only to listed
+  targets, every connection answered or closed, still works after)); tests/wholebox-org.test.js (4);
+  claudetoken.test.js (prepareBoxed with org hosts). CI only (whole-box.yml): the pinned Claude Code in the
+  box through the relay to the real api.anthropic.com with a made-up token (Anthropic refuses it: proves
+  a real TLS session through the relay); the relay fuzzed with 200k inputs; managed settings with hooks
+  and telemetry (`TRIF_TEST_MANAGED=org`). Locally ~380 tests across the suites, no regressions.
+
 ## For Tim (round 4): answered 11-21, "yes, the recommendation" (done in round 5, step 7a)
 
 **Should a chat in TRIF's full sandbox still ask "Use Claude Code anyway" when a company's Claude Code
@@ -252,6 +303,22 @@ company's settings loosen Claude Code's rules; TRIF's full sandbox still holds")
 question with nothing to decide.
 
 ## Findings
+
+- **Round 7, the relay on the real network** (CI run 44882307668, pinned 2.1.330 in the box, a made-up
+  setup-token token, `HTTPS_PROXY` = the relay): Claude Code went to `api.anthropic.com:443` (160.79.104.10)
+  through the relay, three tunnels, a real TLS session both ways (≈2 KB up, 4.9 KB down each; one with
+  the request, 113 KB up), and ended in 1.2 s with **"Failed to authenticate. API Error: 401 OAuth access
+  token is invalid."** Nothing else was asked for. So Claude Code honours `HTTPS_PROXY` with
+  `CLAUDE_CODE_OAUTH_TOKEN`, and the relay carries it untouched.
+- **Round 7, an organization's hooks and telemetry in the box** (same run, `TRIF_TEST_MANAGED=org`): the
+  command hooks ran inside the box (SessionStart, PreToolUse twice; each wrote its line in the run's copy;
+  reading `~/.ssh/id_ed25519` → "Operation not permitted"; `curl https://example.com` → the relay
+  refused example.com:443, not named); **the HTTP hook went through the relay** (CONNECT
+  hook.trif-ci.invalid:443, allowed, no address: a made-up name); **OTLP logs over https went through the
+  relay** (CONNECT otel.trif-ci.invalid:4318); **OTLP metrics to `http://127.0.0.1:47318` reached the
+  stand-in collector** (5.6 KB) through the port the box opened. Claude Code's exporters and HTTP hooks
+  honour `HTTPS_PROXY`/`NO_PROXY`.
+
 
 - **setup-token under a terminal** (round 3 CI probe, pinned 2.1.330): prints Ink's "Welcome to Claude Code"
   logo, "This will guide you through long-lived (1-year) auth token setup for your Claude account. Claude
@@ -359,13 +426,23 @@ question with nothing to decide.
 
 ## Next
 
-Round 7: step 8 (the network relay: CONNECT-only to Anthropic's hosts on 443, no TLS termination; its own
-unit tests and a fuzz-style test of its parsing; wired into token runs in place of the allowlist proxy),
-then step 5 (organisations' policies: managed `env` such as ANTHROPIC_BASE_URL and OTEL endpoints → those
-hosts through the relay; hooks inside the box; docs/IT-ADMINS.md). The resume-across-modes finding (round 6)
-fits with step 5 or after.
+Round 8: step 5b. Read CI's org run (what the pinned Claude Code sends where: telemetry to the local
+collector and through the relay, the HTTP hook, the command hook's lines) and make that test strict; then
+the open points: an org's own proxy in managed `env` (chain the relay to it, or a clear stop), `apiKeyHelper`
+and cloud credentials, plain-http collectors elsewhere (only a stop with words, unless Tim wants an
+http-forwarding relay: that would be a new decision), resuming a chat across modes (round 6). Then step 2
+(daily CI against the latest Claude Code; the pin refresh in release.js).
 
 ## CI
+
+- Round 7: [run 44882307668](https://github.com/acapellascience/trif/actions/runs/44882307668) (whole-box.yml,
+  f92935c) macos **passed**: unit tests (relay, wholebox-org added); **the pinned Claude Code in the box
+  through the relay to the real Anthropic (401 for the made-up token)**; the relay fuzzed with 200k inputs
+  (4000 live connections); every earlier step unchanged; **managed hooks and telemetry in the box**
+  (Findings). windows still running at push time (unchanged this round). Before it, 8f8e7e0's run
+  (44881477614) failed only on the pty test's race (fixed, a36713a), and a36713a's (44881963224) on the
+  real-network test not letting the box read its agent folder (fixed, f92935c), then was cancelled by the
+  next push. The repo's `tests` workflow passed for 8f8e7e0, a36713a and f92935c (44882307647).
 
 - Round 6: [run 44879684946](https://github.com/acapellascience/trif/actions/runs/44879684946) (whole-box.yml,
   9668cc9: 3b and 4) **passed** (macos and windows): **the LLM-gateway run failed in 1.6 s with "TRIF's full

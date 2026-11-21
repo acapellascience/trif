@@ -321,12 +321,13 @@ protection", draft words).
   workflow: [run 44876684031](https://github.com/acapellascience/trif/actions/runs/44876684031) passed.
   3a: [run 44877859928](https://github.com/acapellascience/trif/actions/runs/44877859928) (78ccb22): macos
   **passed**: the real-Seatbelt unit test (tagged reports through `log stream`), and every boxed
-  side-panel run's refusals read back into its log (printed: Findings); windows still running at the
-  time of writing. Before it, 1836fdd's macos failed the real-Seatbelt test (a cold runner's first `log
+  side-panel run's refusals read back into its log (printed: Findings); windows passed (unchanged). Before it, 1836fdd's macos failed the real-Seatbelt test (a cold runner's first `log
   stream`: now waits for its header up to 15 s in that test, 3 s in runs) and c4f6cbd's the
   `loosen-shell` check of the Write's report (none came: not every refusal is reported). The repo's
   `tests` workflow failed on the real-Seatbelt test for 1836fdd–78ccb22 (no reports under the whole
-  suite's load): strict only in whole-box.yml from the last push of the round.
+  suite's load): strict only in whole-box.yml since 6256e9f, whose `tests` run
+  [44878306764](https://github.com/acapellascience/trif/actions/runs/44878306764) passed (its whole-box run,
+  44878306779, still running at the end of the round: the same code as 78ccb22 bar that test's skip).
 
 - Round 4, [run 44874659962](https://github.com/acapellascience/trif/actions/runs/44874659962) (whole-box.yml,
   18ca3f6): macos **passed**: the unit tests (wholebox-noshell added); the earlier steps unchanged; **with

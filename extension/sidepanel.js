@@ -4679,7 +4679,7 @@ function notesToggle(container, notes) {
     const md = el('div', 'md');
     setMarkdown(md, unwrapMarkdown(notes));
     container.append(md);
-    e.target.textContent = 'Hide';
+    e.target.textContent = 'Hide what’s new';
   });
 }
 

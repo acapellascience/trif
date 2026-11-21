@@ -49,9 +49,9 @@ managed policy; a normal run works; the fallback happens only on the person's ch
     (started before the agent) collects Seatbelt's reports; with the allowlist proxy's refusals, a failed
     boxed run gets an error line naming them (reason "box"; `done.boxRefused`), and every boxed run logs
     them (`boxRefused`). Draft words in WHOLE-BOX-STRINGS.md.
-  - [ ] **3b.** A real failed run on CI (a run the box makes fail, e.g. a host an organization's settings
-    name, step 5), and the noise a normal run is refused along the way (round 5's CI prints it) left out
-    of the error if it misleads. The relay's refusals (step 8) the same way.
+  - [ ] **3b.** What every boxed run is refused (round 5's CI list, Findings) left out of the error,
+    kept in the log; a real failed run on CI (a run the box makes fail, e.g. a host an organization's
+    settings name, step 5); the relay's refusals (step 8) the same way.
 - [ ] **4. Informed fallback, never silent.** If the box can't start, the panel offers "Run this chat with
   the older protection" as the person's own choice. Draft the words.
 - [ ] **8. The network relay.** CONNECT-only to Anthropic's hosts on 443 (plus org-named hosts, step 5), no
@@ -272,7 +272,7 @@ question with nothing to decide.
   any-command); `breaks` still stop. Outside the box unchanged.
 - **3a:** helper/lib/boxrefusals.js (`tagFor`, `parseReport`, `describe`, `summary`, `watch`, `fromProxy`);
   wholebox.js `macProfile({tag})`: `(deny default (with message "<tag>"))` and the explicit denies too;
-  runs.js `_watchBox` (before prepare; the agent starts once `log stream` reads, ≤1.5 s), `_boxRefusals`,
+  runs.js `_watchBox` (before prepare; the agent starts once `log stream` reads, ≤3 s), `_boxRefusals`,
   `_finish` (the error line, `done.boxRefused`, the log line, `unwatched` when `log stream` can't run);
   a failed boxed run waits 500 ms after exit for the last reports. claudetoken.prepareBoxed hands over
   the proxy's `seen`.
@@ -285,6 +285,17 @@ question with nothing to decide.
   (sandbox off, every folder, acceptEdits, no other commands) → not asked, a shell, the box still refusing
   config.json, the keychain file, a write to the private folder; both now also check the box's refusals
   in the run's log and print them. Locally 366 tests across the suites (one skip), no regressions.
+- **What a boxed run that worked was refused along the way** (CI, run 44877625810, real pinned 2.1.330,
+  the `loosen-shell` and no-shell runs): `security` (Claude Code checks the keychain) reading
+  ~/.CFUserTextEncoding and the global preferences, and the services com.apple.analyticsd /
+  SecurityServer / securityd.xpc; Claude Code itself: `ipc-posix-shm-read-data
+  apple.shm.notification_center`, com.apple.FSEvents, listening on a socket in its temp folder
+  (`cc-socks/<pid>.sock`), writing its config folder's `plugins` and ~/Library/Caches/claude-cli-nodejs;
+  `git` (Xcode's shim) reading Xcode's libxcrun; `zsh` a temp file in /private/tmp; `trif` (node) reading
+  config.json, ~/.trif/preinstalled.json, helper.log. None stopped the run, so a failed run's error
+  would name these too: **step 3b leaves the ones every run has out of the error** (kept in the log).
+  Also: **not every refusal is reported** (the Write tool's refused write into the private folder had no
+  report; the ones around it did), so the error names what was seen, best effort.
 - Finding: `log stream` works for an administrator account without sudo (Tim's Mac, here); its first
   line "Filtering the log data using …" says it's reading. A report reads "Sandbox: cat(16354)
   deny(1) file-read-data /Users/…/.zshrc" followed by the profile's message on its own line. Noise in

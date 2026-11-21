@@ -11,6 +11,9 @@
 //     on, its errors as before.
 //   - The allowlist proxy's refusals (wholebox.js startProxy `seen`: a CONNECT to a host not on its list).
 //
+// Reports are best effort: the kernel doesn't report every refusal (CI, round 5: a Write tool's refused
+// write had none, the refusals around it did), and the same operation on the same file is kept once.
+//
 // Nothing here is secret (paths and host names the box refused), but paths in the home folder are shown
 // with ~ and the list is capped.
 
@@ -72,7 +75,7 @@ function summary(refusals, opts = {}) {
  * resolves true once `log stream` is reading (or false if it can't: `unavailable` says why), so the run
  * can start after it and none of its reports are missed. `spawnLog` (tests): instead of /usr/bin/log.
  */
-function watch(tag, { spawnLog = (args) => spawn('/usr/bin/log', args, { stdio: ['ignore', 'pipe', 'pipe'] }), readyMs = 1500 } = {}) {
+function watch(tag, { spawnLog = (args) => spawn('/usr/bin/log', args, { stdio: ['ignore', 'pipe', 'pipe'] }), readyMs = 3000 } = {}) {
   const found = [];
   const keys = new Set();
   let child = null;

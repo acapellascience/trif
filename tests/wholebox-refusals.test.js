@@ -99,13 +99,13 @@ test('Seatbelt for real: the run\'s tag in its reports, read back as this run\'s
   const profile = wb.macProfile({ write: [box], readOnly: [path.join(box, 'ro')], tag, home: box });
   assert.match(profile, new RegExp(`\\(deny default \\(with message "${tag}"\\)\\)`));
   fs.writeFileSync(path.join(box, 'p.sb'), profile);
-  const w = br.watch(tag);
+  const w = br.watch(tag, { readyMs: 15000 }); // (a fresh CI runner's first `log stream` is slow to start)
   if (!(await w.ready)) { w.close(); t.skip(`log stream refused (${w.unavailable()}): not an administrator account?`); return; }
   const r = spawnSync('/usr/bin/sandbox-exec', ['-f', path.join(box, 'p.sb'), '/bin/sh', '-c', `cat ${path.join(outside, 'secret.txt')}; echo x > ${path.join(box, 'ro', 'y')}; echo ok > ${path.join(box, 'ok')}`], { encoding: 'utf8', timeout: 20000 });
   assert.ok(!r.stdout.includes('SECRET'), r.stdout);
   assert.equal(fs.readFileSync(path.join(box, 'ok'), 'utf8'), 'ok\n', `the box let the shell write its own folder: ${r.stderr}`);
   // (reports arrive a moment later)
-  for (let i = 0; i < 40 && w.refusals().length < 2; i++) await new Promise((res) => setTimeout(res, 100));
+  for (let i = 0; i < 100 && w.refusals().length < 2; i++) await new Promise((res) => setTimeout(res, 100));
   w.close();
   const got = w.refusals();
   const info = `${JSON.stringify(got)} (log stream: ${w.unavailable() || 'running'}; the shell: ${r.status} ${r.stderr.trim()})`;

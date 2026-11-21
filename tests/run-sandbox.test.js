@@ -465,7 +465,8 @@ test('Claude Code in TRIF\'s full sandbox, managed settings that only loosen its
   assert.ok(offered.includes('Bash') && !offered.includes('mcp__trif__trif'), `a shell: ${[...new Set(offered)].join(', ')}`);
   assert.ok(!runLog(f, runId).some((x) => x.webmods === 'noShell'), info);
   notAsked(f, runId, events, info);
-  boxSaw(f, runId, [/^reading .*config\.json/, /^writing .*probe\.txt/, /^reading .*login\.keychain-db/], info);
+  // (not every refusal is reported: round 5's CI had none for the Write; boxrefusals.js)
+  boxSaw(f, runId, [/^reading .*config\.json/, /^reading .*login\.keychain-db/, /^writing .*other\.net/], info);
   assert.ok(!JSON.stringify(f.anthropic.requests.map((x) => x.body)).includes(SECRET), `something secret reached the model:\n${info}`);
 });
 

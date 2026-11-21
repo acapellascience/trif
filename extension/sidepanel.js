@@ -658,6 +658,9 @@ const BOX_FALLBACK = {
   go: 'Run this chat with the older protection',
   older: 'Running this chat with the older protection: TRIF sent your message again.',
   waited: 'Nothing ran. Send your message again when TRIF’s full sandbox is ready.',
+  // (round 8: the organization's settings, not something that will pass: why 'orgProxy' / 'orgSignIn')
+  textOrg: 'You can run this chat with the older protection: your own Claude Code, with TRIF’s rules for what its commands and file tools may touch, as before you turned on the full sandbox. Claude Code itself isn’t in TRIF’s box then. New chats try the full sandbox again.',
+  waitedOrg: 'Nothing ran.',
   chip: 'This chat runs with the older protection (TRIF’s rules for your own Claude Code), not TRIF’s full sandbox, as you chose. A new chat uses the full sandbox.',
 };
 
@@ -665,8 +668,9 @@ const BOX_FALLBACK = {
 function boxFallbackCard(li, m) {
   li.append(el('p', 'sandbox-title', BOX_FALLBACK.title));
   if (m.text) li.append(el('p', 'sandbox-why', m.text));
-  li.append(el('p', 'sandbox-text', BOX_FALLBACK.text));
-  if (m.answered) { li.append(el('p', 'sandbox-answer', m.answered === 'older' ? BOX_FALLBACK.older : BOX_FALLBACK.waited)); return; }
+  const org = /^org/.test(m.why || '');
+  li.append(el('p', 'sandbox-text', org ? BOX_FALLBACK.textOrg : BOX_FALLBACK.text));
+  if (m.answered) { li.append(el('p', 'sandbox-answer', m.answered === 'older' ? BOX_FALLBACK.older : org ? BOX_FALLBACK.waitedOrg : BOX_FALLBACK.waited)); return; }
   const actions = el('div', 'sandbox-actions');
   const error = el('p', 'note error');
   error.hidden = true;

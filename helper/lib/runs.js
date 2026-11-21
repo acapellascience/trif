@@ -705,8 +705,14 @@ class Runs {
       // (TRIF's full sandbox signed in with the setup-token token, and Claude Code refused it: expired, or
       // revoked. WHOLE-BOX-STRINGS.md.)
       if (run.wholeBox && run.state.signIn === 'token') event = { ...event, message: 'Claude Code refused TRIF\'s full sandbox sign-in (it may have expired, or been signed out elsewhere): sign in again.' };
-      run.loginFailed = event.message;
-      event = { ...event, agent: run.agent, ...(run.wholeBox ? { mode: 'token' } : {}) };
+      // (round 8: the organization's own sign-in, from their managed settings: TRIF's sign-in wouldn't help)
+      const org = run.wholeBox && run.state.signIn === 'organization';
+      // (a plain error, not the panel's sign-in notice)
+      if (org) event = { kind: 'error', message: 'Claude Code couldn\'t sign in the way your organization\'s Claude Code settings choose (their own sign-in, which outranks TRIF\'s) inside TRIF\'s full sandbox. If it needs something on this computer the sandbox doesn\'t open, switch off “Run chats in TRIF\'s full sandbox” in Settings, or ask your IT team.' };
+      else {
+        run.loginFailed = event.message;
+        event = { ...event, agent: run.agent, ...(run.wholeBox ? { mode: 'token' } : {}) };
+      }
     }
     try { this.onEvent(run.id, event); } catch (e) { this.logger.error(`agent event handler: ${e.message}`); }
   }
@@ -878,11 +884,17 @@ class Runs {
         }
         // (step 5: what they name on the network, through TRIF's relay or a port on this computer; the rest
         // noted, refused by the box: claude-managed.js orgNetwork)
-        const net = pre.network || { relay: [], ports: [], notes: [], files: [] };
+        const net = { relay: [], ports: [], notes: [], files: [], stops: [], signIn: [], ...(pre.network || {}) };
         run.orgNetwork = net;
-        if (net.relay.length || net.ports.length || net.notes.length || net.files.length) {
-          this._log(run, { webmods: 'orgNetwork', relay: net.relay.map((x) => `${x.host}:${x.port} (${x.from})`), ports: net.ports.map((x) => `${x.port} (${x.from})`), notes: net.notes, files: net.files, from: pre.sources.join(', '), time: Date.now() });
+        if (net.relay.length || net.ports.length || net.notes.length || net.files.length || net.stops.length || net.signIn.length) {
+          this._log(run, { webmods: 'orgNetwork', relay: net.relay.map((x) => `${x.host}:${x.port} (${x.from})`), ports: net.ports.map((x) => `${x.port} (${x.from})`), notes: net.notes, files: net.files, ...(net.signIn.length ? { signIn: net.signIn.map((x) => x.from) } : {}), ...(net.stops.length ? { stops: net.stops } : {}), from: pre.sources.join(', '), time: Date.now() });
           if (net.notes.length) this.logger.info(`agent run ${run.id}: ${adapter.name}'s managed settings name ${net.notes.map((x) => `${x.url} (${x.from}: ${x.why})`).join('; ')}: TRIF's full sandbox doesn't let those through`);
+        }
+        // (round 8: their own proxy, or a cloud sign-in from this computer's files, can't work in the box:
+        // nothing starts; the panel's card offers the older protection, the person's own choice)
+        if (net.stops.length && adapter.boxOrgMessage) {
+          this._boxUnavailable(run, net.stops.some((x) => x.kind === 'proxy') ? 'orgProxy' : 'orgSignIn', adapter.boxOrgMessage(net.stops));
+          return this._finish(run, { code: null, signal: null });
         }
         if (pre.loosens.length) {
           this.logger.info(`agent run ${run.id}: ${adapter.name}'s managed settings (${pre.sources.join(', ')}) ${pre.loosens.join('; ')}: in TRIF's full sandbox, which holds them`);
@@ -897,7 +909,7 @@ class Runs {
     // now, else the sign-in from `claude setup-token` (claudetoken.js prepareBoxed: Claude Code's own
     // login is out of the box's reach), or none: the run says so, the panel offers the sign-in.
     const prepare = run.wholeBox && adapter.id === 'claude' && adapter.prepare
-      ? (o) => require('./claudetoken').prepareBoxed({ keyPrep: () => adapter.prepare(o), allow: (run.orgNetwork && run.orgNetwork.relay) || [] })
+      ? (o) => require('./claudetoken').prepareBoxed({ keyPrep: () => adapter.prepare(o), allow: (run.orgNetwork && run.orgNetwork.relay) || [], orgSignIn: !!(run.orgNetwork && run.orgNetwork.signIn && run.orgNetwork.signIn.length) })
       : adapter.prepare;
     // (TRIF's full sandbox: what the box refuses is watched from before the agent starts, boxrefusals.js)
     const watching = run.wholeBox ? this._watchBox(run) : Promise.resolve();
@@ -912,7 +924,7 @@ class Runs {
         if (om) this._log(run, { webmods: 'openModel', provider: om.provider, model: om.model, baseUrl: om.baseUrl, key: om.keyed ? 'keyring' : null, keyProxy: !!run.cleanup });
         const ak = run.state.apiKey;
         if (ak) this._log(run, { webmods: 'apiKey', account: ak.account, source: ak.source, keyProxy: !!run.cleanup });
-        if (run.state.signIn) this._log(run, { webmods: 'signIn', kind: run.state.signIn, source: 'keyring' }); // (never the token)
+        if (run.state.signIn) this._log(run, { webmods: 'signIn', kind: run.state.signIn, source: run.state.signIn === 'organization' ? 'managed settings' : 'keyring' }); // (never the token)
         if (prep && prep.proxySeen) run.proxySeen = prep.proxySeen;
         const runEnv = { ...env, ...((prep && prep.env) || {}) };
         for (const k of (prep && prep.unsetEnv) || []) delete runEnv[k];
@@ -932,7 +944,7 @@ class Runs {
    * isn't there yet, or changed, or sandbox-exec refused to start. An error with reason "boxUnavailable"
    * (the panel's card offers "Run this chat with the older protection", the person's own choice; nothing
    * runs until then) and `done.error` {kind: 'boxUnavailable'}. Never falls back by itself.
-   * why: 'downloading' | 'missing' | 'changed' | 'check' | 'start'.
+   * why: 'downloading' | 'missing' | 'changed' | 'check' | 'start' | 'orgProxy' | 'orgSignIn'.
    */
   _boxUnavailable(run, why, message) {
     run.boxUnavailable = why;
@@ -962,12 +974,6 @@ class Runs {
   _spawn(run, found, env, options) {
     const { ws, adapter } = run;
 
-    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, phone: run.phone, noShell: !!run.noShell };
-    let prompt = run.prompt;
-    let context = null;
-    const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));
-    if (adapter.systemPrompt) context = agents.contextText(ctx) + extra;
-    else prompt = `${run.sessionId ? agents.reminderText(ctx) : agents.contextText(ctx) + extra}\n\n${prompt}`;
     let limits;
     try {
       limits = runLimits(ws, run);
@@ -976,6 +982,24 @@ class Runs {
       this._emit(run, { kind: 'error', message: e.message });
       return this._finish(run, { code: null, signal: null });
     }
+    // (a chat that moved between TRIF's full sandbox and the older protection: its session where this run's
+    // Claude Code looks for it, or a new one; claudesessions.js)
+    if (run.sessionId && adapter.id === 'claude' && limits.privateDir) {
+      try {
+        const st = require('./claudesessions').settle({ sessionId: run.sessionId, boxed: !!run.wholeBox, boxConfig: path.join(limits.privateDir, 'agent-config', 'claude'), userConfig: env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude') });
+        if (st.action === 'copied' || st.action === 'fresh') {
+          this.logger.info(`agent run ${run.id}: session ${run.sessionId} ${st.action === 'copied' ? 'copied into TRIF\'s full sandbox' : 'last ran in TRIF\'s full sandbox: a new session with the older protection'}`);
+          this._log(run, { webmods: 'session', action: st.action, sessionId: run.sessionId, time: Date.now() });
+        }
+        if (st.action === 'fresh') { run.sessionId = null; run.lastSessionId = null; }
+      } catch (e) { this.logger.warn(`agent run ${run.id}: couldn't check where session ${run.sessionId} is: ${e.message}`); }
+    }
+    const ctx = { url: run.url, tabId: run.tabId, scope: run.scope, browser: ws.browser || '', agentLevel: run.agentLevel, phone: run.phone, noShell: !!run.noShell };
+    let prompt = run.prompt;
+    let context = null;
+    const extra = adapter.readsInstructions ? '' : instructionsContext(readInstructions(ws.home));
+    if (adapter.systemPrompt) context = agents.contextText(ctx) + extra;
+    else prompt = `${run.sessionId ? agents.reminderText(ctx) : agents.contextText(ctx) + extra}\n\n${prompt}`;
     // The agent's own files (claude: its run settings and context), in a folder of the run's that only
     // the helper and the agent itself read: beside its mailbox, not in it (the run's commands may write
     // there), and not in the workspace. Removed when the run ends.

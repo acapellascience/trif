@@ -423,6 +423,20 @@ adapter.noShellBrokenMessage = (pre) =>
     ? `Your organization's Claude Code settings require Claude Code's own sandbox, which can't start inside TRIF's full sandbox, and ${both(pre.mcpBlocks)}, which would take its place, so this chat can't run in TRIF's full sandbox. `
     : `Your organization's Claude Code settings let Claude Code run any command, so in TRIF's full sandbox this chat gets TRIF's \`trif\` tool in place of a shell, but they also ${both(pre.mcpBlocks)}, so this chat can't run in TRIF's full sandbox. `) +
   'Turning off “Run chats in TRIF\'s full sandbox” in Settings runs chats with TRIF\'s usual protection.';
+// (TRIF's full sandbox, round 8: an organization's own proxy, or a cloud sign-in Claude Code would read from
+// this computer, can't work inside the box; the panel's card then offers the older protection: WHOLE-BOX-STRINGS.md)
+const CLOUD = { bedrock: 'Amazon Bedrock', vertex: 'Google Vertex AI', foundry: 'Microsoft Foundry' };
+adapter.boxOrgMessage = (stops) => {
+  const proxy = stops.find((x) => x.kind === 'proxy');
+  if (proxy) {
+    return `Your organization's Claude Code settings send Claude Code's connections through ${proxy.local ? 'a proxy on this computer' : 'their own proxy'} (${proxy.url}), which TRIF's full sandbox can't let it reach, so this chat can't run in TRIF's full sandbox.`;
+  }
+  const c = stops.find((x) => x.kind === 'cloudSignIn') || {};
+  const name = CLOUD[c.provider] || 'their cloud provider';
+  return c.why === 'a credentials file'
+    ? `Your organization's Claude Code settings sign Claude Code in to ${name} with a credentials file (${String(c.from || '').replace(/^env /, '')}), which TRIF's full sandbox doesn't open, so this chat can't run in TRIF's full sandbox.`
+    : `Your organization's Claude Code settings sign Claude Code in to ${name} with this computer's own sign-in for it, which TRIF's full sandbox doesn't open, so this chat can't run in TRIF's full sandbox.`;
+};
 adapter.brokenMessage = (pre) =>
   `Your organization's Claude Code settings ${both(pre.breaks)}, so chats with Claude Code can't work in TRIF's side panel. ` +
   'Try another agent, or work with Claude Code in a terminal in ~/.trif.';

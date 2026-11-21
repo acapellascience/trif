@@ -88,6 +88,28 @@ In place of the plain error line, a card in the chat (styled like the "Use Claud
   **This chat runs with the older protection (TRIF's rules for your own Claude Code), not TRIF's full
   sandbox, as you chose. A new chat uses the full sandbox.**
 
+**Round 8: an organization's settings the box can't work with** (the same card; the why line is one of these,
+claude.js `boxOrgMessage`):
+
+- Their own proxy: **Your organization's Claude Code settings send Claude Code's connections through their own
+  proxy (proxy.corp.example:8080), which TRIF's full sandbox can't let it reach, so this chat can't run in
+  TRIF's full sandbox.** (a proxy on this computer: "through a proxy on this computer (127.0.0.1:9000)")
+- A cloud sign-in from this computer: **Your organization's Claude Code settings sign Claude Code in to Amazon
+  Bedrock with this computer's own sign-in for it, which TRIF's full sandbox doesn't open, so this chat can't
+  run in TRIF's full sandbox.** (Google Vertex AI, Microsoft Foundry the same); with a file they name: **… with
+  a credentials file (GOOGLE_APPLICATION_CREDENTIALS), which TRIF's full sandbox doesn't open, …**
+- Then, in place of "You can wait …" (waiting won't change it): **You can run this chat with the older
+  protection: your own Claude Code, with TRIF's rules for what its commands and file tools may touch, as
+  before you turned on the full sandbox. Claude Code itself isn't in TRIF's box then. New chats try the full
+  sandbox again.**
+- Answered "Not now": **Nothing ran.**
+
+Their own sign-in failing inside the box (an apiKeyHelper, a key of theirs; a plain error line, not the
+sign-in notice: TRIF's sign-in wouldn't help, theirs outranks it): **Claude Code couldn't sign in the way your
+organization's Claude Code settings choose (their own sign-in, which outranks TRIF's) inside TRIF's full
+sandbox. If it needs something on this computer the sandbox doesn't open, switch off "Run chats in TRIF's
+full sandbox" in Settings, or ask your IT team.**
+
 Not for people (CLI): `trif agent run` asking for it is refused: **only a click in TRIF's side panel can run
 a chat with the older protection (or switch off Settings: Run chats in TRIF's full sandbox)**.
 

@@ -226,6 +226,8 @@ function orgNetwork(s) {
   const ports = [];
   const notes = [];
   const files = [];
+  const stops = [];
+  const signIn = [];
   const add = (url, from) => {
     let u;
     try { u = new URL(String(url)); } catch { notes.push({ from, url: String(url).slice(0, 200), why: 'not a URL' }); return; }
@@ -241,11 +243,26 @@ function orgNetwork(s) {
     // (OTEL_EXPORTER_OTLP_ENDPOINT may be a comma-free URL; a protocol of grpc means plain unless https)
     add(env[k].trim(), `env ${k}`);
   }
+  // (their own proxy, round 8: Claude Code applies managed `env` over the run's own, so it would go to that
+  // proxy, not TRIF's relay, and the box can't name another computer (Seatbelt's network rules know only
+  // this computer and "any"); one on this computer would decide by its own rules where the run reaches. So a
+  // boxed run doesn't start: `stops`, the panel offers the older protection. HTTP_PROXY too: Claude Code's
+  // https falls back to it when HTTPS_PROXY isn't set, so it's where the organization sends its traffic.)
   for (const k of PROXY_VARS) if (typeof env[k] === 'string' && env[k].trim()) {
     let local = false;
-    try { local = LOCAL_NAMES.includes(new URL(env[k].trim()).hostname); } catch { /* not a URL */ }
-    notes.push({ from: `env ${k}`, url: String(env[k]).slice(0, 200), why: local ? 'a proxy on this computer, in place of TRIF\'s relay' : 'a proxy of their own, in place of TRIF\'s relay' });
+    let shown = '';
+    try { const u = new URL(env[k].trim()); local = LOCAL_NAMES.includes(u.hostname); shown = u.host; } catch { /* not a URL */ }
+    stops.push({ kind: 'proxy', from: `env ${k}`, url: shown || '(not a URL)', local });
   }
+  if (typeof env.NO_PROXY === 'string' || typeof env.no_proxy === 'string') notes.push({ from: 'env NO_PROXY', url: String(env.NO_PROXY ?? env.no_proxy).slice(0, 200), why: 'hosts reached without a proxy: the box refuses any but this computer' });
+  cloud(env, s, { relay, notes, files, stops, signIn });
+  // (their own sign-in, round 8: an apiKeyHelper outranks TRIF's token; it runs in the box as a child of
+  // Claude Code, like their hooks, its scripts readable there)
+  if (typeof s.apiKeyHelper === 'string' && s.apiKeyHelper.trim()) {
+    signIn.push({ kind: 'apiKeyHelper', from: 'apiKeyHelper' });
+    files.push(...commandFiles(s.apiKeyHelper));
+  }
+  for (const k of ['ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY']) if (typeof env[k] === 'string' && env[k].trim()) signIn.push({ kind: 'key', from: `env ${k}` });
   const hooks = isObject(s.hooks) ? s.hooks : {};
   for (const [event, groups] of Object.entries(hooks)) {
     for (const g of Array.isArray(groups) ? groups : []) {
@@ -253,16 +270,78 @@ function orgNetwork(s) {
         if (!isObject(h)) continue;
         if (h.type === 'http' && typeof h.url === 'string') add(h.url, `hooks ${event}`);
         if ((h.type === 'command' || !h.type) && typeof h.command === 'string') {
-          // (absolute paths in the command, as words or quoted: the scripts it runs; existing files only)
-          for (const m of h.command.matchAll(/"(\/[^"]+)"|'(\/[^']+)'|(?:^|\s)(\/[^\s;|&<>()'"]+)/g)) {
-            const f = m[1] || m[2] || m[3];
-            try { if (fs.statSync(f).isFile()) files.push(f); } catch { /* not there */ }
-          }
+          files.push(...commandFiles(h.command));
         }
       }
     }
   }
-  return { relay, ports, notes, files };
+  return { relay, ports, notes, files, stops, signIn };
+}
+
+// (absolute paths in a command, as words or quoted: the scripts it runs; existing files only)
+function commandFiles(command) {
+  const out = [];
+  for (const m of String(command).matchAll(/"(\/[^"]+)"|'(\/[^']+)'|(?:^|\s)(\/[^\s;|&<>()'"]+)/g)) {
+    const f = m[1] || m[2] || m[3];
+    try { if (fs.statSync(f).isFile()) out.push(f); } catch { /* not there */ }
+  }
+  return out;
+}
+
+// Cloud providers an organization's managed `env` turns on (round 8): Amazon Bedrock, Google Vertex AI,
+// Microsoft Foundry outrank every other sign-in. Their hosts go through TRIF's relay (from the region or
+// resource the settings give; a base URL of theirs is an endpoint above). Their credentials: given in the
+// settings' env (a key, or a gateway that signs in for Claude Code: CLAUDE_CODE_SKIP_*_AUTH) or by a
+// command of theirs that prints them (awsCredentialExport) work in the box. Credentials Claude Code would
+// read from this computer (~/.aws, gcloud's or Azure's sign-in, a credentials file the settings name, the
+// cloud's own metadata address) aren't in the box: `stops`, kind "cloudSignIn" (whether the box may open
+// those files is Tim's call: docs/WHOLE-BOX-PROGRESS.md, For Tim).
+const on = (v) => typeof v === 'string' && /^(1|true|yes)$/i.test(v.trim());
+const REGION = /^[a-z]{2}(-[a-z]+)+-\d{1,2}$/;
+const VREGION = /^[a-z]+-[a-z]+\d{1,2}$/;
+const RESOURCE = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/i;
+function cloud(env, s, { relay, notes, files, stops, signIn }) {
+  const has = (k) => typeof env[k] === 'string' && env[k].trim() !== '';
+  const fileVars = (vars, provider) => {
+    for (const k of vars) if (has(k)) stops.push({ kind: 'cloudSignIn', provider, from: `env ${k}`, why: 'a credentials file' });
+  };
+  if (on(env.CLAUDE_CODE_USE_BEDROCK)) {
+    signIn.push({ kind: 'bedrock', from: 'env CLAUDE_CODE_USE_BEDROCK' });
+    const regions = [...new Set(['AWS_REGION', 'AWS_DEFAULT_REGION', 'ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION'].filter(has).map((k) => env[k].trim().toLowerCase()))];
+    for (const r of regions) {
+      if (!REGION.test(r)) { notes.push({ from: 'env AWS_REGION', url: r.slice(0, 40), why: 'not a region' }); continue; }
+      if (!has('ANTHROPIC_BEDROCK_BASE_URL')) relay.push({ host: `bedrock-runtime.${r}.amazonaws.com`, port: 443, from: 'env AWS_REGION (Bedrock)' });
+      relay.push({ host: `bedrock.${r}.amazonaws.com`, port: 443, from: 'env AWS_REGION (Bedrock)' });
+    }
+    const export_ = typeof s.awsCredentialExport === 'string' && s.awsCredentialExport.trim();
+    if (export_) files.push(...commandFiles(s.awsCredentialExport));
+    fileVars(['AWS_SHARED_CREDENTIALS_FILE', 'AWS_CONFIG_FILE', 'AWS_WEB_IDENTITY_TOKEN_FILE'], 'bedrock');
+    const given = has('AWS_BEARER_TOKEN_BEDROCK') || (has('AWS_ACCESS_KEY_ID') && has('AWS_SECRET_ACCESS_KEY')) || on(env.CLAUDE_CODE_SKIP_BEDROCK_AUTH) || export_;
+    if (!given) stops.push({ kind: 'cloudSignIn', provider: 'bedrock', from: 'env CLAUDE_CODE_USE_BEDROCK', why: 'sign-in from this computer (~/.aws)' });
+  }
+  if (on(env.CLAUDE_CODE_USE_VERTEX)) {
+    signIn.push({ kind: 'vertex', from: 'env CLAUDE_CODE_USE_VERTEX' });
+    const regions = new Set([has('CLOUD_ML_REGION') ? env.CLOUD_ML_REGION.trim().toLowerCase() : 'us-east5']);
+    for (const [k, v] of Object.entries(env)) if (/^VERTEX_REGION_/.test(k) && typeof v === 'string' && v.trim()) regions.add(v.trim().toLowerCase());
+    if (!has('ANTHROPIC_VERTEX_BASE_URL')) {
+      for (const r of regions) {
+        if (r === 'global') relay.push({ host: 'aiplatform.googleapis.com', port: 443, from: 'env CLOUD_ML_REGION (Vertex AI)' });
+        else if (VREGION.test(r)) relay.push({ host: `${r}-aiplatform.googleapis.com`, port: 443, from: 'env CLOUD_ML_REGION (Vertex AI)' });
+        else notes.push({ from: 'env CLOUD_ML_REGION', url: r.slice(0, 40), why: 'not a region' });
+      }
+    }
+    fileVars(['GOOGLE_APPLICATION_CREDENTIALS'], 'vertex');
+    if (!on(env.CLAUDE_CODE_SKIP_VERTEX_AUTH)) stops.push({ kind: 'cloudSignIn', provider: 'vertex', from: 'env CLAUDE_CODE_USE_VERTEX', why: 'sign-in from this computer (gcloud)' });
+  }
+  if (on(env.CLAUDE_CODE_USE_FOUNDRY)) {
+    signIn.push({ kind: 'foundry', from: 'env CLAUDE_CODE_USE_FOUNDRY' });
+    const res = has('ANTHROPIC_FOUNDRY_RESOURCE') ? env.ANTHROPIC_FOUNDRY_RESOURCE.trim().toLowerCase() : '';
+    if (res && !has('ANTHROPIC_FOUNDRY_BASE_URL')) {
+      if (RESOURCE.test(res)) relay.push({ host: `${res}.services.ai.azure.com`, port: 443, from: 'env ANTHROPIC_FOUNDRY_RESOURCE (Foundry)' });
+      else notes.push({ from: 'env ANTHROPIC_FOUNDRY_RESOURCE', url: res.slice(0, 64), why: 'not a resource name' });
+    }
+    if (!has('ANTHROPIC_FOUNDRY_API_KEY') && !on(env.CLAUDE_CODE_SKIP_FOUNDRY_AUTH)) stops.push({ kind: 'cloudSignIn', provider: 'foundry', from: 'env CLAUDE_CODE_USE_FOUNDRY', why: 'sign-in from this computer (Azure)' });
+  }
 }
 
 /**
@@ -278,7 +357,7 @@ function check(opts = {}) {
   const mcpBlocks = new Set();
   const anyCommand = new Set();
   let forcesSandbox = false;
-  const network = { relay: [], ports: [], notes: [], files: [] };
+  const network = { relay: [], ports: [], notes: [], files: [], stops: [], signIn: [] };
   for (const src of found) {
     const n = orgNetwork(src.settings);
     for (const k of Object.keys(network)) network[k].push(...n[k].map((x) => (typeof x === 'object' ? { ...x, source: src.name } : x)));

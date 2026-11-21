@@ -121,6 +121,20 @@ jobs:
           H="$D/trif-ci-hook.sh"
           printf '{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"1","OTEL_METRICS_EXPORTER":"otlp","OTEL_LOGS_EXPORTER":"otlp","OTEL_EXPORTER_OTLP_PROTOCOL":"http/json","OTEL_EXPORTER_OTLP_METRICS_ENDPOINT":"http://127.0.0.1:47318/v1/metrics","OTEL_EXPORTER_OTLP_LOGS_ENDPOINT":"https://otel.trif-ci.invalid:4318/v1/logs","OTEL_METRIC_EXPORT_INTERVAL":"1000","OTEL_LOGS_EXPORT_INTERVAL":"1000"},"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"\\"%s\\" SessionStart"}]}],"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"\\"%s\\" PreToolUse"},{"type":"http","url":"https://hook.trif-ci.invalid/pre"}]}]}}\n' "$H" "$H" | sudo tee "$D/managed-settings.json"
           TRIF_TEST_MANAGED=org node --test --test-timeout=300000 --test-name-pattern="hooks and telemetry" tests/whole-box.test.js
+      # (step 5b, round 8: an organization's apiKeyHelper, run in the box; a made-up key, the stand-in API)
+      - name: Managed settings with an apiKeyHelper, the pinned Claude Code in the box
+        run: |
+          D="/Library/Application Support/ClaudeCode"
+          printf '%s\n' '#!/bin/sh' 'echo sk-ant-api03-MadeUpForCI-keyhelper' | sudo tee "$D/trif-ci-key.sh" > /dev/null
+          sudo chmod 755 "$D/trif-ci-key.sh"
+          printf '{"apiKeyHelper":"\\"%s\\""}\n' "$D/trif-ci-key.sh" | sudo tee "$D/managed-settings.json"
+          TRIF_TEST_MANAGED=keyhelper node --test --test-timeout=300000 --test-name-pattern="apiKeyHelper" tests/whole-box.test.js
+      # (step 5b, round 8: an organization's own proxy, TEST-NET; Claude Code takes it over TRIF's relay and
+      # the box refuses it: why a boxed run with one doesn't start, runs.js)
+      - name: Managed settings with a proxy of their own, the pinned Claude Code in the box
+        run: |
+          echo '{"env":{"HTTPS_PROXY":"http://192.0.2.1:3128","CLAUDE_CODE_MAX_RETRIES":"0"}}' | sudo tee "/Library/Application Support/ClaudeCode/managed-settings.json"
+          TRIF_TEST_MANAGED=proxy node --test --test-timeout=300000 --test-name-pattern="own proxy" tests/whole-box.test.js
       - name: Remove the managed settings
         if: always()
         run: sudo rm -f "/Library/Application Support/ClaudeCode/managed-settings.json"

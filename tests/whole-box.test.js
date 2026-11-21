@@ -182,7 +182,7 @@ function loosest(c, L) {
   return args.map((a, k) => (args[k - 1] === '--permission-mode' ? 'bypassPermissions' : a));
 }
 
-async function runClaude(L, { boxed, script = null, moreEnv = {}, boxOpts = {} }) {
+async function runClaude(L, { boxed, script = null, moreEnv = {}, boxOpts = {}, dropEnv = [] }) {
   const steps = script || [
     { tool: 'Read', input: { file_path: L.own } },
     { tool: 'Read', input: { file_path: L.secret } },
@@ -205,6 +205,7 @@ async function runClaude(L, { boxed, script = null, moreEnv = {}, boxOpts = {} }
   for (const f of c.files) fs.writeFileSync(f.path, f.content);
   const env = { HOME: L.home, USER: os.userInfo().username, PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`, TERM: 'dumb', ANTHROPIC_BASE_URL: fake.url, ANTHROPIC_API_KEY: 'placeholder',
     CLAUDE_CONFIG_DIR: L.cfg, DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ...c.env, ...moreEnv };
+  for (const k of dropEnv) delete env[k];
   let cmd = { file: c.file, args, env };
   if (boxed) cmd = wb.wrap(cmd, { limits: L.limits, configDir: L.cfg, profileFile: path.join(agentDir, 'box.sb'), extraRead: [agentDir, path.dirname(path.dirname(fs.realpathSync(process.execPath))), ...(boxOpts.extraRead || [])], ports: boxOpts.ports || [] }); // (and node, if this Claude Code is npm's node script)
   const t0 = Date.now();
@@ -219,8 +220,9 @@ async function runClaude(L, { boxed, script = null, moreEnv = {}, boxOpts = {} }
     child.stdin.end('probe');
   });
   const results = fake.toolResults();
+  const auth = (fake.requests || []).filter((q) => /\/v1\/messages$/.test(q.url.replace(/\?.*$/, ''))).map((q) => q.headers['x-api-key'] || q.headers.authorization || '');
   await fake.close();
-  return { ...res, results, ms: Date.now() - t0, labels: steps.slice(0, -1).map((s) => s.bash || `${s.tool} ${s.input.file_path || s.input.path}`) };
+  return { ...res, results, auth, ms: Date.now() - t0, labels: steps.slice(0, -1).map((s) => s.bash || `${s.tool} ${s.input.file_path || s.input.path}`) };
 }
 
 test('macOS, real Claude Code with its loosest settings: outside the copy, the system refuses', { skip: !claudeBin && 'Claude Code not installed (or not macOS)' }, async () => {
@@ -325,7 +327,73 @@ test('CI, an organization\'s hooks and telemetry: in the box, hooks run boxed; w
     assert.doesNotMatch(ran, new RegExp(SECRET), `the hook in the box can't read the secret:\n${info}`);
     assert.match(ran, /secret: (refused|.*Operation not permitted)/, info);
     for (const e of relay.seen.filter((x) => x.allowed)) assert.ok(['api.anthropic.com:443', 'claude.ai:443', 'console.anthropic.com:443', 'platform.claude.com:443', ...pre.network.relay.map((x) => `${x.host}:${x.port}`)].includes(e.target), e.target);
+    // (round 8, strict on what round 7's run showed: every hook event ran boxed; the HTTP hook and the OTLP
+    // logs went through the relay (their made-up hosts have no address: `failed`, not refused); the metrics
+    // reached the collector on this computer through the port the box opened; the hook's own curl to a host
+    // nobody named was refused by the relay)
+    assert.match(ran, /hook SessionStart/, info);
+    assert.match(ran, /hook PreToolUse/, info);
+    assert.match(ran, /net: 000/, `the hook's curl got nowhere:\n${info}`);
+    const saw = (t, allowed) => relay.seen.some((x) => x.target === t && x.allowed === allowed);
+    assert.ok(saw('hook.trif-ci.invalid:443', true), `the HTTP hook through the relay:\n${info}`);
+    assert.ok(saw('otel.trif-ci.invalid:4318', true), `the OTLP logs through the relay:\n${info}`);
+    assert.ok(saw('example.com:443', false), `the hook's curl refused by the relay:\n${info}`);
+    assert.ok(got.some((x) => x.url === '/v1/metrics' && x.bytes > 0), `the metrics at the collector on this computer:\n${info}`);
   } finally { await relay.close(); collector.close(); }
+});
+
+// Round 8, CI only (TRIF_TEST_MANAGED=keyhelper: managed settings whose apiKeyHelper is a script in
+// /Library/Application Support/ClaudeCode printing a made-up key). As runs.js does it (orgNetwork's files
+// readable; no ANTHROPIC_API_KEY of TRIF's, which would outrank it): Claude Code runs the helper inside the
+// box, and the key it prints is the one the requests carry.
+test('CI, an organization\'s apiKeyHelper: run in the box, its key used', { skip: (process.env.TRIF_TEST_MANAGED !== 'keyhelper' || !claudeBin) && 'only with TRIF_TEST_MANAGED=keyhelper (CI)' }, async () => {
+  const pre = require('../helper/lib/agents/claude-managed').check({});
+  console.log(`# managed network: ${JSON.stringify(pre.network)}`);
+  assert.deepStrictEqual(pre.network.signIn.map((x) => x.kind), ['apiKeyHelper']);
+  assert.ok(pre.network.files.some((f) => /trif-ci-key\.sh$/.test(f)), JSON.stringify(pre.network));
+  const L = layout();
+  const res = await runClaude(L, { boxed: true, script: [{ tool: 'Read', input: { file_path: L.own } }, { say: 'done' }], dropEnv: ['ANTHROPIC_API_KEY'], boxOpts: { extraRead: pre.network.files } });
+  const info = `exit ${res.code}\nauth: ${JSON.stringify(res.auth.map((a) => a.slice(0, 24)))}\nresults: ${JSON.stringify(res.results).slice(0, 800)}\nstderr: ${res.err.slice(-1500)}`;
+  console.log(info.split('\n').map((x) => `# ${x}`).join('\n'));
+  assert.ok(res.auth.length, `requests reached the stand-in:\n${info}`);
+  assert.ok(res.auth.every((a) => a === 'sk-ant-api03-MadeUpForCI-keyhelper'), `every request carries the helper's key:\n${info}`);
+  assert.match(String(res.results[0]), /COPY-OK/, info);
+});
+
+// Round 8, CI only (TRIF_TEST_MANAGED=proxy: managed settings whose env names a proxy of their own, TEST-NET
+// 192.0.2.1:3128). What runs.js's stop rests on: Claude Code applies the managed env over the run's own, so it
+// goes to their proxy, not TRIF's relay, and the box refuses that. The real network, as the relay's test: a
+// made-up token (if TRIF's relay won after all, Anthropic refuses it, and this fails: then chain the relay).
+test('CI, an organization\'s own proxy: Claude Code takes theirs over TRIF\'s relay, and the box refuses it', { skip: (process.env.TRIF_TEST_MANAGED !== 'proxy' || !pinned) && 'only with TRIF_TEST_MANAGED=proxy and TRIF\'s pinned Claude Code (CI)' }, async () => {
+  const pre = require('../helper/lib/agents/claude-managed').check({});
+  assert.deepStrictEqual(pre.network.stops.map((x) => [x.kind, x.url]), [['proxy', '192.0.2.1:3128']]);
+  const L = layout();
+  const r = await wb.startProxy({});
+  try {
+    const agentDir = path.join(L.root, 'agent-proxy');
+    fs.mkdirSync(agentDir);
+    const c = claude.command({ bin: claudeBin, prompt: 'Say hi.', agentDir, model: 'claude-haiku-4-5', ...L.limits, wholeBox: true });
+    for (const f of c.files) fs.writeFileSync(f.path, f.content);
+    const env = { HOME: L.home, USER: os.userInfo().username, PATH: '/usr/bin:/bin', TERM: 'dumb', CLAUDE_CONFIG_DIR: L.cfg, ...c.env,
+      CLAUDE_CODE_OAUTH_TOKEN: `sk-ant-oat01-${'MadeUpForCI'.repeat(8)}AA`, HTTPS_PROXY: `http://127.0.0.1:${r.port}`, CLAUDE_CODE_MAX_RETRIES: '0' };
+    for (const k of ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) delete env[k];
+    const cmd = wb.wrap({ file: c.file, args: c.args, env }, { limits: L.limits, configDir: L.cfg, profileFile: path.join(agentDir, 'box.sb'), extraRead: [agentDir] });
+    const res = await new Promise((resolve) => {
+      const child = spawn(cmd.file, cmd.args, { cwd: L.stage, env: cmd.env, stdio: ['pipe', 'pipe', 'pipe'] });
+      let out = '';
+      let err = '';
+      child.stdout.on('data', (d) => { out += d; });
+      child.stderr.on('data', (d) => { err += d; });
+      const timer = setTimeout(() => child.kill('SIGKILL'), 90000);
+      child.on('close', (code) => { clearTimeout(timer); resolve({ code, out, err }); });
+      child.stdin.end('Say hi.');
+    });
+    const info = `exit ${res.code}\nrelay saw: ${JSON.stringify(r.seen)}\nstdout: ${res.out.slice(-2000)}\nstderr: ${res.err.slice(-1500)}`;
+    console.log(info.split('\n').map((x) => `# ${x}`).join('\n'));
+    assert.ok(!r.seen.some((x) => x.target === 'api.anthropic.com:443'), `Claude Code didn't use TRIF's relay (their proxy won):\n${info}`);
+    const result = res.out.split('\n').map((x) => { try { return JSON.parse(x); } catch { return null; } }).find((m) => m && m.type === 'result');
+    assert.ok(res.code !== 0 || (result && result.is_error), `nothing got through:\n${info}`);
+  } finally { await r.close(); }
 });
 
 // On CI only (.github/workflows/whole-box.yml writes the real managed-settings.json in /Library/Application

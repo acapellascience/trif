@@ -200,6 +200,20 @@ test('a boxed run\'s sign-in (prepareBoxed): a saved API key\'s proxy first; els
   const s2 = await ct.prepareBoxed({ keyPrep: async () => ({}), env: { ...kc.env, TRIF_ANTHROPIC_URL: 'http://127.0.0.1:9/' }, allow, startProxy: fakeStart });
   assert.deepStrictEqual(starts.pop(), { hosts: [], allow });
   assert.deepStrictEqual([s2.env.ANTHROPIC_BASE_URL, s2.env.HTTPS_PROXY], ['http://127.0.0.1:9/', 'http://127.0.0.1:4603']);
+  // Round 8: the organization signs Claude Code in (an apiKeyHelper, a key of theirs, a cloud provider):
+  // no TRIF sign-in asked, the token (saved here) not given; Anthropic and their hosts through the relay.
+  const o1 = await ct.prepareBoxed({ keyPrep: async () => ({}), env: kc.env, allow, orgSignIn: true, startProxy: fakeStart });
+  assert.deepStrictEqual(starts.pop(), { allow });
+  assert.deepStrictEqual(o1.env, { HTTPS_PROXY: 'http://127.0.0.1:4604', NO_PROXY: '127.0.0.1,localhost,::1' });
+  assert.ok(o1.unsetEnv.includes('CLAUDE_CODE_OAUTH_TOKEN') && o1.unsetEnv.includes('ANTHROPIC_BASE_URL'));
+  assert.deepStrictEqual([o1.secrets, o1.state], [[], { signIn: 'organization' }]);
+  assert.ok(!JSON.stringify(o1).includes(FAKE_TOKEN));
+  const kcNone = makeFakeKeychain(fresh('kc'));
+  const o2 = await ct.prepareBoxed({ keyPrep: async () => ({}), env: { ...kcNone.env, TRIF_ANTHROPIC_URL: 'http://127.0.0.1:9/' }, orgSignIn: true, startProxy: fakeStart });
+  assert.deepStrictEqual(starts.pop(), { hosts: [], allow: [] }, 'no token saved: still no sign-in asked');
+  assert.strictEqual(o2.env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:9/');
+  // (a saved API key still comes first, as without their sign-in)
+  assert.strictEqual(await ct.prepareBoxed({ keyPrep: async () => keyed, env: kc.env, orgSignIn: true }), keyed);
   // A keyring item that isn't a token: "sign in again", the item's text never in the message.
   const kc2 = makeFakeKeychain(fresh('kc'));
   await require('../helper/lib/keyring').setKey(ct.ACCOUNT, 'sk-ant-api03-not-a-setup-token-xx', { service: ct.SERVICE, env: kc2.env });

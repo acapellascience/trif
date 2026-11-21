@@ -137,7 +137,7 @@ function ptyCommand(file, args = [], { platform = process.platform } = {}) {
  * startProxy, the box's one way out; TRIF_ANTHROPIC_URL, tests: a stand-in on this computer instead).
  * No token: throws an Error with .signIn = 'token' (the run says so; the panel offers the sign-in).
  */
-async function prepareBoxed({ keyPrep = async () => ({}), env = process.env, keyringOpts = {}, allow = [], startProxy = (o) => require('./wholebox').startProxy(o) } = {}) {
+async function prepareBoxed({ keyPrep = async () => ({}), env = process.env, keyringOpts = {}, allow = [], orgSignIn = false, startProxy = (o) => require('./wholebox').startProxy(o) } = {}) {
   // (step 5: hosts an organization's managed settings name, claude-managed.js orgNetwork: through TRIF's
   // relay too, whatever the sign-in; this computer's own addresses never go to the relay: NO_PROXY)
   const NO_PROXY = '127.0.0.1,localhost,::1';
@@ -154,6 +154,21 @@ async function prepareBoxed({ keyPrep = async () => ({}), env = process.env, key
     };
   }
   if (typeof k.cleanup === 'function') { try { await k.cleanup(); } catch { /* nothing started */ } }
+  // (round 8: the organization signs Claude Code in itself, managed settings outranking the token: an
+  // apiKeyHelper, a key in their env, a cloud provider. No TRIF sign-in needed, and the token isn't given
+  // to a run that wouldn't use it. Anthropic's hosts and theirs through the relay.)
+  if (orgSignIn) {
+    const standOrg = require('./env').envVar('ANTHROPIC_URL', env); // (tests: a stand-in for Anthropic)
+    const relayOrg = await startProxy(standOrg ? { hosts: [], allow } : { allow });
+    return {
+      env: { ...(standOrg ? { ANTHROPIC_BASE_URL: standOrg } : {}), HTTPS_PROXY: `http://127.0.0.1:${relayOrg.port}`, NO_PROXY },
+      unsetEnv: ['CLAUDE_CODE_OAUTH_TOKEN', ...OUTRANKS, ...(standOrg ? [] : ['ANTHROPIC_BASE_URL'])],
+      secrets: [],
+      cleanup: () => relayOrg.close(),
+      proxySeen: relayOrg.seen,
+      state: { signIn: 'organization' },
+    };
+  }
   const r = await readToken({ env, ...keyringOpts });
   if (!r.value) {
     const e = new Error(r.error

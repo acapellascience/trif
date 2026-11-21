@@ -52,7 +52,7 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
     /// The phone's memory, in GB.
     nonisolated static var memoryGB: Double {
         // (development: `-memorygb 4`, a 4 GB phone's choices in the Simulator)
-        let args = ProcessInfo.processInfo.arguments
+        let args = DevFlags.args
         if let i = args.firstIndex(of: "-memorygb"), i + 1 < args.count, let g = Double(args[i + 1]) { return g }
         return Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
     }
@@ -79,7 +79,7 @@ final class LocalModels: NSObject, ObservableObject, URLSessionDownloadDelegate 
 
     /// (development) `-modelbase http://localhost:<port>`: downloads from a local stand-in (a loopback address only).
     nonisolated static let mockBase: URL? = {
-        let args = ProcessInfo.processInfo.arguments
+        let args = DevFlags.args
         guard let i = args.firstIndex(of: "-modelbase"), i + 1 < args.count, let u = URL(string: args[i + 1]),
               ["localhost", "127.0.0.1", "::1"].contains(u.host ?? "") else { return nil }
         return u
@@ -731,6 +731,7 @@ final class LocalConversation: PanelConversation {
 }
 
 
+#if DEBUG
 extension Model {
     /// (development, the `hashtest` step) The memory a model's check takes (Tim, 11-18: the 2.74 GB model's check
     /// took ~1.1 GB in 5 s and the phone froze).
@@ -765,3 +766,4 @@ extension Model {
         return "\(old ? "old reading" : "now"): \(size) MB hashed in \(String(format: "%.1f", Date().timeIntervalSince(t0))) s; footprint \(start) MB at the start, \(most) MB at most (+\(most - start)), \(footprintMB()) MB at the end; \(hash.prefix(12))"
     }
 }
+#endif

@@ -1185,6 +1185,173 @@ add('S5', 'access', 'Disconnected: the robot gives the card and nothing is read;
   return [!/waitingSend|working|starting/.test(q0) && /outline: \d+ chars/.test(rc) && q.ok ? 'PASS' : 'FAIL', `disconnected: ${q0.split('\n')[0]}; connected: ${rc.split('\n').find((x) => x.startsWith('outline'))}; ${q.t || ''}`];
 });
 
+// ---- security batch (11-20): links from outside, mods arriving from outside, diagnostics without browsing history
+const openurl = (u) => { try { sim('openurl', DEV, u); return true; } catch (e) { return false; } };
+const zlib = require('zlib');
+const modText = (name, origin = BASE) => `// ==WebMod==\n// @name        ${name}\n// @description Made by the matrix\n// @match       ${origin}/*\n// @style\n// ==/WebMod==\n${JSON.stringify({ css: `.feed-item h2 { color: #1f8a5b } /* ${name} ${TAG} */` }, null, 2)}`;
+const addLink = (file, text) => `trif://add?v=1&name=${encodeURIComponent(file)}&z=${zlib.deflateRawSync(Buffer.from(text)).toString('base64url')}`;
+const viewOf = async () => step({ view: 1 });
+const closeExtraTabs = async () => { for (let i = 0; i < 8; i++) { const n = (await step({ tabhosts: 1 })).split(' ').length; if (n <= 3) break; await step({ close: n - 1 }); } await step({ select: 0 }); };
+const diagCopy = async () => step({ diagtext: 1 });
+
+add('X1', 'security', 'How trif://open links are taken: full screen only with this install\'s key, or an old icon\'s start address on a site with an icon record; anything else a tab', async () => {
+  const enc = encodeURIComponent;
+  const real = await step({ iconlink: 'https://norecord.invalid/' });
+  const key = (/[?&]k=([^&]+)/.exec(real) || [])[1] || '';
+  const tries = [
+    ['forged, a page with a path', `trif://open?url=${enc('https://example.com/login')}&app=1`, 'tab'],
+    ['forged, a start address with no icon record', `trif://open?url=${enc('https://norecord.invalid/')}&app=1`, 'tab'],
+    ['a wrong key', `trif://open?url=${enc('https://norecord.invalid/')}&app=1&k=${'A'.repeat(key.length || 22)}`, 'tab'],
+    ['the key, another address', `trif://open?url=${enc('https://example.com/a?b')}&app=1&k=${key}`, 'fullScreen'],
+    ['TRIF\'s own icon link', real, 'fullScreen'],
+    ['not full screen at all', `trif://open?url=${enc('https://example.com/')}`, 'tab'],
+  ];
+  const seen = [];
+  let ok = key.length >= 20;
+  for (const [name, u, want] of tries) {
+    const got = await step({ linkopen: u });
+    const pass = got.startsWith(want);
+    ok = ok && pass;
+    seen.push(`${pass ? 'ok' : 'WRONG'} ${name}: ${got}`);
+  }
+  return [ok ? 'PASS' : 'FAIL', `key ${key.length} chars; ${seen.join('; ')}`];
+});
+
+add('X2', 'security', 'A forged full screen link from outside opens an ordinary tab with its address, never connecting its site; TRIF\'s own icon link opens full screen; then an old icon\'s start address on that site does too', async () => {
+  const enc = encodeURIComponent;
+  await step({ disconnect: '127.0.0.1' });
+  openurl(`trif://open?url=${enc(`${OTHER}/feed.html?x2=1`)}&app=1`);
+  await sleep(2500);
+  const v1 = await viewOf();
+  const a1 = await accessOf();
+  if (/full screen true/.test(v1)) await step({ fullscreen: 1 });
+  const real = await step({ iconlink: `${BASE}/` });
+  openurl(real);
+  await sleep(2500);
+  const v2 = await viewOf();
+  if (/full screen true/.test(v2)) await step({ fullscreen: 1 });
+  const legacy = await step({ linkopen: `trif://open?url=${enc(`${BASE}/`)}&app=1` });
+  await step({ connect: '127.0.0.1' });
+  await closeExtraTabs();
+  const ok = /on 127\.0\.0\.1, full screen false/.test(v1) && /connected false/.test(a1) && /on localhost, full screen true/.test(v2) && legacy.startsWith('fullScreen');
+  return [ok ? 'PASS' : 'FAIL', `forged: ${v1}; ${a1.slice(0, 120)}; real: ${v2}; old icon's start: ${legacy}`];
+});
+
+add('X3', 'security', 'trif://add links from outside, three at once: one Add this mod?, the others dropped with a log line; once answered, the next link is offered', async () => {
+  for (const n of ['a', 'b', 'c']) openurl(addLink(`localhost-mxx3${n}${TAG}.js`, modText(`MxX3${n}${TAG}`)));
+  await sleep(2500);
+  const o = await offer();
+  const w = await step({ outside: 1 });
+  const d = await diagCopy();
+  const dropped = (d.match(/outside offers\s+a mod from a code dropped/g) || []).length;
+  await step({ cancelOffer: 1 });
+  await sleep(1600);
+  openurl(addLink(`localhost-mxx3d${TAG}.js`, modText(`MxX3d${TAG}`)));
+  await sleep(2000);
+  const o2 = await offer();
+  await step({ cancelOffer: 1 });
+  const ok = o.id && /mxx3/.test(o.id) && o.queued === 0 && /waiting true/.test(w) && dropped >= 2 && o2.id && /mxx3d/.test(o2.id);
+  return [ok ? 'PASS' : 'FAIL', `first: ${o.id} queued ${o.queued}; ${w}; dropped lines ${dropped}; after the answer: ${o2.id}`];
+});
+
+add('X4', 'security', 'The watched folder: five new files, three offered (one at a time), the rest left for the next look; a link meanwhile is dropped; the next look offers the other two', async () => {
+  const dir = path.join(docsDir(), `x4-${TAG}`);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const n of ['a', 'b', 'c', 'd', 'e']) fs.writeFileSync(path.join(dir, `localhost-mxx4${n}${TAG}.js`), modText(`MxX4${n}${TAG}`));
+  await step({ watchfolder: dir });
+  await sleep(2500);
+  const o = await offer();
+  const st = (/folder\s+5 new mod file\(s\)[^\n]*3 offered now, 2 left for the next look/.exec(await diagCopy()) || [''])[0];
+  openurl(addLink(`localhost-mxx4z${TAG}.js`, modText(`MxX4z${TAG}`)));
+  await sleep(1500);
+  const after = await offer();
+  const seen = [o.id];
+  for (let i = 0; i < 4; i++) { await step({ cancelOffer: 1 }); await sleep(1700); const x = await offer(); if (!x.id) break; seen.push(x.id); }
+  await step({ folderscan: 1 });
+  await sleep(2500);
+  const o2 = await offer();
+  const seen2 = [o2.id];
+  for (let i = 0; i < 4; i++) { await step({ cancelOffer: 1 }); await sleep(1700); const x = await offer(); if (!x.id) break; seen2.push(x.id); }
+  await step({ watchfolder: '' });
+  fs.rmSync(dir, { recursive: true, force: true });
+  const ok = o.queued === 2 && st && !after.text.includes('mxx4z') && seen.length === 3 && seen2.filter(Boolean).length === 2;
+  return [ok ? 'PASS' : 'FAIL', `first look: ${seen.join(', ')} (queued ${o.queued}); log "${st.slice(0, 160)}"; link meanwhile: ${after.text.includes('mxx4z') ? 'OFFERED' : 'dropped'}; next look: ${seen2.join(', ')}`];
+});
+
+add('X5', 'security', 'A .js download a page starts by itself (no touch): not offered, a log line', async () => {
+  await sleep(10500); // (no touch for 10 s: the matrix never touches, but a step before may have been a tap)
+  await pagejs(`const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([${JSON.stringify(modText(`MxX5${TAG}`))}], { type: 'text/javascript' })); a.download = 'mxx5${TAG}.js'; document.body.append(a); a.click(); return 'clicked'`);
+  await sleep(3000);
+  const o = await offer();
+  const d = await diagCopy();
+  return [!o.id && /no touch of the person's: not offered/.test(d) ? 'PASS' : 'FAIL', `offer ${o.id || 'none'}; log: ${/no touch/.test(d)}`];
+});
+
+add('X6', 'security', 'A trif://pair link from outside asks "Connect this iPhone to {computer}?" and connects nothing by itself', async () => {
+  const before = await step({ phonepair: 1 });
+  const b64 = (n) => Buffer.alloc(n, 7).toString('base64url');
+  openurl(`trif://pair?v=1&k=${b64(32)}&s=${b64(16)}&n=Someone`);
+  await sleep(2500);
+  const after = await step({ phonepair: 1 });
+  const shotf = shot('x6-pair-asks');
+  await step({ phonepair: 'noask' });
+  const sameComputer = before.split(';')[0] === after.split(';')[0];
+  return [/asking about Someone/.test(after) && /step idle/.test(after) && sameComputer ? 'PASS' : 'FAIL', `before: ${before}; after the link: ${after}${shotf ? `; ${shotf}` : ''}`];
+});
+
+add('X7', 'security', 'A chat\'s mod for a site TRIF isn\'t connected on: offered, added, the site stays disconnected, the note says it waits', async () => {
+  await step({ disconnect: '127.0.0.1' });
+  const got = await step({ offerchat: [modText(`MxX7${TAG}`, OTHER)], site: '127.0.0.1' });
+  await sleep(800);
+  const o = await offer();
+  await step({ addOffer: 1 });
+  await sleep(800);
+  const st = await step({ status: 1 });
+  const acc = await step({ access: 1 });
+  await step({ connect: '127.0.0.1' });
+  const ok = o.id && /mxx7/.test(o.id) && /runs once you connect TRIF on 127\.0\.0\.1/.test(st) && /connected: \[[^\]]*\]/.test(acc) && !/connected: \[[^\]]*127\.0\.0\.1/.test(acc);
+  return [ok ? 'PASS' : 'FAIL', `${got}; offer ${o.id}; note "${st}"; ${acc.split('\n')[0]}`];
+});
+
+add('X8', 'security', 'Copy diagnostics: sites only, nothing of a sensitive site, cookies as totals, ids shortened, no mod log words; the log on the phone keeps its detail', async () => {
+  const secret = `zq${TAG}`;
+  const lines = [
+    ['icon', `opened https://example.com/${secret}?q=${secret}#${secret} from a link`],
+    ['site access', `connected online.chase.com and https://mail.google.com/mail/u/0/#inbox/${secret}`],
+    ['cookies', `the matrix: 9 cookies: ${secret}.com 4, x.com 5`],
+    ['cookie names', `the matrix, x.com: ${secret} (.x.com, this run only)`],
+    ['mod log', `x.com/feed on x.com/${secret}: ${secret} said by a mod`],
+    ['pickup', 'conversation 3f2a9c1e-1b2c-4d5e-8f90-1234567890ab loaded'],
+  ];
+  for (const l of lines) await step({ diaglog: l });
+  await step({ copydiag: 1 });
+  await sleep(1500);
+  let pasted = '';
+  try { pasted = sim('pbpaste', DEV); } catch (e) {}
+  const kept = fs.readFileSync(path.join(container(), 'Library', 'Application Support', 'diagnostics.json'), 'utf8');
+  const ok = pasted.includes('TRIF iPhone app diagnostics') && !pasted.includes(secret) && !pasted.includes('3f2a9c1e') && pasted.includes('…567890ab') && !/chase\.com|mail\.google\.com/.test(pasted) && pasted.includes('https://example.com from a link') && /the matrix: 9 cookies$/m.test(pasted) && kept.includes(secret);
+  return [ok ? 'PASS' : 'FAIL', `copied ${pasted.length} chars, the secret in it ${pasted.includes(secret)}, sensitive hosts ${/chase\.com|mail\.google\.com/.test(pasted)}; on the phone ${kept.includes(secret)}; lines: ${pasted.split('\n').slice(-6).join(' | ')}`];
+});
+
+add('X9', 'security', 'Paste and import, the person\'s own acts: a paste shows Add this mod? (never added by itself) and waits behind an offer already up; an imported file is added off', async () => {
+  await step({ offer: modText(`MxX9a${TAG}`) });
+  await sleep(1200);
+  const o1 = await offer();
+  await step({ offer: modText(`MxX9b${TAG}`) });
+  await sleep(1200);
+  const o2 = await offer();
+  const listed = (await modlist()).filter((m) => /MxX9/.test(m.name));
+  await reset();
+  const f = path.join(docsDir(), `localhost-mxx9c${TAG}.js`);
+  fs.writeFileSync(f, modText(`MxX9c${TAG}`));
+  await step({ import: f });
+  await sleep(1500);
+  const m = (await modlist()).find((x) => x.name === `MxX9c${TAG}`);
+  await step({ sheet: 'none' });
+  const ok = o1.id && /mxx9a/.test(o1.id) && /mxx9a/.test(o2.id || '') && o2.queued === 1 && listed.length === 0 && m && !m.on;
+  return [ok ? 'PASS' : 'FAIL', `paste: ${o1.id}; a second paste: shown ${o2.id}, queued ${o2.queued}; added by themselves ${listed.length}; import: ${m ? `${m.id} ${m.on ? 'on' : 'off'}` : 'none'}`];
+});
+
 module.exports = { step, until, launch, links, offer, modlist, ask, send, goToChat, tabs, reset, runsHere, words, modId, TAG, cases, shot, panejs, pagejs, chat, sleep, serve, cleanPrefs };
 
 async function main() {

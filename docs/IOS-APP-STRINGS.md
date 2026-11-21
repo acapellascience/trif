@@ -954,3 +954,18 @@ under way). The project's instructions themselves (ClaudePane.projectInstruction
 Not words, for Tim to look at: the robot in the toolbar is drawn at 40% on a website TRIF isn't connected on (my call
 for the "quiet cue"; shot 570 has it beside the menu, 569 under the card). The Mods tab's title stays "Mods on {site}";
 for a sensitive host it's that host (mods on mail.google.com, not google.com).
+
+## Security fixes (added 11-20; drafts)
+
+| Where | Old | New |
+|---|---|---|
+| A pairing code that came in a link (the Camera app, or anything that opened `trif://pair`), My computer's screen | — (it paired at once) | **Connect this iPhone to {computer}?** · Connect · Cancel |
+| … its footer | — | Only if you just showed this code in TRIF on your own computer. Your mods will sync with it. |
+| The note, a mod link or a download while another mod from outside waits for its answer | — | TRIF is already asking about a mod from outside. Answer that one first. |
+| The note, the watched folder had more than three new mods (the rest offered at the next look) | — | 1 more mod waits in {folder}. TRIF offers it the next time you open it. · {n} more mods wait in {folder}. TRIF offers them the next time you open it. |
+| The note after adding a mod for a site TRIF isn't connected on | Added {name}. It runs on {sites}. | Added {name}. It runs once you connect TRIF on {site}. |
+| The note, a downloaded .js file with nothing in it (was the clipboard's words) | Nothing on the clipboard. · The clipboard has no mod. | That file has no mod in it. |
+| Copied / sent diagnostics, the line under the header (shared text, read by Tim and agents) | — | (sites only: no addresses, nothing of sensitive sites, cookies as totals) · if the rule can't run: (the lines' words left out: they couldn't be made safe to share) |
+
+Not words: a forged full screen link now opens an ordinary tab (address bar shown) with no note; a page's download with
+no touch, and a dropped link, say nothing on screen beyond the note above (log lines only).

@@ -8,6 +8,11 @@
 // - A QR code's link, trif://add?v=1&name=<site>-<mod>.js&z=<raw deflate, base64url>[&h=<16 hex of its sha256>]:
 //   the mod's text unpacked (256 KB at most), checked against h, and offered the same way.
 // Either way, nothing is added without the person's Add it.
+// - Both are outside sources (security batch, 11-20): anything can open a trif:// link, and other apps can write
+//   to the folder. So one batch from outside waits at a time (Browser.outsideMayOffer: a link or a download while
+//   one is waiting is dropped, with a line in the log); a folder's scan offers at most `perScan` files, the rest
+//   left for the next time TRIF comes to the front. Adding never connects a site: a mod for a site TRIF isn't
+//   connected on waits there.
 
 import CryptoKit
 import Compression
@@ -65,32 +70,44 @@ final class FolderWatch: ObservableObject {
         return url
     }
 
+    /// The most files one scan offers; the rest wait for the next scan (the app back in front).
+    nonisolated static let perScan = 3
+
     /// The .js files in the folder not offered before, offered in turn (off the main thread to read them).
     func scan(_ why: String) {
         guard !scanning, let url = resolve(), let browser else { return }
+        // (an offer from outside still waiting: this scan's files wait too, unseen, for the next one)
+        if browser.outsideWaiting { log("not looked in \(url.lastPathComponent) (\(why)): an offer from outside is still waiting"); return }
         scanning = true
         let seen = Set(UserDefaults.standard.stringArray(forKey: seenKey) ?? [])
         Task.detached(priority: .utility) {
-            let found = FolderWatch.newFiles(in: url, seen: seen)
+            let found = FolderWatch.newFiles(in: url, seen: seen, limit: FolderWatch.perScan)
             await MainActor.run {
                 let me = FolderWatch.shared
                 me.scanning = false
                 if found.waiting > 0 { me.log("\(found.waiting) file(s) in iCloud not on the phone yet: asked for, next time") }
                 if let e = found.error { me.log("couldn't look in \(url.lastPathComponent): \(e)"); return }
                 guard !found.files.isEmpty else { return }
-                me.log("\(found.files.count) new mod file(s) in \(url.lastPathComponent) (\(why)): \(found.files.map(\.name).joined(separator: ", "))")
+                let now = found.files, later = found.more
+                me.log("\(now.count + later) new mod file(s) in \(url.lastPathComponent) (\(why)): \(now.map(\.name).joined(separator: ", "))\(later > 0 ? "; \(now.count) offered now, \(later) left for the next look" : "")")
                 var list = UserDefaults.standard.stringArray(forKey: me.seenKey) ?? []
-                list += found.files.map(\.key)
+                list += now.map(\.key)
                 if list.count > 2000 { list.removeFirst(list.count - 2000) }
                 UserDefaults.standard.set(list, forKey: me.seenKey)
-                Task { await browser.offerFiles(found.files.map { ($0.name, $0.text) }, from: url.lastPathComponent) }
+                browser.outsideReading += 1
+                Task {
+                    await browser.offerFiles(now.map { ($0.name, $0.text) }, from: url.lastPathComponent, outside: true)
+                    browser.outsideReading -= 1
+                    if later > 0 { browser.status = "\(later == 1 ? "1 more mod waits" : "\(later) more mods wait") in \(url.lastPathComponent). TRIF offers \(later == 1 ? "it" : "them") the next time you open it." }
+                }
             }
         }
     }
 
-    struct Found { var files: [(name: String, key: String, text: String)] = []; var waiting = 0; var error: String? }
+    /// `more`: new files past the limit, left unread for the next look.
+    struct Found { var files: [(name: String, key: String, text: String)] = []; var waiting = 0; var more = 0; var error: String? }
 
-    nonisolated static func newFiles(in folder: URL, seen: Set<String>) -> Found {
+    nonisolated static func newFiles(in folder: URL, seen: Set<String>, limit: Int = .max) -> Found {
         var out = Found()
         let ok = folder.startAccessingSecurityScopedResource()
         defer { if ok { folder.stopAccessingSecurityScopedResource() } }
@@ -116,6 +133,7 @@ final class FolderWatch: ObservableObject {
                 let size = v?.fileSize ?? 0
                 let key = "\(name)|\(size)|\(Int(v?.contentModificationDate?.timeIntervalSince1970 ?? 0))"
                 guard !seen.contains(key), size > 0, size <= 2_000_000 else { continue }
+                if out.files.count >= limit { out.more += 1; continue }
                 guard let data = try? Data(contentsOf: item), let text = String(data: data, encoding: .utf8) else { continue }
                 out.files.append((name, key, text))
             }
@@ -161,9 +179,25 @@ enum ModLinkInURL {
 }
 
 extension Browser {
+    /// An offer from outside is up or queued, or still being read.
+    var outsideWaiting: Bool {
+        outsideReading > 0 || (modOffer.map { outsideIds.contains($0.id) } ?? false) || offerQueue.contains { outsideIds.contains($0.id) }
+    }
+    /// Whether a mod from outside (`from`: a code, a download) may be offered now: not while another from outside
+    /// waits for its answer (a page or a message firing links, or a burst of them, never stacks up cards). Else
+    /// dropped, logged, and the note says why.
+    func outsideMayOffer(_ from: String) -> Bool {
+        guard outsideWaiting else { outsideIds = []; return true }
+        Diagnostics.shared.log("outside offers", "a mod from \(from) dropped: one from outside is still waiting for its answer")
+        status = "TRIF is already asking about a mod from outside. Answer that one first."
+        return false
+    }
+
     /// Mod files from outside the chat (the watched folder, a QR code's link), each read with its file name (which
     /// tells its site) and offered in turn with Add this mod?; one already here as it is, left out.
-    func offerFiles(_ files: [(name: String, text: String)], from: String) async {
+    /// `outside`: counted as outside's (`outsideMayOffer`) while it waits; the caller counts it in `outsideReading`
+    /// from the moment it takes it (before any await), so two links at once can't both pass.
+    func offerFiles(_ files: [(name: String, text: String)], from: String, outside: Bool = false) async {
         var found: [InstalledMod] = []
         var failed: [String] = []
         for (name, text) in files {
@@ -177,6 +211,7 @@ extension Browser {
             Diagnostics.shared.log("folder", "couldn't read from \(from): \(failed.joined(separator: "; "))")
         }
         guard !found.isEmpty else { return }
+        if outside { outsideIds.formUnion(found.map(\.id)) }
         if offerQueue.isEmpty && modOffer == nil { offerBatch = 0; offerShown = 0 }
         offerQueue += found
         offerBatch += found.count

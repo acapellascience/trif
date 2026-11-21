@@ -299,7 +299,7 @@ final class DeafListener: SpeechListener {
     var flow: String { inner.flow }
 
     static let kind: String? = {
-        let a = ProcessInfo.processInfo.arguments
+        let a = DevFlags.args
         guard let i = a.firstIndex(of: "-speechdeaf"), i + 1 < a.count else { return nil }
         return a[i + 1]
     }()
@@ -615,7 +615,7 @@ final class SpeechInput: ObservableObject {
         }
         looked = true
         if download { downloadTried = true }
-        if ProcessInfo.processInfo.arguments.contains("-oldspeech") { choiceWords = "SFSpeechRecognizer (-oldspeech)"; return }
+        if DevFlags.args.contains("-oldspeech") { choiceWords = "SFSpeechRecognizer (-oldspeech)"; return }
         guard #available(iOS 26.0, *) else { choiceWords = "SFSpeechRecognizer (before iOS 26)"; return }
         choosing = Task { @MainActor in
             await self.chooseAnalyzer(download: download)
@@ -748,12 +748,12 @@ final class SpeechInput: ObservableObject {
     /// (development, `-speechfile <path>`: a recording stands in for the microphone, played at the pace of speech
     /// (`-speechrate N`), then silence, so a hold or a tap can be tried in the Simulator without the Mac's room)
     static let standInFile: URL? = {
-        let a = ProcessInfo.processInfo.arguments
+        let a = DevFlags.args
         guard let i = a.firstIndex(of: "-speechfile"), i + 1 < a.count else { return nil }
         return URL(fileURLWithPath: a[i + 1])
     }()
     static let standInRate: Double = {
-        let a = ProcessInfo.processInfo.arguments
+        let a = DevFlags.args
         if let i = a.firstIndex(of: "-speechrate"), i + 1 < a.count, let n = Double(a[i + 1]), n > 0 { return n }
         return 1
     }()
@@ -807,7 +807,7 @@ final class SpeechInput: ObservableObject {
         let file = SpeechInput.standInFile
         let t0 = CACurrentMediaTime()
         var sessionMs = 0
-        if file == nil || ProcessInfo.processInfo.arguments.contains("-speechsession") {
+        if file == nil || DevFlags.args.contains("-speechsession") {
             do { try takeSession() } catch {
                 phase = .unavailable("The microphone can't be used right now. Type instead.")
                 Diagnostics.shared.log("quick ask", "talking: the audio session wouldn't start (\(error.localizedDescription))")
@@ -1137,6 +1137,7 @@ final class SpeechInput: ObservableObject {
         if resume { SpeechInput.resumeMedia?() }
     }
 
+    #if DEBUG
     /// (development) The SFSpeechRecognizer on a recorded file (SFSpeechURLRecognitionRequest): what it hears, and how.
     func recognize(file: URL) async -> String {
         let status = SFSpeechRecognizer.authorizationStatus()
@@ -1161,6 +1162,7 @@ final class SpeechInput: ObservableObject {
             }
         }
     }
+    #endif
 
     var describe: String {
         "phase \(phase), speech \(SFSpeechRecognizer.authorizationStatus().rawValue) (0 not asked, 1 denied, 2 restricted, 3 allowed), microphone \(AVAudioApplication.shared.recordPermission == .denied ? "denied" : AVAudioApplication.shared.recordPermission == .granted ? "allowed" : "not asked"), on-device \(SpeechInput.recognizer()?.supportsOnDeviceRecognition ?? false) (\(SpeechInput.recognizer()?.locale.identifier ?? "-")), recognizers: \(choiceWords)"

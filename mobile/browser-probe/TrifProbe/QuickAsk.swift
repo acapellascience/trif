@@ -488,14 +488,14 @@ enum QuickStrip {
     /// The most of their box's text the strip shows (about three or four lines; a longer text scrolls in their box,
     /// its last lines and Send in view). `-stripmax N`.
     static let maxPart: CGFloat = {
-        let a = ProcessInfo.processInfo.arguments
+        let a = DevFlags.args
         if let i = a.firstIndex(of: "-stripmax"), i + 1 < a.count, let n = Double(a[i + 1]) { return CGFloat(n) }
         return 112
     }()
     static let minBody: CGFloat = 44
     /// No message box found in the page: its foot, this tall, as before 11-18 (`-stripheight N`: the whole strip).
     static let noBoxBody: CGFloat = {
-        let a = ProcessInfo.processInfo.arguments
+        let a = DevFlags.args
         if let i = a.firstIndex(of: "-stripheight"), i + 1 < a.count, let n = Double(a[i + 1]) { return CGFloat(n) - header }
         return 230
     }()

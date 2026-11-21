@@ -73,6 +73,7 @@ final class Model: ObservableObject {
     let bars = BarState()
 
     init() {
+        DevFlags.dropArgumentDefaults()
         let report = Report()
         let browser = Browser(report: report)
         self.report = report
@@ -80,9 +81,10 @@ final class Model: ObservableObject {
         self.pane = ClaudePane(report: report, browser: browser)
         LocalModels.shared.wake() // (a model download iOS kept going while the app was away)
         self.modsPanel = ModsPanel(browser: browser)
+        #if DEBUG
         // For the Simulator and CI: `-autorun plain,strict,…` (the probe's own pages, or full addresses) runs the
         // checks on each page in turn, as the Checks sheet's button does, and saves them in the report.
-        let args = ProcessInfo.processInfo.arguments
+        let args = DevFlags.args
         if let i = args.firstIndex(of: "-autorun"), i + 1 < args.count {
             let pages = args[i + 1].split(separator: ",").map(String.init)
             Task { @MainActor in
@@ -102,20 +104,25 @@ final class Model: ObservableObject {
             let paths = args[i + 1].split(separator: ",").map { URL(fileURLWithPath: String($0)) }
             Task { @MainActor in try? await Task.sleep(nanoseconds: 1_500_000_000); browser.importFiles(paths) }
         }
+        #endif
         // (development) steps, one at a time, for driving the app in the Simulator without touching it: write
         // Documents/step.json, then `xcrun simctl spawn <device> notifyutil -p com.trif.probe.step`. What a step's
         // script returns goes to Documents/step-out.txt. Steps: {"sheet": "mods|tabs|history|chat|none"},
         // {"modsjs": "…"} (in the Mods tab's page), {"pagejs": "…"} (in the shown tab's page), {"go": "…"},
         // {"newtab": "…"}, {"select": n}, {"close": n}, {"back": true}.
-        let panel = self.modsPanel
+        // (Release has none of it: the Darwin observer, step.json, every step and the development launch flags are
+        // compiled only into Debug builds, the Simulator's. Security batch 11-20: a step runs any JavaScript in any
+        // page, the signed-in chats' too, reads cookies and approves mods.)
         Model.pane = self.pane
         LeavingCover.shared.browser = browser
-        Model.barsRef = self.bars
-        Model.stepRunner = { Task { @MainActor in await Model.runStep(browser: browser, panel: panel) } }
         PhoneSyncModel.shared.applied = { ids in browser.syncApplied(ids) }
         SpeechInput.pauseMedia = { BackgroundPlay.pauseForTalk(browser) }
         SpeechInput.resumeMedia = { BackgroundPlay.resumeAfterTalk(browser) }
         PhoneSyncModel.shared.start(store: browser.mods)
+        #if DEBUG
+        let panel = self.modsPanel
+        Model.barsRef = self.bars
+        Model.stepRunner = { Task { @MainActor in await Model.runStep(browser: browser, panel: panel) } }
         CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), nil, { _, _, _, _, _ in Model.stepRunner?() },
                                         "com.trif.probe.step" as CFString, nil, .deliverImmediately)
         // (development) `-go address`: the shown tab goes there at start.
@@ -152,14 +159,19 @@ final class Model: ObservableObject {
                 report.log("shottest", "done")
             }
         }
+        #endif
     }
 }
 
 extension Model {
-    static var stepRunner: (() -> Void)?
     static weak var pane: ClaudePane?
-    /// (development: the robotHold step, as ContentView's gesture on the robot)
+    /// (development: the robotHold step, as ContentView's gesture on the robot; only the Debug build's step posts it)
     static let robotHoldStep = Notification.Name("trif.robotHoldStep")
+}
+
+#if DEBUG
+extension Model {
+    static var stepRunner: (() -> Void)?
     static weak var barsRef: BarState?
 
     static func runStep(browser: Browser, panel: ModsPanel) async {
@@ -264,7 +276,7 @@ extension Model {
         // -linkhost, at that address); {"phonepair": "forget"}: forget the computer)
         if let v = step["phonepair"] {
             let m = PhoneLinkModel.shared
-            if let text = v as? String, text == "forget" { m.forget() } else if let text = v as? String { m.open(text) }
+            if let text = v as? String, text == "forget" { m.forget() } else if let text = v as? String, text == "noask" { m.asking = nil; m.shown = false } else if let text = v as? String { m.open(text) }
             out = "phone link: " + m.describe
         }
         // ({"phonedrop": 1}: More's link to the computer lost as a suspended app loses it; it reconnects after its waits,
@@ -442,6 +454,21 @@ extension Model {
         // (another app's link: the question up now, if any, and the note)
         if step["applink"] != nil { out = "question: \(browser.appLinkAsking ?? "none"); note: \(browser.status)" }
         if step["copydiag"] != nil { browser.copyDiagnostics() }
+        // (security batch, 11-20: {"diaglog": [kind, text]} a line put in the log as the app would; {"diagtext": 1} the
+        // text Copy diagnostics copies; {"iconlink": "https://…/"} the link TRIF's icon for that site carries (its key
+        // in it); {"linkopen": "trif://…"} how TrifLink takes a link (full screen or a tab, and why); {"outside": 1}
+        // the offers from outside waiting; {"watchfolder": "/path" | ""} that folder watched (as picked in Files) or
+        // none, {"folderscan": 1} looked through now)
+        if let l = step["diaglog"] as? [String], l.count == 2 { Diagnostics.shared.log(l[0], l[1]); out = "logged" }
+        if step["diagtext"] != nil { out = Diagnostics.shared.text() }
+        if let u = step["iconlink"] as? String, let site = URL(string: u) { out = TrifLink.link(to: site).absoluteString }
+        if let u = step["linkopen"] as? String, let url = URL(string: u) { out = "\(TrifLink.open(url))" }
+        if step["outside"] != nil { out = "waiting \(browser.outsideWaiting), reading \(browser.outsideReading), ids \(browser.outsideIds.sorted()), shown \(browser.modOffer?.id ?? "none"), queued \(browser.offerQueue.map(\.id))" }
+        if let f = step["watchfolder"] as? String {
+            if f.isEmpty { FolderWatch.shared.stop() } else { try? FileManager.default.createDirectory(atPath: f, withIntermediateDirectories: true); FolderWatch.shared.choose(URL(fileURLWithPath: f, isDirectory: true)) }
+            out = "watching \(FolderWatch.shared.folderName ?? "none")"
+        }
+        if step["folderscan"] != nil { FolderWatch.shared.scan("the dev step"); out = "scanning" }
         if step["resethint"] != nil { UserDefaults.standard.removeObject(forKey: "fullScreenHinted") }
         if step["fullscreen"] != nil { browser.toggleFullScreen(); out = "full screen: \(browser.fullScreen), note: \(browser.status)" }
         if step["chat"] != nil, let p = Model.pane { out = "shown: \(p.shown), activity: \(p.activity.rawValue), at: \(p.webView.url?.absoluteString ?? "nothing")" }
@@ -508,6 +535,7 @@ extension Model {
         try? out.write(to: docs.appendingPathComponent("step-out.txt"), atomically: true, encoding: .utf8)
     }
 }
+#endif
 
 struct ContentView: View {
     @EnvironmentObject var browser: Browser
@@ -842,7 +870,9 @@ struct ContentView: View {
         }
         // (the icon check's way in, Model.iconCheck: UIApplication.open of the app's own scheme asks "Open in …?" first)
         .onAppear {
+            #if DEBUG
             ContentView.openForCheck = { url in openLink(url) }
+            #endif
             // (a tap on the toolbar that did nothing: the app's state with it, in Diagnostics "toolbar")
             ToolbarWatch.shared.state = { holdWords }
         }
@@ -1098,18 +1128,26 @@ struct ContentView: View {
     }
     private func openLinkNow(_ url: URL) {
         PendingLink.take(url)
-        if TrifLink.target(url) != nil {
+        if TrifLink.isOurs(url) {
             LeavingCover.shared.iconLinkCame("taken by the app")
             Diagnostics.shared.log("icon", "the app takes \(PendingLink.describe(url)), over: \(coverNames)")
         }
         if url.isFileURL { browser.importFiles([url]); try? FileManager.default.removeItem(at: url) }
         else if url.host?.lowercased() == "pair", url.scheme?.lowercased() == "trif" {
-            // (desktop TRIF's Connect a phone code, scanned with iOS's Camera app: My computer pairs at once)
-            closeCovers(); PhoneLinkModel.shared.open(url.absoluteString)
+            // (desktop TRIF's Connect a phone code, scanned with iOS's Camera app: My computer opens with it)
+            // (from outside: asked first, "Connect this iPhone to {computer}?"; security batch 11-20)
+            closeCovers(); PhoneLinkModel.shared.open(url.absoluteString, fromLink: true)
         }
         else if url.host?.lowercased() == "add", url.scheme?.lowercased() == "trif" {
             // (a mod in a link: a QR code's, from desktop TRIF; offered like any other)
-            if let m = ModLinkInURL.read(url) { closeCovers(); Task { await browser.offerFiles([(m.name, m.text)], from: "a code") } }
+            // (security batch, 11-20: from outside, so one at a time: a link while another's mod waits is dropped)
+            if let m = ModLinkInURL.read(url) {
+                if browser.outsideMayOffer("a code") {
+                    closeCovers()
+                    browser.outsideReading += 1
+                    Task { await browser.offerFiles([(m.name, m.text)], from: "a code", outside: true); browser.outsideReading -= 1 }
+                }
+            }
             else { browser.status = "That code's mod couldn't be read: it may be cut short or damaged." }
         }
         else if url.host?.lowercased() == "settings", url.scheme?.lowercased() == "trif" {
@@ -1120,13 +1158,23 @@ struct ContentView: View {
         else if let site = TrifLink.target(url) {
             // (the Add to Home Screen sheet, if it's for this site, stays: it says it's done, and the person closes it;
             // likewise the list of icons waiting, if they came from its profile, which also clears the list)
+            // (security batch, 11-20: full screen, and an icon counted as installed, only for a link TRIF made:
+            // TrifLink.open; any other trif://open is an ordinary tab with its address, and never connects a site)
             let host = Site.of(site.host ?? ""), set = TrifLink.set(url)
-            ProfileHandoff.shared.opened(fromIconOf: host, set: set)
-            IconQueue.shared.opened(site: host, set: set)
+            let how = TrifLink.open(url)
+            if case .fullScreen = how {
+                ProfileHandoff.shared.opened(fromIconOf: host, set: set)
+                IconQueue.shared.opened(site: host, set: set)
+            }
             if !(addingIcon && ProfileHandoff.shared.installed) { addingIcon = false }
             if !(showIconQueue && ProfileHandoff.shared.installed) { showIconQueue = false }
             closeCovers(all: true)
-            if TrifLink.wantsFullScreen(url) { browser.openFullScreen(site) } else { browser.openFromIcon(site) }
+            switch how {
+            case .fullScreen: browser.openFullScreen(site)
+            case .tab(let why):
+                if TrifLink.wantsFullScreen(url) { Diagnostics.shared.log("icon", "a full screen link not taken as one (\(why)): an ordinary tab") }
+                browser.openFromIcon(site)
+            }
         }
         else if url.scheme == "trif" { report.log("icon", "a trif:// link that isn't an http(s) site, ignored") }
     }
@@ -1142,7 +1190,9 @@ struct ContentView: View {
             }
         }
     }
+    #if DEBUG
     static var openForCheck: ((URL) -> Void)?
+    #endif
     /// What covers the page, by name ("none"), for the dev step {"view": 1} and the icon check (Model.iconCheck).
     private var coverNames: String {
         let all: [(Bool, String)] = [(pane.shown, "chat"), (showTabs, "tabs"), (showMods, "mods"), (showAddress, "address"),
@@ -1347,7 +1397,7 @@ struct ContentView: View {
     /// The toolbar's tabs button before the Mods switch. `false` (Tim, 11-17, later the same day: "the old order"):
     /// back, forward, chat, [page], Mods, tabs, Home Screen. `true` (or the launch flag `-tabsfirst`) is the order he
     /// tried that day: back, forward, chat, [page], tabs, Mods, Home Screen.
-    static let tabsBeforeMods = false || ProcessInfo.processInfo.arguments.contains("-tabsfirst")
+    static let tabsBeforeMods = false || DevFlags.args.contains("-tabsfirst")
 
     /// The Mods tab: a switch, on or, with all paused, off (Tim, 11-15; the robot is the chat's now), with the count
     /// waiting for an OK.
@@ -1368,7 +1418,7 @@ struct ContentView: View {
 
     /// The page: back to it from whatever covers it; on the page, a + for a new tab.
     private var pageButton: some View {
-        Button { ToolbarWatch.shared.fired("page"); showPage() } label: { PageGlyph(letter: ProcessInfo.processInfo.arguments.contains("-pageletter") ? String(siteLabel.prefix(1)).uppercased() : nil, plus: !covered) }
+        Button { ToolbarWatch.shared.fired("page"); showPage() } label: { PageGlyph(letter: DevFlags.args.contains("-pageletter") ? String(siteLabel.prefix(1)).uppercased() : nil, plus: !covered) }
             .accessibilityLabel(covered ? backToTab : "New Tab")
     }
     /// The tabs, their count in a rounded square.
@@ -1923,7 +1973,7 @@ final class BarState: NSObject, ObservableObject {
     }
     private var shifting = false
     /// (development) `-nobarshift` at launch: the bars move without the page moving with them, as before 11-16.
-    static let compensates = !ProcessInfo.processInfo.arguments.contains("-nobarshift")
+    static let compensates = !DevFlags.args.contains("-nobarshift")
 
     /// What the bars cover now, told to WebKit (every frame they move); with `range`, also the viewport's range
     /// (compact … full, for the page's vh units), when a bar's size changes.
@@ -2036,12 +2086,12 @@ struct FullScreenExit: View {
     let long: Bool
     let leave: () -> Void
     @State private var bright = true
-    static let robot = ProcessInfo.processInfo.arguments.contains("-exitrobot")
+    static let robot = DevFlags.args.contains("-exitrobot")
     /// (`-exitbelow`: where it was before 11-17, 60 points under the status bar at the right)
-    static let belowBar = ProcessInfo.processInfo.arguments.contains("-exitbelow")
+    static let belowBar = DevFlags.args.contains("-exitbelow")
     static let below: CGFloat = 60
     /// (development: `-exity <points>`, the circle's centre that far down)
-    static let devY: CGFloat? = { let a = ProcessInfo.processInfo.arguments; return a.firstIndex(of: "-exity").flatMap { a.indices.contains($0 + 1) ? Double(a[$0 + 1]).map { CGFloat($0) } : nil } }()
+    static let devY: CGFloat? = { let a = DevFlags.args; return a.firstIndex(of: "-exity").flatMap { a.indices.contains($0 + 1) ? Double(a[$0 + 1]).map { CGFloat($0) } : nil } }()
     var body: some View {
         GeometryReader { g in
             // (Tim, 11-17: "can we move it up?": the round button straddles the foot of the status bar, beside the

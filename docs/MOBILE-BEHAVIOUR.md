@@ -555,9 +555,40 @@ docs/PHONE-SYNC.md 2a on branch phone-link, D16, D17.)
   covers it so the OS's picture is the robot, never another page; the launch screen the same. Otherwise the OS keeps
   its real picture. Off on return once the icon's tab is drawn (≤ 0.8 s), 0.2 s fade. [shared: core/leaving-cover.js,
   the "icon use" decision]
+- Only TRIF's own icons open full screen (security, 11-20): anything can open the app's links (a web page, a message,
+  another app), and full screen shows no address, so a page made to look like a bank's would show nothing of where it
+  is. Each install makes a secret key once (iPhone: the Keychain) and puts it in every icon link it makes; a link asks
+  for full screen with the key, or (an icon made before the key) with none, for exactly its site's start address
+  (`https://host/`, what every icon opens) on a site whose icon has opened TRIF before. Anything else opens as an
+  ordinary tab with its address shown, logged. An icon made before the key that never opened TRIF opens as a tab;
+  making it again fixes it. Only a link taken as the icon's marks the icon as installed.
+- No link connects a site: an icon's site may have been connected by the upgrade rule (Site access), but a link alone
+  never connects one; the new tab follows site access like any other.
 - Icons' look, names and batches: Tim's design 11-16/11-17 (see the notes); the profile is named "{Site} for TRIF".
 - Several icons at once (11-16): "Add to Home Screen later" keeps an icon with its choices on a list (up to 20, across
   launches), added together in one go; the list clears once TRIF is opened from one of them.
+
+## Mods from outside (security, 11-20)
+
+- Every way a mod arrives ends at Add this mod? or the approval card, or (an import, a file the person opened in TRIF)
+  is added off and waits for its switch; nothing from outside is ever installed running. The ways: a chat's reply
+  (judged: Chat offers), Paste, a page's .js download, a `trif://add` link (a QR code's), the watched folder, Files /
+  share sheet / AirDrop import, phone sync, and the quick ask's look-only auto-add (the person's own quick ask only:
+  its pill is made only by their ask, or by the note of their own Send picked up after a restart; never on a sensitive
+  site).
+- Outside sources (a link, a download, the watched folder) give one batch at a time: while one of their offers is up,
+  queued or being read, another link or download is dropped with a log line and the note "TRIF is already asking
+  about a mod from outside. Answer that one first."; the folder isn't looked in then (its files wait, unseen).
+- The watched folder offers at most 3 new files a look; the rest wait for the next look (the app back in front),
+  logged.
+- A download is offered only after the person's touch on that page (within 10 s: a signed address or a new window can
+  take a few); one a page's script starts by itself is let go, logged.
+- A paste or download while an offer is up waits behind it, never replaces it.
+- Adding a mod never connects its site; for a site TRIF isn't connected on, the note says it waits: "Added {name}. It
+  runs once you connect TRIF on {site}." (Site access.)
+- Phone sync: pairing is the consent (sync is the person's own computer; new mods arrive as an import or an edit
+  would, holds and sensitive sites as ever). So a pairing code that comes in a link (the Camera app, or anything that
+  opened `trif://pair`) asks "Connect this iPhone to {computer}?" first; TRIF's own scanner pairs at once.
 
 ## Safety and privacy
 
@@ -566,6 +597,15 @@ docs/PHONE-SYNC.md 2a on branch phone-link, D16, D17.)
 - Diagnostics never hold cookie values, API keys, page titles with addresses, or a link's address/number.
 - Diagnostics are the person's to send: the Mods tab's Send diagnostics…, and the page menu's Copy diagnostics (11-17,
   the same text, reachable without scrolling on the smallest phone).
+- What leaves the phone is made safe first (security, 11-20) [shared: core/diagnostics-redact.js]: sites only
+  (`scheme://host`, no path, query or fragment); a sensitive site's host or address is "a sensitive site" (TRIF's own
+  chats, claude.ai and chatgpt.com, keep their host and their pages' shape with ids shortened); cookies as totals,
+  never per domain or by name; any long id (a conversation's, a tab's) shortened to "…" and its last 8; a mod's own
+  log lines counted, never copied. TRIF's stand-in hosts (localhost, 127.0.0.1, ::1, .local, .localhost) stay whole.
+  The log kept on the phone, in the app's own container, keeps its detail.
+- Development tools never ship (security, 11-20): the step driver, its helpers and every development launch flag are
+  compiled only into Debug builds; a Release build (sideload, TestFlight) has none, and drops launch arguments given
+  as settings.
 - API keys stay on the device (Keychain / Keystore), this device only.
 - On-device models download only when asked, with a visible bar; a model runs only after its checksum check.
 

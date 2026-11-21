@@ -148,7 +148,7 @@ struct PanelEngine {
 
     /// (development) `-apibase http://localhost:<port>`: every engine at a local mock (a loopback address only).
     static let mockBase: URL? = {
-        let args = ProcessInfo.processInfo.arguments
+        let args = DevFlags.args
         guard let i = args.firstIndex(of: "-apibase"), i + 1 < args.count, let u = URL(string: args[i + 1]),
               ["localhost", "127.0.0.1", "::1"].contains(u.host ?? "") else { return nil }
         return u

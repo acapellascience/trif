@@ -104,6 +104,15 @@ chatgpt.com's ••• → Project settings: from the help pages, not seen sign
 | S3 | A redirect from a connected site into a disconnected one lands with nothing of TRIF | PASS | set at the response |
 | S4 | Back to a page WebKit kept with TRIF in it, after its site was disconnected: loaded again, clean | PASS | |
 | S5 | Disconnected: the quick ask stops at the card; Connect: readable at once, the quick ask fills the chat | PASS | no reload (no mods there) |
+| X1 | Security (11-20): trif://open full screen only with this install's key, or an old icon's start address on a site with an icon record; else a tab | PASS | TrifLink.open's answers |
+| X2 | A forged full screen link from outside: an ordinary tab, its site left disconnected; TRIF's own icon link: full screen | PASS | `simctl openurl` |
+| X3 | Three trif://add links at once: one Add this mod?, two dropped (logged); the next link after the answer is offered | PASS | |
+| X4 | The watched folder, five new files: three offered, two at the next look; a link meanwhile dropped | PASS | |
+| X5 | A .js download a page's script starts with no touch: not offered, logged | PASS | |
+| X6 | A trif://pair link: "Connect this iPhone to {computer}?", nothing paired by itself | PASS | shot 576 |
+| X7 | A chat's mod for a disconnected site: added, the site stays disconnected, the note says it waits | PASS | |
+| X8 | Copy diagnostics: sites only, no sensitive site, cookies as totals, ids shortened, no mod log words; the phone's log keeps them | PASS | `simctl pbpaste` |
+| X9 | Paste: Add this mod?, a second paste queued behind it; an imported file added off | PASS | |
 
 With P1-P6 the same build ran A1, A2, A3, B11 and F1: PASS. On the signed-in Simulator (Tim's accounts, nothing
 created or sent): Set it up filled claude.ai's real "New project" (name, description, Create enabled; shot 566) and

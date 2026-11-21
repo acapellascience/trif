@@ -8,6 +8,25 @@ import Foundation
 import UIKit
 import WebKit
 
+/// The development launch flags (`-chathome`, `-apibase`, `-nosafe`, `-bare`, `-clipbase`, `-linkhost`, …: see
+/// mobile/IOS-AGENT-NOTES.md, "Dev launch flags"): read only in Debug builds (the Simulator's). A Release build (the
+/// .ipa, TestFlight) sees none, whatever it's launched with, so none of them can change what it does (security batch,
+/// 11-20: several switch a safeguard off or point TRIF somewhere else). Every flag is read through this.
+enum DevFlags {
+    #if DEBUG
+    static let args: [String] = ProcessInfo.processInfo.arguments
+    #else
+    static let args: [String] = []
+    #endif
+    /// Release: launch arguments as settings (`-connectedSites (…)`, which UserDefaults takes from any `-key value`
+    /// pair) dropped before anything reads a setting. Debug keeps them (the Simulator's tests set prefs that way).
+    static func dropArgumentDefaults() {
+        #if !DEBUG
+        UserDefaults.standard.removeVolatileDomain(forName: UserDefaults.argumentDomain)
+        #endif
+    }
+}
+
 extension String {
     /// nil for an empty string (for `?? "none"`).
     var nonEmpty: String? { isEmpty ? nil : self }
@@ -188,7 +207,7 @@ final class Diagnostics {
     nonisolated static func watchMainThread() {
         let q = DispatchQueue(label: "trif.hang-watch", qos: .utility)
         // (development: -hang100 logs any wait over 100 ms, ten looks a second)
-        let fine = ProcessInfo.processInfo.arguments.contains("-hang100")
+        let fine = DevFlags.args.contains("-hang100")
         let limit = fine ? 0.1 : 0.5
         final class Out: @unchecked Sendable { var waiting = false }
         let out = Out()
@@ -222,12 +241,21 @@ final class Diagnostics {
     }
 
     /// The log as a file to share: a header, then one line per event, oldest first.
-    /// The diagnostics as text: what Send diagnostics… sends and Copy diagnostics copies.
+    /// The diagnostics as text: what Send diagnostics… sends and Copy diagnostics copies. Made safe to share (security
+    /// batch, 11-20; the shared rule core/diagnostics-redact.js): sites only, never where on them; nothing of a
+    /// sensitive site's; cookies as totals; long ids shortened; a mod's own log lines counted, not copied. The log on
+    /// the phone (diagnostics.json, in the app's own container) keeps its detail. If the rule can't answer, only each
+    /// line's time and kind go out.
     func text() -> String {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        var text = "TRIF iPhone app diagnostics\nmade \(f.string(from: Date())) on \(Diagnostics.device()), iOS \(UIDevice.current.systemVersion), app \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))\n\n"
-        for e in events { text += "\(f.string(from: e.at))  \(e.kind)  \(e.text)\n" }
+        var text = "TRIF iPhone app diagnostics\nmade \(f.string(from: Date())) on \(Diagnostics.device()), iOS \(UIDevice.current.systemVersion), app \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))\n"
+        let safe = Core.shared.call("diagnosticsRedact.all", [events.map { [$0.kind, $0.text] }, SiteAccess.shared.own]) as? [String]
+        text += safe?.count == events.count ? "(sites only: no addresses, nothing of sensitive sites, cookies as totals)\n\n" : "(the lines' words left out: they couldn't be made safe to share)\n\n"
+        for (i, e) in events.enumerated() {
+            let words = safe?.count == events.count ? safe![i] : "(left out)"
+            text += "\(f.string(from: e.at))  \(e.kind)  \(words)\n"
+        }
         return text
     }
 
@@ -374,7 +402,7 @@ final class CookieKeeper: NSObject, WKHTTPCookieStoreObserver {
     /// call that, in WebKit's current source, ends in the same save: removing cookies changed since the distant future
     /// (none), then saving (undocumented behaviour, not a contract). `-publicflush` forces the public one.
     private static let flushSelector = NSSelectorFromString("_flushCookiesToDiskWithCompletionHandler:")
-    var usesPrivateFlush: Bool { !ProcessInfo.processInfo.arguments.contains("-publicflush") && store.responds(to: CookieKeeper.flushSelector) }
+    var usesPrivateFlush: Bool { !DevFlags.args.contains("-publicflush") && store.responds(to: CookieKeeper.flushSelector) }
 
     /// WebKit's cookies onto disk now; `done` once written.
     func flush(_ why: String?, done: (@MainActor () -> Void)? = nil) {

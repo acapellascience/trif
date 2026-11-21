@@ -19,7 +19,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
 - Page text and model replies are untrusted; "Add this mod?" is the consent step: nothing is installed without it.
 - No private routes or tokens of claude.ai / chatgpt.com: TRIF reads only what their pages show.
 - Each step ends with the .ipa built and copied (below) and its dSYM UUID reported. Screenshots go to
-  `mobile/browser-probe/shots/` (not committed), numbered on from the last (575 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557, ChatGPT's redesign 558, the pickup 559-561, chat projects 562-568, site access 569-575): `NNN-se-what.png`.
+  `mobile/browser-probe/shots/` (not committed), numbered on from the last (576 now; ios-chatgpt used 520-529, the mod matrix 530-549, edit blocks 550-557, ChatGPT's redesign 558, the pickup 559-561, chat projects 562-568, site access 569-575, security 576): `NNN-se-what.png`.
 - Leave RobotShape / the robot outline alone: another agent has Tim's shape options.
 
 ## Build and test
@@ -30,6 +30,14 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   so the Keychain works there: unsigned it answers -34018). Then `simctl install`, and launch with flags (below).
   Launch with `-nosafe` when a test terminates the app while it's in front: else safe mode switches off the mods that
   were running (a terminate in front is an unclean end).
+- DEBUG BUILDS ONLY (security batch, 11-20): the step driver below (the Darwin observer, step.json, `Model.runStep` and
+  its helpers: the Model extensions in WebClip.swift, Browser.swift, LocalModels.swift, SpeechInput.recognize(file:),
+  LeavingCover.showForCheck, ContentView.openForCheck) and every dev launch flag (read only through `DevFlags.args`,
+  Diagnostics.swift: [] in Release) are `#if DEBUG`. A Release build (the .ipa, TestFlight) has none of it, and
+  `DevFlags.dropArgumentDefaults()` drops `-key value` launch arguments UserDefaults would take as settings. Check after
+  a change: build Release (`-configuration Release -sdk iphoneos CODE_SIGNING_ALLOWED=NO`) and `strings` the binary for
+  `com.trif.probe.step`, `step.json`, `-chathome`, `-apibase`, `-nosafe` (all absent; 11-20: 0 hits). New code that
+  reads a flag: `DevFlags.args`, never `ProcessInfo.processInfo.arguments`. The matrix and every step need a Debug build.
 - Driving it: the app reads `Documents/step.json` when it gets the Darwin notification `com.trif.probe.step`
   (`xcrun simctl spawn <dev> notifyutil -p com.trif.probe.step`) and writes `Documents/step-out.txt`. Steps (TrifProbeApp
   `Model.step`): go, newtab, select, sheet ("chat" opens the robot view), chat, closechat, newchat, chats, showchat,
@@ -83,6 +91,11 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   way of reading the shown page tried through its web view: REFUSED on a disconnected page), sensitiveown ("pattern" /
   "-pattern"), accessupgrade (the first-start rule runs again at the next launch; `"keep": []` sets the connected list
   first)…
+  security (11-20): diaglog ([kind, text]: a line put in the log), diagtext (what Copy diagnostics copies), iconlink
+  ("https://…/": the link TRIF's icon for that site carries, its key in it), linkopen ("trif://…": how TrifLink.open
+  takes it: fullScreen/tab and why), outside (the offers from outside waiting: ids, reading, shown, queued),
+  watchfolder ("/path" in the app's container: watched as if picked in Files; "": none), folderscan, phonepair "noask"
+  (the link's pairing question closed).
   Real touches: the iOS Simulator tool (tap, swipe, touch2_path for the two-finger hold). Screenshots: `simctl io <dev> screenshot`.
 - Logs: `Library/Application Support/report.json` (kinds: claude, panel, mods, icon, fullscreen…) and `diagnostics.json`
   (kinds: hang, local model, chats, chat, chat files, memory…) in the app's data container.
@@ -165,6 +178,10 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   P4 needs P3's project. Dev steps `projectstate` (each service's offer answer, project, guide; each chat's setup) and
   `projectsetup` ("Claude": ⋯'s Set it up). Not in it
   (done by hand with the iOS Simulator tool): the phone locked (LOCK/HOME), dark mode, rotation, the keyboard up.
+  X1-X9 (11-20, security): links (X1 TrifLink.open's answers, X2 `simctl openurl` a forged and a real icon link),
+  trif://add bursts (X3), the watched folder's cap (X4, a folder in the app's Documents), a script's download (X5), a
+  pair link (X6), a mod for a disconnected site (X7), redacted diagnostics through `simctl pbpaste` (X8), paste and
+  import (X9). They leave mods named MxX… (deleted at the next run like the rest).
   `-gpthome <url>` (11-19): ChatGPT's own stand-in (Claude's stays `-chathome`'s). Dev steps `panelmsg` (any Mods tab
   message through ModsPanel.handle: `{"type": "delete", "id"}`) and `modlist` (each mod: id, name, site, on/held,
   history count, code length).
@@ -316,7 +333,7 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   JS counts as a gesture). App to the background: `simctl launch <dev> com.apple.Preferences`; back: `simctl launch`
   the app; lock: the iOS Simulator tool's LOCK button (HOME wakes / unlocks). Steps still answer in the background
   while something plays.
-- Dev launch flags: `-speechfile <wav>` (a recording stands in for the microphone in every hold or tap of it: played in
+- Dev launch flags (Debug builds only: `DevFlags.args`; a Release build ignores every one): `-speechfile <wav>` (a recording stands in for the microphone in every hold or tap of it: played in
   0.1 s pieces at the pace of speech, then silence for as long as listening goes on; `-speechrate N` N times as fast;
   make them with `say -v Samantha -o x.wav --data-format=LEI16@16000 "…"` and ffmpeg's anullsrc for silences, never the
   live microphone), `-oldspeech` (SFSpeechRecognizer even where iOS 26's SpeechAnalyzer is there), `-speechdeaf analyzer|recognizer` (that recognizer gets no audio: the switch to the other, with the audio kept, can be tried), `-speechsession` (the real audio session switch with `-speechfile`), `-chathome <url>`, `-apibase <loopback>`, `-modelbase <loopback>`, `-memorygb 4` (a 4 GB phone's
@@ -845,6 +862,30 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   `TRIF_E2E_CHROME=<Chrome for Testing binary>` (the worktree has no tests/e2e/.browsers). make-project.rb: regenerates the project
   (sources globbed); the pbxproj is also edited by hand (ids `A1C10B0E5EB1C11B000000xx`).
 
+- Security (11-20, Tim's four quick fixes; rules in docs/MOBILE-BEHAVIOUR.md "Icons", "Mods from outside", "Safety and
+  privacy"):
+  - `DevFlags` (Diagnostics.swift): every dev launch flag's one reader, [] in Release; `#if DEBUG` round the step
+    driver and its helpers (Build and test).
+  - Icon links (WebClip.swift): `IconKey` (16 random bytes, base64url, Keychain service "TRIF icon links", after first
+    unlock; prefs `iconLinkKey` if the Keychain refuses) goes into every icon link as `k=`; `TrifLink.open(url)` →
+    `.fullScreen(why)` / `.tab(why)`: the key, or no key + exactly `scheme://host/` + an "iconTabs" record for its site
+    (icons made 11-16..11-20); `TrifLink.isOurs` gates showIconTabAtLaunch, the leaving cover's icon note, and
+    ProfileHandoff/IconQueue's "installed". ContentView.openLinkNow logs a full screen link taken as a tab.
+  - Outside offers (Browser.swift `outsideIds`/`outsideReading`, FolderWatch.swift `outsideWaiting`,
+    `outsideMayOffer`): trif://add links (openLinkNow), downloads (`offer(text:outside:)`) and the folder
+    (`offerFiles(…, outside: true)`, `FolderWatch.perScan` = 3, `newFiles(limit:)` reads no more than that) one batch
+    at a time; callers bump `outsideReading` before any await. `offer(text:)` queues behind a shown offer (`present`).
+    ModDownloads.take notes whether a touch came in the last 10 s (TouchClock); no touch → cancelled, logged
+    ("outside offers"). Browser.addMod's note for a site not connected.
+  - Pairing from a link (PhoneLinkView.swift): `PhoneLinkModel.open(text, fromLink: true)` sets `asking`; the screen
+    asks, Connect → `confirmAsked()`. The scanner and the dev step pair at once.
+  - Diagnostics' copy (Diagnostics.text(), used by Copy and Send): `TrifCore.diagnosticsRedact.all` over the events
+    with the person's own sensitive list; the on-disk diagnostics.json unchanged. Rule and cases:
+    mobile/shared/core/diagnostics-redact.js, diagnostics-redact-cases.json; `node --test
+    mobile/test/core-diagredact.test.js`. Redaction is by pattern over free text (addresses, host-like words, ids,
+    the cookie and mod log kinds): a new log line with page words in some other shape would get through; keep page
+    text out of log lines in the first place.
+
 ## Tim's decisions
 
 - Site access (Tim 11-20: "let's opt in per site. it's not that much hassle compared to now"; decided with the main
@@ -1302,6 +1343,26 @@ long descriptions; docs/IOS-APP-STRINGS.md every word people see. This file is t
   tabs.json); tabs behind are let go after 20 s, so their counts stand still until shown again.
 
 ## Open and unverified
+
+- Security: waiting for the Fable review (Tim 11-20: a Fable red-team near the app's completion; not done here):
+  - Prompt injection through the outline → a mod that sends data off the page: are its powers plain on the card?
+  - Home Screen icons' .mobileconfig profiles are unsigned, teaching people to accept "Unverified": sign them with the
+    developer certificate.
+  - File protection on tab shots, history and notes (NSFileProtectionComplete), and no tab-list picture of sensitive
+    pages.
+  - A clickjacking guard on the phone (desktop has one).
+  - The phone link's pre-auth handling of garbage from the LAN (fuzz the Mac side).
+  - (found here, for the same review) CookieKeeper still uses WebKit's private `_flushCookiesToDiskWithCompletionHandler:`
+    in Release (Tim's choice for now; `-publicflush` was the only switch and is Debug-only now): App Review risk.
+  - (found here) History import (a file opened in TRIF) merges visits with no question; a phone-sync new mod takes the
+    computer's switch (by design, D8: pairing is the consent).
+- Security fixes (11-20): Simulator only. Matrix X1-X9 PASS (shot 576: the pairing question), the whole matrix 63 PASS
+  + A5 BLOCKED as before, iconcheck 15/15; the Release device build checked by `strings` (no step driver, no flags:
+  only "-noserver" left, inside a log message, its reader [] in Release) and a Release Simulator build launched with
+  flags answered no step. Not tried: a phone; a real Home Screen icon made before the key on Tim's phone (each one that opened TRIF
+  since 11-16 has its record, so it stays full screen; one never opened opens as a tab: make it again); a real tapped
+  .js download after this change (the touch window is 10 s; a tap through ChatGPT's signed-address popup should be
+  inside it); the Camera app scanning a real pairing code (now one more tap: Connect).
 
 - Site access (11-20): Simulator only (shots 569-575; matrix S1-S5 and A1-A3, B3, B11, F1, P2 PASS; a page's own
   scripts saw no handler, no window.webkit, no TRIF global, no mod or every-site mod on a disconnected page, in a

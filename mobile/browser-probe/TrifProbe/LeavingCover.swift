@@ -28,7 +28,7 @@ final class LeavingCover {
     private var events: [String] = []
     private var frontAt = Date()
     /// (development) `-nocover`: never covered, as before 11-18, to compare.
-    static let off = ProcessInfo.processInfo.arguments.contains("-nocover")
+    static let off = DevFlags.args.contains("-nocover")
 
     private func note(_ s: String) {
         events.append("+\(Int(Date().timeIntervalSince(frontAt) * 1000)) ms \(s)")
@@ -129,6 +129,7 @@ final class LeavingCover {
     func describe() -> String {
         "icon use now: \(reason() ?? "no (the real picture stays)"); came by an icon \(arrivedByIcon); cover \(window?.isHidden == false ? "up" : "down")\n" + events.joined(separator: "\n")
     }
+    #if DEBUG
     func showForCheck() {
         guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
         show(in: scene)
@@ -137,6 +138,7 @@ final class LeavingCover {
             hide(animated: false)
         }
     }
+    #endif
 }
 
 /// Black, TRIF's robot at the exact centre of the whole screen (not the safe area) at its own size, no words: CoverRobot,

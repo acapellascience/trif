@@ -267,6 +267,9 @@ final class PhoneLinkModel: ObservableObject {
     @Published private(set) var codeName: String?
     @Published var scanning = false
     @Published var note: String?
+    /// A code that came in a link (security batch, 11-20): anything can open a trif:// link, and pairing replaces the
+    /// computer this iPhone syncs its mods with, so a link's code waits for the person's Connect.
+    @Published var asking: PairCode?
     private var pairer: PhoneLinkPairer?
     /// What the computer lists this iPhone as (Tim's default 17, 11-17): the person names it at pairing; "iPhone" to
     /// start with (iOS gives apps only "iPhone" for the device's name, without an entitlement TRIF doesn't ask for).
@@ -279,14 +282,27 @@ final class PhoneLinkModel: ObservableObject {
         return t.isEmpty ? "iPhone" : String(t.prefix(60))
     }
 
-    /// A `trif://pair` link (the Camera app, or a scan): pairs at once. False when it isn't a code.
+    /// A code: from TRIF's own scanner, paired at once; from a `trif://pair` link (`fromLink`: the Camera app, or
+    /// anything else that opened it), asked first. False when it isn't a code.
     @discardableResult
-    func open(_ text: String) -> Bool {
+    func open(_ text: String, fromLink: Bool = false) -> Bool {
         shown = true
         scanning = false
         guard let code = PairCode.parse(text) else { note = "That isn't a code from TRIF on your computer."; return false }
+        if fromLink {
+            pairer?.cancel(); pairer = nil; step = nil; note = nil
+            asking = code
+            Diagnostics.shared.log("phone link", "a pairing code came in a link: asked before connecting")
+            return true
+        }
         pair(code)
         return true
+    }
+    /// The question's Connect.
+    func confirmAsked() {
+        guard let code = asking else { return }
+        asking = nil
+        pair(code)
     }
 
     func pair(_ code: PairCode) {
@@ -320,11 +336,11 @@ final class PhoneLinkModel: ObservableObject {
         step = nil
     }
 
-    func reset() { pairer?.cancel(); pairer = nil; step = nil; note = nil; scanning = false }
+    func reset() { pairer?.cancel(); pairer = nil; step = nil; note = nil; scanning = false; asking = nil }
 
     /// (development) `-linkhost 127.0.0.1:<port>`: loopback only.
     static var devEndpoints: [NWEndpoint]? {
-        let args = ProcessInfo.processInfo.arguments
+        let args = DevFlags.args
         guard let i = args.firstIndex(of: "-linkhost"), i + 1 < args.count else { return nil }
         let parts = args[i + 1].split(separator: ":")
         guard parts.count == 2, ["127.0.0.1", "localhost"].contains(String(parts[0])), let port = NWEndpoint.Port(String(parts[1])) else { return nil }
@@ -342,7 +358,7 @@ final class PhoneLinkModel: ObservableObject {
         case .paired(let n)?: s = "paired(\(n))"
         case .failed(let f)?: s = "failed(\(f))"
         }
-        return "\(c); step \(s)" + (note.map { "; note \($0)" } ?? "")
+        return "\(c); step \(s)" + (asking.map { "; asking about \($0.name)" } ?? "") + (note.map { "; note \($0)" } ?? "")
     }
 }
 
@@ -357,7 +373,16 @@ struct PhoneLinkView: View {
     var body: some View {
         NavigationStack {
             List {
-                if model.scanning {
+                if let code = model.asking {
+                    // (a code from a link: the person says it's their own computer's before anything connects)
+                    Section {
+                        Text("Connect this iPhone to \(code.name)?").bold()
+                        Button("Connect") { model.confirmAsked() }
+                        Button("Cancel", role: .cancel) { model.asking = nil; model.shown = false }
+                    } footer: {
+                        Text("Only if you just showed this code in TRIF on your own computer. Your mods will sync with it.")
+                    }
+                } else if model.scanning {
                     Section { scanner } footer: { Text("Scan the code in TRIF's Settings on your computer: Connect a phone.") }
                 } else if let step = model.step {
                     Section { progress(step) }
@@ -368,7 +393,7 @@ struct PhoneLinkView: View {
                     }
                 }
                 if let note = model.note { Section { Text(note).foregroundStyle(.red) } } // (a QR that isn't TRIF's, too)
-                if !model.scanning {
+                if !model.scanning && model.asking == nil {
                     if model.computer == nil && model.step == nil {
                         Section {
                             Text("Your coding agent on your computer makes the mod. In TRIF on your computer, open Settings, choose Connect a phone, and scan the code.")

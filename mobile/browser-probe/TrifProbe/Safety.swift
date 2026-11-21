@@ -44,7 +44,7 @@ final class Safety: ObservableObject {
         snapshots = SwitchSnapshot.load()
         session = (UserDefaults.standard.data(forKey: Safety.key)).flatMap { try? JSONDecoder().decode(Session.self, from: $0) } ?? Session(clean: true, sites: [:])
         switchedOff = (UserDefaults.standard.data(forKey: Safety.offKey)).flatMap { try? JSONDecoder().decode([String: SwitchedOff].self, from: $0) } ?? [:]
-        let args = ProcessInfo.processInfo.arguments
+        let args = DevFlags.args
         let ago = session.since.map { " \(Int(Date().timeIntervalSince($0))) s before this launch" } ?? ""
         Diagnostics.shared.log("safe mode", session.clean
             ? "the last run ended cleanly (it had left the front\(ago), or never came to it)"

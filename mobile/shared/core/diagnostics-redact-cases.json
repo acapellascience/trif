@@ -1,0 +1,117 @@
+{
+ "own": [
+  "mybank.example"
+ ],
+ "lines": [
+  [
+   "icon",
+   "opened youtube.com from its Home Screen icon: its own tab (https://www.youtube.com/watch?v=abc123&t=4), back to full screen",
+   "opened youtube.com from its Home Screen icon: its own tab (https://www.youtube.com), back to full screen"
+  ],
+  [
+   "icon",
+   "opened https://example.com/search?q=private+words#top from a link.",
+   "opened https://example.com from a link."
+  ],
+  [
+   "link",
+   "a Home Screen icon's link to https://www.chase.com/personal/login (full screen)",
+   "a Home Screen icon's link to a sensitive site (full screen)"
+  ],
+  [
+   "site access",
+   "connected online.chase.com (the robot's card); mybank.example too; bank.mybank.example/x",
+   "connected a sensitive site (the robot's card); a sensitive site too; a sensitive site/x"
+  ],
+  [
+   "chat",
+   "Claude for x.com: https://claude.ai/chat/3f2a9c1e-1b2c-4d5e-8f90-1234567890ab?x=1 loaded",
+   "Claude for x.com: https://claude.ai/chat/…567890ab loaded"
+  ],
+  [
+   "chat",
+   "ChatGPT: https://chatgpt.com/c/6740f2a1-0bcd-8000-9abc-0123456789ab.",
+   "ChatGPT: https://chatgpt.com/c/…456789ab"
+  ],
+  [
+   "pickup",
+   "Claude for x.com: conversation 3f2a9c1e-1b2c-4d5e-8f90-1234567890ab loaded behind the tab",
+   "Claude for x.com: conversation …567890ab loaded behind the tab"
+  ],
+  [
+   "cookies",
+   "just after launch: 312 cookies: x.com 40 (3 for this run only), chase.com 12, google.com 30",
+   "just after launch: 312 cookies"
+  ],
+  [
+   "cookies",
+   "going to the background: 314 cookies; changed: x.com 41, chase.com none",
+   "going to the background: 314 cookies; changed on 2 sites"
+  ],
+  [
+   "cookies",
+   "cookies are written down at once with WebKit's private flush",
+   "cookies are written down at once with WebKit's private flush"
+  ],
+  [
+   "cookie names",
+   "just after launch, x.com: auth_token (.x.com, until 2027-01-01 10:00), ct0 (.x.com, this run only)",
+   "just after launch: 2 cookie names (not copied)"
+  ],
+  [
+   "cookie names",
+   "going to the background, x.com: none now",
+   "going to the background: none"
+  ],
+  [
+   "cookie names",
+   "just after launch: none for x.com, twitter.com, instagram.com",
+   "just after launch: none"
+  ],
+  [
+   "cookie changes",
+   "added ct0 (.x.com, this run only), replaced auth_token (.x.com, until 2027-01-01 10:00), removed guest_id (.x.com)",
+   "1 added, 1 replaced, 1 removed"
+  ],
+  [
+   "mod log",
+   "x.com/calmer-feed on x.com/home: error: Cannot read secret text from the page",
+   "x.com/calmer-feed on x.com: a log line of 44 characters (not copied)"
+  ],
+  [
+   "mod log",
+   "x.com/calmer-feed started on x.com/home",
+   "x.com/calmer-feed started on x.com"
+  ],
+  [
+   "mod log",
+   "something else entirely",
+   "a mod's log line of 23 characters (not copied)"
+  ],
+  [
+   "mods",
+   "http://localhost:8377/feed.html?x=1 ran 2 mods; http://127.0.0.1:8378/a?b; http://timothys-macbook-air.local:8377/p?q",
+   "http://localhost:8377/feed.html?x=1 ran 2 mods; http://127.0.0.1:8378/a?b; http://timothys-macbook-air.local:8377/p?q"
+  ],
+  [
+   "mods",
+   "mail.google.com/tidy added, mybank.example/x too, x.com/calmer-feed kept",
+   "a sensitive site/tidy added, a sensitive site/x too, x.com/calmer-feed kept"
+  ],
+  [
+   "install",
+   "file:///var/mobile/Containers/Data/Application/0A1B2C3D-1111-2222-3333-444455556666/Library/x.json",
+   "file://"
+  ],
+  [
+   "x",
+   "mail me at tim@chase.com; see trifprobe://pages/plain.html?x=1; hash 0123456789abcdef0123456789abcdef",
+   "mail me at tim@a sensitive site; see trifprobe://pages/plain.html?x=1; hash …89abcdef"
+  ],
+  [
+   "x",
+   "https://user:secret@example.org:8443/a/b?c#d",
+   "https://example.org:8443"
+  ]
+ ]
+}

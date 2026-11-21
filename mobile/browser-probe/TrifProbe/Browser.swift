@@ -84,6 +84,11 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     @Published var hideChat = 0
     /// The mods of a reply waiting for their Add this mod? (one sheet at a time), and where the one shown is in them.
     var offerQueue: [InstalledMod] = []
+    /// Offers from outside TRIF (a trif://add link, a page's download, the watched folder; security batch 11-20): the
+    /// ids handed to Add this mod?, and how many are still being read, so only one batch from outside waits at a time
+    /// (FolderWatch.swift, `outsideMayOffer`).
+    var outsideIds: Set<String> = []
+    var outsideReading = 0
     @Published private(set) var offerPlace: (n: Int, of: Int)?
     var offerBatch = 0, offerShown = 0
     /// The last mod added from the chat, for what the chat is told next (feedbackForChat).
@@ -147,7 +152,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         // (the counts in the titles kept with the tabs: the cards and TRIF's icon as they were left, UnreadCounts)
         UnreadCounts.shared.changed()
         // (a launch by a Home Screen icon: its own tab shown from the first frame, WebClip.swift)
-        if let link = PendingLink.url, let site = TrifLink.target(link), TrifLink.wantsFullScreen(link) { showIconTabAtLaunch(site) }
+        if let link = PendingLink.url, let site = TrifLink.target(link), TrifLink.isOurs(link) { showIconTabAtLaunch(site) }
     }
 
     // MARK: tabs
@@ -505,7 +510,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     private func swapScripts(_ modScripts: [WKUserScript], plan: ModStore.ScriptPlan?) {
         let t0 = Date()
         // (development) `-bare`: nothing of the app's in any page, to measure a page without it
-        let bare = ProcessInfo.processInfo.arguments.contains("-bare")
+        let bare = DevFlags.args.contains("-bare")
         connectedScripts = bare ? [] : base() + modScripts
         lastPlan = plan
         sensitiveSets = [:]
@@ -519,7 +524,7 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
     /// mods kept under that site.
     private func sensitiveScripts(_ site: String) -> [WKUserScript] {
         if let s = sensitiveSets[site] { return s }
-        if ProcessInfo.processInfo.arguments.contains("-bare") { return [] }
+        if DevFlags.args.contains("-bare") { return [] }
         let plan = (lastPlan ?? mods.scriptPlan()).only { SiteAccess.shared.scope($0.site) == site }
         let list = base() + mods.userScripts(from: plan, fresh: [:], remember: false)
         sensitiveSets[site] = list
@@ -649,6 +654,9 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
         } else if !added.on, added.newOff == "sensitive", source != "import" {
             // (site access: a sensitive site's new mod starts off there, whoever made it)
             status = "Added \(added.name), off: \(SiteAccess.shared.scope(added.site)) is a sensitive site. Switch it on in Mods."
+        } else if source != "import" && !quiet, added.site != "all-sites", !SiteAccess.shared.isConnected(added.site) {
+            // (site access: adding a mod never connects its site; it waits there until the person connects it)
+            status = "Added \(added.name). It runs once you connect TRIF on \(SiteAccess.shared.scope(added.site))."
         } else if source != "import" && !quiet {
             status = "Added \(added.name). It runs on \(added.sites.joined(separator: ", "))."
             // (added away from the site its chat was for (the done banner's Add, Tim 11-18): the note offers the way there)
@@ -1017,15 +1025,25 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
 
     /// What was pasted (iOS's own Paste button hands it over without asking), or an Add to TRIF tap: a whole mod.
     /// `refuse`: where a refusal's message goes (an Add to TRIF tap: its chat's box); nil (a paste): the clipboard.
-    func offer(text pasted: String?, site chatSite: String = "", refuse: ((ChatRefusal) -> Void)? = nil) {
+    /// `outside`: where it came from when that isn't the person's own act (a page's download): one at a time
+    /// (`outsideMayOffer`), and queued behind an offer already shown, never in its place.
+    func offer(text pasted: String?, site chatSite: String = "", refuse: ((ChatRefusal) -> Void)? = nil, outside: String? = nil) {
         guard let text = pasted?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
-            status = "Nothing on the clipboard."
+            status = outside == nil ? "Nothing on the clipboard." : "That file has no mod in it."
             return
         }
+        if let outside, !outsideMayOffer(outside) { return }
+        // (shown now, or after the offer that's up: one sheet at a time, never replacing it)
+        func present(_ m: InstalledMod) {
+            if outside != nil { outsideIds.insert(m.id) }
+            if modOffer == nil { modOffer = m } else { offerQueue.append(m) }
+        }
+        if outside != nil { outsideReading += 1 }
         // (edit blocks (Tim, 11-19): applied to the mod they name, all or nothing, then offered as its new version)
         if ModEdits.has(text) {
             let (here, came) = ModOfferRules.from(chatSite: chatSite, shown: host)
             Task { @MainActor in
+                defer { if outside != nil { outsideReading -= 1 } }
                 switch prepare(text) {
                 case .already:
                     status = ChatRefusal.alreadyNote
@@ -1041,14 +1059,12 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
                     m.edits = p.edits
                     Diagnostics.shared.log("chat offers", "\(refuse == nil ? "pasted" : "Add to TRIF"): \(m.id), \(p.edits?.count ?? 0) change(s) from edit blocks")
                     // (several mods' edits in one text: the first now, the rest after it, as a reply's mods)
-                    modOffer = m
+                    present(m)
                     if list.count > 1 {
-                        var rest: [InstalledMod] = []
                         for q in list.dropFirst() {
                             guard let o = q.on, var n = (await mods.readInBackground(q.text, file: o.file, site: o.site, here: here)).mod else { continue }
-                            n.cameFrom = came; n.edits = q.edits; rest.append(n)
+                            n.cameFrom = came; n.edits = q.edits; present(n)
                         }
-                        offerQueue += rest
                     }
                 }
             }
@@ -1060,16 +1076,18 @@ final class Browser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDeleg
             // rule, so a computer's phone twin (phone~<site>) is its site here too, as the spec says; round 8 fixed it)
             let (here, came) = ModOfferRules.from(chatSite: chatSite, shown: host)
             Task { @MainActor in
+                defer { if outside != nil { outsideReading -= 1 } }
                 let r = await mods.readNamedInBackground(text, here: here)
                 if var m = r.mod {
                     // (a whole file that leaves parts of the mod here out: refused, the chat asked for all of it)
                     if let no = shortened(text, m) { Diagnostics.shared.log("chat offers", "\(refuse == nil ? "pasted" : "Add to TRIF"): refused \(no.log)"); tellRefusal(no, refuse); return }
-                    m.cameFrom = came; modOffer = m
+                    m.cameFrom = came; present(m)
                 } else { status = "That mod can't be added: \(r.error ?? "no reason given")." }
             }
             return
         }
-        status = "The clipboard has no mod."
+        if outside != nil { outsideReading -= 1 }
+        status = outside == nil ? "The clipboard has no mod." : "That file has no mod in it."
     }
 
     // MARK: edit blocks and shortened files (Tim, 11-19; the rule: mobile/shared/core/mod-edit.js)
@@ -2031,7 +2049,7 @@ extension Browser {
         case "videoplay":
             // (the app's own play: counts as the person's, so sound is allowed where the page's own play isn't)
             let r = await Browser.within(3, "no answer") { () -> String in
-                let v = try? await webView.callAsyncJavaScript(VideoResume.play, arguments: ["forceMuted": ProcessInfo.processInfo.arguments.contains("-resumemuted")], in: nil, contentWorld: Browser.trifWorld)
+                let v = try? await webView.callAsyncJavaScript(VideoResume.play, arguments: ["forceMuted": DevFlags.args.contains("-resumemuted")], in: nil, contentWorld: Browser.trifWorld)
                 return v.map { "\($0)" } ?? "no answer"
             }
             report.log("video", "\(host): play after resuming: \(r)")
@@ -2112,7 +2130,7 @@ enum BackgroundPlay {
     /// The app went to the background (or the phone locked): what WebKit paused plays on. Looked at twice, as
     /// WebKit's pause can come a moment after the app is told.
     @MainActor static func resume(_ browser: Browser) {
-        guard !ProcessInfo.processInfo.arguments.contains("-nobgresume") else { return }
+        guard !DevFlags.args.contains("-nobgresume") else { return }
         // (WebKit pauses as it's told the app left: the same moment as this, give or take: 300 ms before counts)
         let left = Date().timeIntervalSince1970 * 1000
         Task { @MainActor in
@@ -2279,7 +2297,7 @@ enum BackgroundPlay {
 
     @MainActor static func setUp() {
         let session = AVAudioSession.sharedInstance()
-        if !ProcessInfo.processInfo.arguments.contains("-noaudiosession") {
+        if !DevFlags.args.contains("-noaudiosession") {
             do { try session.setCategory(.playback, mode: .moviePlayback) }
             catch { Diagnostics.shared.log("audio", "couldn't set the audio session to playback: \(error.localizedDescription)") }
         }
@@ -2300,7 +2318,7 @@ enum BackgroundPlay {
         nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: session, queue: .main) { _ in
             MainActor.assumeIsolated {
                 Diagnostics.shared.log("audio", "iOS reset its media services: the audio session set again")
-                if !ProcessInfo.processInfo.arguments.contains("-noaudiosession") { try? session.setCategory(.playback, mode: .moviePlayback) }
+                if !DevFlags.args.contains("-noaudiosession") { try? session.setCategory(.playback, mode: .moviePlayback) }
             }
         }
     }
@@ -2312,6 +2330,7 @@ enum BackgroundPlay {
     }
 }
 
+#if DEBUG
 extension Model {
     /// (development, the dev step {"playcheck": "<a page with a video or audio>"}) The regression check for a playing
     /// tab (Tim, 11-16: YouTube stopped about 20 s after he switched tabs): the page opens in a new tab and plays,
@@ -2426,6 +2445,7 @@ extension Model {
         return out.joined(separator: "\n") + "\naudio session: " + BackgroundPlay.describe()
     }
 }
+#endif
 
 /// (Browser.within: whichever of an answer and its time limit comes first)
 @MainActor final class OnceFlag { var done = false }
@@ -2452,10 +2472,24 @@ final class ModDownloads: NSObject, WKDownloadDelegate {
         return disposition.contains("attachment") || !r.canShowMIMEType
     }
 
-    func take(_ d: WKDownload) { d.delegate = self }
+    /// (each download: whether the person's finger was on the page just before it began)
+    private var tapped: [ObjectIdentifier: Bool] = [:]
+    /// A download begins. Only one that follows the person's touch (within 10 s: a signed address or a new window
+    /// can take a few) goes on to Add this mod?: a page's script can start downloads by itself, as many as it likes
+    /// (security batch, 11-20).
+    func take(_ d: WKDownload) {
+        let since = TouchClock.lastLift.map { Date().timeIntervalSince($0) }
+        tapped[ObjectIdentifier(d)] = TouchClock.down > 0 || TouchClock.menu || (since.map { $0 >= 0 && $0 < 10 } ?? false)
+        d.delegate = self
+    }
 
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String) async -> URL? {
+        let byTouch = tapped.removeValue(forKey: ObjectIdentifier(download)) ?? false
         guard ModDownloads.jsName(suggestedFilename), response.expectedContentLength < 2_000_000 else { return nil }
+        guard byTouch else {
+            Diagnostics.shared.log("outside offers", "a .js download a page started with no touch of the person's: not offered")
+            return nil
+        }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).js")
         files[ObjectIdentifier(download)] = (url, suggestedFilename)
         return url
@@ -2466,7 +2500,7 @@ final class ModDownloads: NSObject, WKDownloadDelegate {
         let text = (try? String(contentsOf: f.url, encoding: .utf8)) ?? ""
         try? FileManager.default.removeItem(at: f.url)
         browser?.report.log("mods", "downloaded \(f.name) (\(text.count) characters): to Add this mod?")
-        browser?.offer(text: text.isEmpty ? nil : text)
+        browser?.offer(text: text.isEmpty ? nil : text, outside: "a download")
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {

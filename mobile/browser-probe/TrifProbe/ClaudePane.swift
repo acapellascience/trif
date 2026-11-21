@@ -58,13 +58,13 @@ enum ChatService: String, CaseIterable, Identifiable {
     /// (development) `-chathome <address>`: a stand-in chat page for both (mobile/shared/pages/chat.html, served by
     /// mobile/serve.js), for the Simulator, where neither can be signed in to.
     static let standIn: String? = {
-        let args = ProcessInfo.processInfo.arguments
+        let args = DevFlags.args
         guard let i = args.firstIndex(of: "-chathome"), i + 1 < args.count else { return nil }
         return args[i + 1]
     }()
     /// (development) `-gpthome <address>`: ChatGPT's own stand-in (e.g. chat.html?gpt&gptin), Claude's staying -chathome's.
     static let gptStandIn: String? = {
-        let args = ProcessInfo.processInfo.arguments
+        let args = DevFlags.args
         guard let i = args.firstIndex(of: "-gpthome"), i + 1 < args.count else { return nil }
         return args[i + 1]
     }()

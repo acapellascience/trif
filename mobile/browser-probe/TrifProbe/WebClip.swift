@@ -28,8 +28,10 @@ enum TrifLink {
         var c = URLComponents()
         c.scheme = "trif"
         c.host = "open"
-        // (app=1: the icon opens its site in full screen, no browser around it: Tim, 11-16)
-        c.queryItems = [URLQueryItem(name: "url", value: site.absoluteString), URLQueryItem(name: "app", value: "1")]
+        // (app=1: the icon opens its site in full screen, no browser around it: Tim, 11-16; k: this install's key,
+        // so only a link TRIF made opens full screen, IconKey)
+        c.queryItems = [URLQueryItem(name: "url", value: site.absoluteString), URLQueryItem(name: "app", value: "1"),
+                        URLQueryItem(name: "k", value: IconKey.value)]
         if let set { c.queryItems?.append(URLQueryItem(name: "set", value: set)) }
         return c.url!
     }
@@ -56,7 +58,7 @@ enum PendingLink {
         }
         url = link
         since = Date()
-        if TrifLink.target(link) != nil { LeavingCover.shared.iconLinkCame(how) }
+        if TrifLink.isOurs(link) { LeavingCover.shared.iconLinkCame(how) }
         Diagnostics.shared.log("link", "\(how): \(describe(link))")
     }
     static func take(_ link: URL) {
@@ -71,14 +73,89 @@ enum PendingLink {
         if link.host?.lowercased() == "settings" { return "trif://settings (TRIF's page in Settings)" }
         guard let site = TrifLink.target(link) else { return "a trif:// link that isn't an http(s) site" }
         let set = TrifLink.set(link)
-        return "a Home Screen icon's link to \(Diagnostics.place(site))\(TrifLink.wantsFullScreen(link) ? "" : " (an older icon, not full screen)")\(set.map { ", from the profile of several icons \($0)" } ?? "")"
+        let how: String
+        switch TrifLink.open(link) { case .fullScreen(let why): how = "full screen: \(why)"; case .tab(let why): how = "a tab: \(why)" }
+        return "a Home Screen icon's link to \(Diagnostics.place(site)) (\(how))\(set.map { ", from the profile of several icons \($0)" } ?? "")"
     }
 }
 
 extension TrifLink {
-    /// The link asks for full screen (app=1: the name the icons made since 11-16 have).
+    /// The link asks for full screen (app=1: the name the icons made since 11-16 have). Asking isn't enough: see
+    /// `fullScreen`.
     static func wantsFullScreen(_ url: URL) -> Bool {
         URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "app" && $0.value == "1" } ?? false
+    }
+
+    /// How TRIF takes a trif://open link (security batch, 11-20). Any web page, message or app can open a trif://
+    /// link, and full screen shows no address: a page made to look like a bank's, with nothing to say where it is.
+    /// So full screen only for a link TRIF itself made (its Home Screen icons'): one carrying this install's key
+    /// (IconKey); or an icon made before the key (no `k`), for its site's own start address (scheme://host/, what
+    /// every icon opens: SiteFace.start) on a site whose icon has opened TRIF before (its record in "iconTabs").
+    /// Anything else opens as an ordinary tab, its address shown. Either way the link never connects a site: site
+    /// access is the person's alone (Browser.applyAccess on the new tab's page).
+    enum Open: Equatable { case fullScreen(why: String), tab(why: String) }
+    static func open(_ url: URL, iconSites: [String: String]? = nil) -> Open {
+        guard let site = target(url) else { return .tab(why: "not an icon's link") }
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let key = items.first { $0.name == "k" }?.value
+        guard wantsFullScreen(url) else { return .tab(why: "an older icon, not full screen") }
+        if let key {
+            return IconKey.matches(key) ? .fullScreen(why: "an icon TRIF made") : .tab(why: "a full screen link with a key that isn't this install's")
+        }
+        let host = (site.host ?? "").lowercased()
+        let start = site.path.isEmpty || site.path == "/"
+        guard start, site.query == nil, site.fragment == nil, site.user == nil, site.password == nil else {
+            return .tab(why: "a full screen link with no key, to an address that isn't a site's start")
+        }
+        let map = iconSites ?? (UserDefaults.standard.dictionary(forKey: "iconTabs") as? [String: String] ?? [:])
+        return map[Site.of(host)] != nil ? .fullScreen(why: "an icon made before the key, for a site whose icon opened TRIF before")
+            : .tab(why: "a full screen link with no key, for a site with no icon of TRIF's")
+    }
+    /// The link is one of TRIF's own icons' (full screen allowed): what may mark an icon as installed.
+    static func isOurs(_ url: URL) -> Bool { if case .fullScreen = open(url) { return true } else { return false } }
+}
+
+/// This install's key for its Home Screen icons' links (security batch, 11-20): 16 random bytes, base64url, made once
+/// and kept in the Keychain (after first unlock, so it moves with an encrypted backup as the icons do), in the app's
+/// settings if the Keychain won't take it. A web page can't know it, so it can't make a link that opens full screen.
+enum IconKey {
+    private static let service = "TRIF icon links", account = "key", prefKey = "iconLinkKey"
+    /// Made at the first use, once (a static let: thread-safe and lazy).
+    static let value: String = load() ?? make()
+
+    /// Compared in constant time (the key's length is public; its bytes aren't).
+    static func matches(_ text: String) -> Bool {
+        let a = Array(value.utf8), b = Array(text.utf8)
+        guard a.count == b.count else { return false }
+        return zip(a, b).reduce(0) { $0 | ($1.0 ^ $1.1) } == 0
+    }
+
+    private static func query() -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+    }
+    private static func load() -> String? {
+        var q = query()
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: CFTypeRef?
+        if SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data, let s = String(data: d, encoding: .utf8), s.count >= 20 { return s }
+        if let s = UserDefaults.standard.string(forKey: prefKey), s.count >= 20 { return s }
+        return nil
+    }
+    private static func make() -> String {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        if SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) != errSecSuccess { bytes = (0..<16).map { _ in UInt8.random(in: 0...255) } }
+        let key = Data(bytes).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        var q = query()
+        q[kSecValueData as String] = Data(key.utf8)
+        q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        if SecItemAdd(q as CFDictionary, nil) == errSecSuccess {
+            Diagnostics.logLater("icon", "this install's key for its icons' links made (in the Keychain)")
+        } else {
+            UserDefaults.standard.set(key, forKey: prefKey)
+            Diagnostics.logLater("icon", "this install's key for its icons' links made (the Keychain refused it: kept in the app's settings)")
+        }
+        return key
     }
 }
 
@@ -153,6 +230,7 @@ extension Browser {
     }
 }
 
+#if DEBUG
 extension Model {
     /// (development) {"iconcheck": "https://…/"}: that site's Home Screen icon link opened from each state the app can
     /// be in while in front (no tab of its own yet; its tab in or out of full screen; another tab in front; the tabs,
@@ -291,6 +369,7 @@ extension Model {
         })
     }
 }
+#endif
 
 /// What the page says about itself for an icon: its touch icons, manifest, favicons and names.
 struct SiteFace {
@@ -621,7 +700,7 @@ final class ProfileHandoff: NSObject, ObservableObject {
     /// The page on timsrobot.com that hands a profile to Safari from the address's # part (site/src/clip.js on the
     /// main repo's clip-page branch): `-clipbase <https origin>` at launch for a local copy.
     static var clipBase: String {
-        let a = ProcessInfo.processInfo.arguments
+        let a = DevFlags.args
         if let i = a.firstIndex(of: "-clipbase"), i + 1 < a.count { return a[i + 1] }
         return "https://timsrobot.com"
     }
@@ -689,7 +768,7 @@ final class ProfileHandoff: NSObject, ObservableObject {
         }
         log("server starting (background time asked for: \(task != .invalid ? "yes" : "no"))")
         // (development: `-noserver` at launch, as if the server had failed, for the Files route)
-        if ProcessInfo.processInfo.arguments.contains("-noserver") { fail("development: -noserver"); return }
+        if DevFlags.args.contains("-noserver") { fail("development: -noserver"); return }
         let params = NWParameters.tcp
         params.requiredInterfaceType = .loopback // (only this phone can reach it)
         params.allowLocalEndpointReuse = true
@@ -752,7 +831,7 @@ final class ProfileHandoff: NSObject, ObservableObject {
                     me.away = false
                     // (development: `-noopen` at launch, no browser opened, the address in the diagnostics, for testing
                     // what another browser's fetch does)
-                    if ProcessInfo.processInfo.arguments.contains("-noopen") { me.log("development: not opened (\(plain.absoluteString))"); me.state = .handed; return }
+                    if DevFlags.args.contains("-noopen") { me.log("development: not opened (\(plain.absoluteString))"); me.state = .handed; return }
                     UIApplication.shared.open(safari) { opened in
                         MainActor.assumeIsolated {
                             guard me.generation == gen else { return }

@@ -65,6 +65,9 @@ class Logins {
     // (token: TRIF's own copy, the one boxed runs use, never the user's; claudepin.js)
     const pinned = tokenMode ? require('./claudepin').installedPinned(ws.home) : null;
     if (tokenMode && !pinned) throw new Error('TRIF\'s own copy of Claude Code isn\'t downloaded yet (Settings: Run chats in TRIF\'s full sandbox)');
+    // (token mode: under a pseudo-terminal, which `setup-token` needs to print anything; claudetoken.js)
+    const pty = tokenMode ? require('./claudetoken').ptyCommand(pinned.bin, ['setup-token']) : null;
+    if (tokenMode && !pty) throw new Error('signing in for TRIF\'s full sandbox isn\'t available on this computer yet');
     const found = tokenMode ? { available: true, path: pinned.bin } : adapter.detect({ dirs: agents.searchDirs(ws), env, version: false });
     if (!found.available) throw new Error(adapter.missing);
 
@@ -79,13 +82,15 @@ class Logins {
       tokenMode,
       token: null, // (token mode: what setup-token printed, until it's in the keyring)
       loginArgs: tokenMode ? ['setup-token'] : adapter.login.args,
+      spawnAs: pty, // ({file, args}: what's started instead of path + loginArgs)
       parseLine: tokenMode ? require('./claudetoken').parseSetupTokenLine : adapter.login.parseLine,
       ws,
       path: found.path,
       // BROWSER discourages the CLI from opening a second sign-in page (the panel opens one).
       // (token mode: a config folder of its own, removed after, so `setup-token` leaves the user's own
-      // Claude Code settings as they were; and TRIF's copy never updates itself)
-      env: { ...env, BROWSER: '/usr/bin/true', ...(tokenMode ? { CLAUDE_CONFIG_DIR: require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'trif-setup-token-')), DISABLE_AUTOUPDATER: '1' } : {}) },
+      // Claude Code settings as they were; TRIF's copy never updates itself; a terminal's TERM, as it runs
+      // in one: TRIF_SETUP_TOKEN_TERM, the CI probe's other try)
+      env: { ...env, BROWSER: '/usr/bin/true', ...(tokenMode ? { CLAUDE_CONFIG_DIR: require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'trif-setup-token-')), DISABLE_AUTOUPDATER: '1', TERM: envVar('SETUP_TOKEN_TERM') || 'xterm-256color', NO_COLOR: '1' } : {}) },
       startedAt: Date.now(),
       child: null,
       bufs: { stdout: '', stderr: '' },
@@ -112,7 +117,8 @@ class Logins {
     const stdin = login.child && login.child.stdin;
     if (!stdin || !stdin.writable || login.finished) throw new Error("the login isn't waiting for a code");
     login.codes.push(c);
-    stdin.write(c + '\n');
+    // (token mode: through the pseudo-terminal, to a program reading keys: Return is \r)
+    stdin.write(c + (login.tokenMode ? '\r' : '\n'));
     this.logger.info(`agent login ${login.id}: code sent`);
     return { sent: true };
   }
@@ -160,7 +166,8 @@ class Logins {
     this.logger.info(`agent login ${login.id}: ${adapter.name} ${args.join(' ')} (${login.path})`);
     let child;
     try {
-      child = spawn(login.path, args, { cwd: login.ws.home, env: login.env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+      const how = login.spawnAs || { file: login.path, args };
+      child = spawn(how.file, how.args, { cwd: login.ws.home, env: login.env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     } catch (e) {
       login.spawnError = e;
       return this._finish(login, { code: null, signal: null });
@@ -216,6 +223,7 @@ class Logins {
       this._emit(login, { kind: 'login', url: ev.url });
     } else if (ev.kind === 'text') {
       const text = redact(ev.text, login.codes);
+      if (login.tokenMode && login.notes[login.notes.length - 1] === text) return; // (a terminal UI redraws the same line)
       login.notes.push(text);
       if (login.notes.length > NOTES_KEEP) login.notes.shift();
       this._emit(login, { kind: 'text', text });
@@ -281,7 +289,7 @@ class Logins {
       }
     }
     if (message) this._emit(login, { kind: 'error', message: redact(message, login.codes) });
-    const done = { kind: 'done', ok, login: true };
+    const done = { kind: 'done', ok, login: true, ...(login.tokenMode ? { mode: 'token' } : {}) };
     if (login.cancelled) done.cancelled = true;
     this._emit(login, done);
     this.logger.info(`agent login ${login.id} done: ok=${ok} code=${code} signal=${signal}${login.cancelled ? ' (cancelled)' : ''}` +

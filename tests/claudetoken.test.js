@@ -60,13 +60,17 @@ function fakeClaude(dir) {
   fs.writeFileSync(bin, `#!${process.execPath}
 const fs = require('fs'); const path = require('path');
 const argv = process.argv.slice(2);
-fs.writeFileSync(path.join(${JSON.stringify(dir)}, 'call.json'), JSON.stringify({ argv, env: process.env }));
+fs.writeFileSync(path.join(${JSON.stringify(dir)}, 'call.json'), JSON.stringify({ argv, env: process.env, tty: !!process.stdin.isTTY, columns: process.stdout.columns }));
 if (argv[0] !== 'setup-token') { process.stderr.write('unexpected ' + argv.join(' ')); process.exit(3); }
+// (as the real one, round 2's CI probe: without a terminal, a newline and a wait)
+if (!process.stdin.isTTY) { process.stdout.write('\\n'); setInterval(() => {}, 1000); return; }
+// (a terminal UI reads keys: Return is \\r, nothing echoed)
+process.stdin.setRawMode(true);
 process.stdout.write('Opening browser to sign in…\\n');
 process.stdout.write("If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&state=SECRETSTATE\\n");
 process.stdout.write('Paste code here if prompted > ');
 let buf = '';
-process.stdin.on('data', (d) => { buf += d; if (!buf.includes('\\n')) return;
+process.stdin.on('data', (d) => { buf += d; if (!buf.includes('\\r')) return;
   const code = buf.trim();
   if (code === 'BADCODE') { process.stderr.write('OAuth error: invalid code\\n'); process.exit(1); }
   if (code === 'NOTOKEN') { process.stdout.write('\\nDone.\\n'); process.exit(0); }
@@ -117,7 +121,9 @@ test('the panel\'s sign-in, mode "token": TRIF\'s copy runs setup-token; the tok
   assert.strictEqual(fs.existsSync(r.call.env.CLAUDE_CONFIG_DIR), false, 'removed after');
   assert.strictEqual(r.call.env.DISABLE_AUTOUPDATER, '1');
   assert.deepStrictEqual(r.events.filter((e) => e.kind === 'login'), [{ kind: 'login', url: 'https://claude.com/cai/oauth/authorize?code=true&state=SECRETSTATE' }]);
-  assert.deepStrictEqual(r.events.at(-1), { kind: 'done', ok: true, login: true });
+  assert.deepStrictEqual(r.events.at(-1), { kind: 'done', ok: true, login: true, mode: 'token' });
+  assert.strictEqual(r.call.tty, true, 'under a pseudo-terminal');
+  assert.strictEqual(r.call.columns, 4000, 'wide: nothing wrapped');
   assert.strictEqual(r.token.value, FAKE_TOKEN, 'in the keyring');
   const seen = JSON.stringify(r.events) + r.logged.join('\n');
   assert.ok(!seen.includes(FAKE_TOKEN) && !seen.includes('sk-ant-oat'), 'never in an event or the log');
@@ -129,7 +135,7 @@ test('the panel\'s sign-in, mode "token": TRIF\'s copy runs setup-token; the tok
 
 test('setup-token failing, or printing no token: done not ok, a message, nothing kept; without TRIF\'s copy: refused', async () => {
   const bad = await tokenLogin('BADCODE');
-  assert.deepStrictEqual(bad.events.at(-1), { kind: 'done', ok: false, login: true });
+  assert.deepStrictEqual(bad.events.at(-1), { kind: 'done', ok: false, login: true, mode: 'token' });
   assert.match(bad.events.find((e) => e.kind === 'error').message, /^Signing in to Claude Code for TRIF's full sandbox failed: OAuth error: invalid code/);
   assert.strictEqual(bad.token.value, null);
   const none = await tokenLogin('NOTOKEN');

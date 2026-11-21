@@ -70,4 +70,51 @@ async function readToken(o = {}) {
 const hasToken = (o = {}) => keyring.hasKey(ACCOUNT, opts(o));
 const removeToken = (o = {}) => keyring.removeKey(ACCOUNT, opts(o));
 
-module.exports = { SERVICE, ACCOUNT, TOKEN_RE, OUTRANKS, redactTokens, parseSetupTokenLine, tokenEnv, storeToken, readToken, hasToken, removeToken };
+// `claude setup-token` prints nothing useful without a terminal (round 2's CI probe: with pipes it prints
+// a newline and waits), so it runs under a pseudo-terminal: macOS's own /usr/bin/script (no new
+// dependency). script refuses a socket as its stdin (tcgetattr: "Operation not supported on socket"), and
+// node's pipes are sockets on macOS, so its stdin comes through `cat` (a real pipe), and cat is stopped
+// when script ends (else the shell waits for it). Inside, the terminal is made very wide (stty) so the
+// sign-in URL and the token are never wrapped across lines. script's exit status is the program's. The
+// terminal echoes what's typed: logins.js redacts the code; the program reads it in raw mode, so the code
+// is sent with \r (Return), not \n. Windows: ConPTY (step 9b); elsewhere: null.
+const SCRIPT = '/usr/bin/script';
+function ptyCommand(file, args = [], { platform = process.platform } = {}) {
+  if (platform !== 'darwin') return null;
+  const inner = '/bin/stty cols 4000 rows 50 2>/dev/null; exec "$0" "$@"';
+  return { file: '/bin/sh', args: ['-c', `/bin/cat | { ${SCRIPT} -q /dev/null /bin/sh -c '${inner}' "$@"; s=$?; /usr/bin/pkill -P $$ -x cat; exit $s; }`, 'sh', file, ...args] };
+}
+
+/**
+ * A boxed run's sign-in (runs.js, TRIF's full sandbox): {env, unsetEnv, secrets, cleanup, state} as an
+ * adapter's prepare gives (runs.js _withAgent). A saved API key: the key proxy, as now (`keyPrep`, the
+ * claude adapter's own prepare). Else the setup-token token from the keyring, as CLAUDE_CODE_OAUTH_TOKEN
+ * (the variables that outrank it unset), Anthropic reached through the allowlist proxy (wholebox.js
+ * startProxy, the box's one way out; TRIF_ANTHROPIC_URL, tests: a stand-in on this computer instead).
+ * No token: throws an Error with .signIn = 'token' (the run says so; the panel offers the sign-in).
+ */
+async function prepareBoxed({ keyPrep = async () => ({}), env = process.env, keyringOpts = {}, startProxy = (o) => require('./wholebox').startProxy(o) } = {}) {
+  const k = (await keyPrep()) || {};
+  if (k.env && k.env.ANTHROPIC_BASE_URL) return k;
+  if (typeof k.cleanup === 'function') { try { await k.cleanup(); } catch { /* nothing started */ } }
+  const r = await readToken({ env, ...keyringOpts });
+  if (!r.value) {
+    const e = new Error(r.error
+      ? `TRIF's full sandbox couldn't read your Claude Code sign-in (${redactTokens(r.error)}): sign in again.`
+      : 'Chats in TRIF\'s full sandbox need you to sign in to Claude Code for TRIF first.');
+    e.signIn = 'token';
+    throw e;
+  }
+  const stand = require('./env').envVar('ANTHROPIC_URL', env);
+  let proxy = null;
+  if (!stand) proxy = await startProxy({});
+  return {
+    env: { CLAUDE_CODE_OAUTH_TOKEN: r.value, ...(stand ? { ANTHROPIC_BASE_URL: stand } : { HTTPS_PROXY: `http://127.0.0.1:${proxy.port}` }) },
+    unsetEnv: [...OUTRANKS, ...(stand ? [] : ['ANTHROPIC_BASE_URL'])],
+    secrets: [r.value],
+    cleanup: proxy ? () => proxy.close() : null,
+    state: { signIn: 'token' },
+  };
+}
+
+module.exports = { SERVICE, ACCOUNT, TOKEN_RE, OUTRANKS, redactTokens, parseSetupTokenLine, tokenEnv, storeToken, readToken, hasToken, removeToken, ptyCommand, prepareBoxed };

@@ -43,11 +43,12 @@ jobs:
           ls -la "$RUNNER_TEMP"/claude-pin/runtime/*/
           "$RUNNER_TEMP"/claude-pin/runtime/claude-code-*/claude --version
           echo "TRIF_TEST_CLAUDE_PIN_HOME=$RUNNER_TEMP/claude-pin" >> "$GITHUB_ENV"
-      # (step 6: what the real pinned copy prints for `setup-token` without a terminal; never completed, no account)
+      # (step 6b: what the real pinned copy prints for `setup-token` under the pseudo-terminal logins.js uses;
+      # never completed, no account: a stand-in code is typed)
       - name: Probe setup-token's output (TRIF's pinned Claude Code)
         continue-on-error: true
-        timeout-minutes: 2
-        run: node tests/whole-box/setup-token-probe.js "$(ls -d "$RUNNER_TEMP"/claude-pin/runtime/claude-code-*/)claude"
+        timeout-minutes: 4
+        run: node tests/whole-box/setup-token-probe.js "$RUNNER_TEMP/claude-pin"
       - name: The box, and the loosest Claude Code in it
         run: node --test --test-timeout=300000 tests/whole-box.test.js
       - name: A side-panel run, every trif command (today's sandbox)

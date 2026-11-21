@@ -255,12 +255,14 @@ function parseStream(stdout) {
     `set "TRIF_WFP_EXE=${process.env.TRIF_WFP_EXE}"`,
     `"${process.execPath}" "${path.join(__dirname, '..', '..', 'helper', 'lib', 'winbox.js')}" status > "${lowOut}.tmp" 2>&1`,
     `whoami /groups | findstr /i "S-1-5-32-544" >> "${lowOut}.groups" 2>&1`,
+    `"${process.env.TRIF_WFP_EXE}" status > "${lowOut}.wfp" 2>&1`,
     `move /y "${lowOut}.tmp" "${lowOut}" > nul`,
   ].join('\r\n'));
   spawnSync(sys('runas.exe'), ['/trustlevel:0x20000', `cmd /c "${lowCmd}"`], { encoding: 'utf8', timeout: 30000 });
   for (let i = 0; i < 60 && !fs.existsSync(lowOut); i++) await new Promise((r) => setTimeout(r, 500));
   const lowText = fs.existsSync(lowOut) ? fs.readFileSync(lowOut, 'utf8') : '(nothing)';
   show('status without an administrator (Basic User)', lowText);
+  show('  wfp status as that user', fs.existsSync(`${lowOut}.wfp`) ? fs.readFileSync(`${lowOut}.wfp`, 'utf8').slice(0, 600) : '(none)');
   show('  its Administrators group', fs.existsSync(`${lowOut}.groups`) ? fs.readFileSync(`${lowOut}.groups`, 'utf8') : '(none)');
   let low = null;
   try { low = JSON.parse(lowText.trim().split(/\r?\n/).pop()); } catch { /* none */ }

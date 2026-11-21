@@ -230,10 +230,12 @@ function parseWfp(text, { sid }) {
   try { w = JSON.parse(String(text || '').trim().split(/\r?\n/).filter(Boolean).pop()); } catch { return { ports: null, problems: ['filtersUnknown'] }; }
   if (!w || w.ok !== true || !Array.isArray(w.filters)) return { ports: null, problems: ['filtersUnknown'] };
   const problems = [];
-  if (!w.sublayer) problems.push('filtersMissing');
+  // (not found: FWP_E_SUBLAYER_NOT_FOUND / FWP_E_FILTER_NOT_FOUND; anything else, e.g. access denied: unknown)
+  if (!w.sublayer) problems.push(w.sublayerError === '0x80320007' ? 'filtersMissing' : 'filtersUnknown');
   else if (w.sublayer.weight !== 65535) problems.push('filtersChanged');
   const want = WFP_FILTERS;
-  if (w.filters.length !== want.length || w.filters.some((f) => f.missing)) problems.push('filtersMissing');
+  if (w.filters.length !== want.length || w.filters.some((f) => f.missing === '0x80320003')) problems.push('filtersMissing');
+  if (w.filters.some((f) => f.missing && f.missing !== '0x80320003')) problems.push('filtersUnknown');
   let ports = null;
   for (const f of w.filters.filter((x) => !x.missing)) {
     const x = want.find((y) => y.key === String(f.key).toLowerCase());

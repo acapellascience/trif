@@ -84,7 +84,13 @@ public static class TrifWfp
     [DllImport("fwpuclnt.dll")] static extern void FwpmFreeMemory0(ref IntPtr p);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertStringSidToSidW(string sid, out IntPtr psid);
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertSidToStringSidW(IntPtr psid, out IntPtr str);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string sddl, uint revision, out IntPtr sd, IntPtr size);
     [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr p);
+
+    // Who may do what with TRIF's provider, sublayer and filters: the system and administrators everything;
+    // signed-in users read them (WFP's default is administrators only, and `status` runs before every boxed
+    // run as the person, round 11). Reading shows the container's SID and TRIF's two ports, nothing else.
+    const string Sddl = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GR;;;AU)";
 
     // ------------------------------------------------------------------ unmanaged memory (x64 layouts)
     // FWPM_FILTER0 200 bytes: key 0, name 16, description 24, flags 32, providerKey* 40, providerData 48,
@@ -101,6 +107,7 @@ public static class TrifWfp
         public IntPtr Str(string s) { IntPtr p = Marshal.StringToHGlobalUni(s); blocks.Add(p); return p; }
         public IntPtr GuidPtr(Guid g) { IntPtr p = Alloc(16); WriteGuid(p, 0, g); return p; }
         public IntPtr Sid(string s) { IntPtr p; if (!ConvertStringSidToSidW(s, out p)) throw new Exception("not a SID: " + s); sids.Add(p); return p; }
+        public IntPtr Sd(string sddl) { IntPtr p; if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, out p, IntPtr.Zero)) throw new Exception("security descriptor " + Marshal.GetLastWin32Error()); sids.Add(p); return p; }
         public void Dispose() { foreach (var p in blocks) Marshal.FreeHGlobal(p); foreach (var p in sids) LocalFree(p); }
     }
     static void WriteGuid(IntPtr p, int off, Guid g) { Marshal.Copy(g.ToByteArray(), 0, p + off, 16); }
@@ -162,12 +169,13 @@ public static class TrifWfp
             try
             {
                 RemoveIn(eng, steps);
+                IntPtr sd = m.Sd(Sddl);
                 IntPtr p = m.Alloc(64);
                 WriteGuid(p, 0, Provider);
                 Marshal.WriteIntPtr(p, 16, m.Str("TRIF"));
                 Marshal.WriteIntPtr(p, 24, m.Str("TRIF's full sandbox"));
                 Marshal.WriteInt32(p, 32, 1); // FWPM_PROVIDER_FLAG_PERSISTENT
-                e = FwpmProviderAdd0(eng, p, IntPtr.Zero);
+                e = FwpmProviderAdd0(eng, p, sd);
                 if (e != 0) throw new Exception("provider " + Hex(e));
                 steps.Add("provider");
                 IntPtr s = m.Alloc(72);
@@ -177,7 +185,7 @@ public static class TrifWfp
                 Marshal.WriteInt32(s, 32, 1); // FWPM_SUBLAYER_FLAG_PERSISTENT
                 Marshal.WriteIntPtr(s, 40, m.GuidPtr(Provider));
                 Marshal.WriteInt16(s, 64, unchecked((short)SubLayerWeight));
-                e = FwpmSubLayerAdd0(eng, s, IntPtr.Zero);
+                e = FwpmSubLayerAdd0(eng, s, sd);
                 if (e != 0) throw new Exception("sublayer " + Hex(e));
                 steps.Add("sublayer");
                 IntPtr psid = m.Sid(sid);
@@ -191,7 +199,7 @@ public static class TrifWfp
                         cs.Add(new Cond { Field = COND_REMOTE_PORT, Match = MATCH_RANGE, Type = FWP_RANGE, Ptr = PortRange(m, relay, keyProxy) });
                     }
                     ulong id;
-                    e = FwpmFilterAdd0(eng, Filter(m, spec, cs), IntPtr.Zero, out id);
+                    e = FwpmFilterAdd0(eng, Filter(m, spec, cs), sd, out id);
                     if (e != 0) throw new Exception("filter '" + spec.Name + "' " + Hex(e));
                     steps.Add(spec.Key.ToString());
                 }

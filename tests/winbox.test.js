@@ -147,7 +147,8 @@ test('status with TRIF\'s WFP filters: ready only with all seven as made', () =>
   const pw = (o) => w.parseWfp(JSON.stringify(o), { sid: SID });
   assert.deepStrictEqual(pw(goodWfp()), { ports: PORTS, problems: [] });
   const mut = (f) => { const o = goodWfp(); f(o); return pw(o).problems; };
-  assert.deepStrictEqual(mut((o) => { o.sublayer = null; }), ['filtersMissing']);
+  assert.deepStrictEqual(mut((o) => { o.sublayer = null; o.sublayerError = '0x80320007'; }), ['filtersMissing']);
+  assert.deepStrictEqual(mut((o) => { o.sublayer = null; o.sublayerError = '0x80070005'; o.filters = o.filters.map((f) => ({ key: f.key, missing: '0x80070005' })); }), ['filtersUnknown'], 'not allowed to read: unknown, not missing');
   assert.deepStrictEqual(mut((o) => { o.sublayer.weight = 100; }), ['filtersChanged']);
   assert.deepStrictEqual(mut((o) => { o.filters[3] = { key: o.filters[3].key, missing: '0x80320003' }; }), ['filtersMissing']);
   assert.deepStrictEqual(mut((o) => { o.filters.pop(); }), ['filtersMissing']);

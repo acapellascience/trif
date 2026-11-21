@@ -1437,6 +1437,7 @@ class Scenario {
       await r.check('Settings → Mods your chat makes → Wait for me: what the chat makes waits, with Show code and Turn on in its card; what it changes waits while the version before runs; Start on again', () => this.chatWaitCheck(win));
       await r.check('messages typed while the agent works (a stand-in Claude Code): they wait under the conversation and go as one message when it is done, kept across a panel reload; Send now goes into the working run; after Stop they wait, "Not sent", and a click puts one back in the box', () => this.queueCheck(win));
       await r.check('mods that break: a mod that throws gets a badge and a card in the chat; Show error opens its code at the line; Ignore hides it; a new version that throws again: Fix it starts a run (a stand-in Claude Code) that fixes it, and Undo fix puts it back; a style mod whose selectors stop matching is flagged, and a fix run that finds nothing broken clears it with trif not-broken (Not broken.); Settings has When a mod breaks', () => this.modHealthCheck(win));
+      await r.check('mods that break on a single-page site: a style mod for its home view only, seen there, then on its watch view reached with pushState (home kept hidden) and on loads of the watch view, isn\'t flagged there; broken on home, it is, and the card names the page', () => this.spaHealthCheck(win));
       await r.check('one card per request (a stand-in Claude Code that writes two boxed mods): the approval card shows both, each mod\'s lines under its name with Show code, the site\'s box once; Not now leaves both waiting; one Allow runs both', () => this.requestCardCheck(win));
       await r.check('a hijacked agent (a stand-in Claude Code): the tab it ran code in sends nothing that changes anything until it reloads, even later; its mod that posts is held by its code, whatever its header says', () => this.hijackedAgentCheck(win));
       await r.check('the tab lock\'s harder edges (TL-1 to TL-6): cross-site images, workers no tab owns, the site\'s other tabs, popups, WebRTC and preconnect from the locked page, and what the code leaves in the site\'s storage', () => this.tabLockHardeningCheck(win));
@@ -5669,7 +5670,7 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       // a style mod whose selector stops matching: on ?has=1 it matched; three loads without, then flagged
       for (let i = 0; i < 3; i++) { await go(`?n=${i}`); await sleep(10500); }
       const quiet = await waitFor('the may-be-broken card', async () => (await cards()).find((c) => c.mod === `${site}/e2e-quiet`) || null, { timeoutMs: 8000, intervalMs: 500 }).catch(() => null);
-      if (!quiet || quiet.text !== 'E2E Quiet may be broken on 127.0.0.1: nothing it looks for is on the page any more. Want me to fix it?') problems.push(`the may-be-broken card: ${JSON.stringify(quiet)}`);
+      if (!quiet || quiet.text !== 'E2E Quiet may be broken on 127.0.0.1/health.html: nothing it looks for is on the page any more. Want me to fix it?') problems.push(`the may-be-broken card: ${JSON.stringify(quiet)}`);
       const r3 = await row('e2e-quiet');
       if (!r3 || r3.badge !== 'may be broken') problems.push(`the quiet mod's badge: ${JSON.stringify(r3)}`);
       // Fix it on it: the stand-in finds nothing broken and runs the prompt's `trif not-broken` (through the run's
@@ -5704,6 +5705,72 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
       for (const f of [brokeFile, quietFile]) { try { fs.unlinkSync(f); } catch { /* gone */ } }
       await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
       await this.panel(`async () => { const d = document.getElementById('code-view'); if (d && d.open) d.close(); if (!document.getElementById('settings').hidden) document.getElementById('settings-btn').click(); return true; }`).catch(() => {});
+    }
+  }
+
+  // ---- mods that break, on a single-page site (Tim, 11-20: YouTube's page-only mods flagged on its other pages):
+  // style mods for the home view only, seen on home, then on the watch view reached with pushState (home kept in
+  // the page hidden), then on loads of the watch view itself. No flag on the watch view, where they never
+  // applied; on home, where they did, three loads without its tiles flag them, and the cards say which page.
+  async spaHealthCheck(win) {
+    const site = '127.0.0.1';
+    const base = `http://${site}:${this.o.servers.port}`;
+    // (two mods: one as Tim's YouTube mods are written, :is() with a comma and :not([hidden]); one that says
+    // nothing about [hidden], found in the hidden home view too unless only the page shown counts)
+    const mods = [
+      { id: `${site}/e2e-spa-home`, name: 'E2E Spa Home', css: 'section:is([data-kind="home"], [data-kind="subs"]):not([hidden]) .grid > .tile { outline: 2px solid rgb(4, 5, 6) !important }' },
+      { id: `${site}/e2e-spa-plain`, name: 'E2E Spa Plain', css: 'section[data-kind="home"] .grid > .tile { color: rgb(7, 8, 9) !important }' },
+    ];
+    const files = mods.map((m) => path.join(this.trif, 'sites', m.id + '.js'));
+    const go = (p) => this.ext(`async (id, url) => { await chrome.tabs.update(id, { url, active: true }); }`, [win.tabId, `${base}${p}`]);
+    const chat = async () => (await this.ext(`async (k) => (await chrome.storage.local.get(k))[k] || null`, [`chat:${site}`])) || { messages: [] };
+    const cards = async () => (await chat()).messages.filter((m) => m.kind === 'modError' && mods.some((x) => x.id === m.mod));
+    const pages = async (id) => { const h = await this.ext(`async (id) => ((await chrome.storage.local.get('modHealth')).modHealth || {})[id] || null`, [id]); return Object.fromEntries(Object.entries(h?.pages || {}).map(([k, v]) => [k.replace(base, ''), v])); };
+    const LOAD = 10500; // (the two looks after a load: 3 s and 9 s)
+    const problems = [];
+    try {
+      if (!(await this.ext(`async () => !!(globalThis.chrome && chrome.storage)`).catch(() => false))) this.control = await this.d.openTab(`${this.d.origin}/onboarding.html`);
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
+      // (what the browser tells TRIF as the page changes: tabs.onUpdated, for the record)
+      await this.ext(`async (tabId) => { window.__e2eUpd = []; chrome.tabs.onUpdated.addListener((t, info, tab) => { if (t === tabId) window.__e2eUpd.push({ ...info, url: tab.url }); }); }`, [win.tabId]);
+      mods.forEach((m, i) => fs.writeFileSync(files[i], `// ==WebMod==\n// @name ${m.name}\n// @match *://127.0.0.1/spa/*\n// @run-at document-start\n// @rules\n// ==/WebMod==\n${JSON.stringify({ css: m.css })}\n`));
+      for (const m of mods) await waitFor(`${m.id} registered and on`, async () => { const x = ((await this.cli(['status'], { json: true, timeoutMs: 20000 })).json?.extension?.mods || []).find((y) => y.id === m.id); return x && !x.newOff && x.on !== false ? x : null; }, { timeoutMs: 20000, intervalMs: 500 });
+      // home: what they look for is there
+      await go('/spa/'); await sleep(LOAD);
+      const styled = await this.page(`async () => { const t = getComputedStyle(document.querySelector('.tile')); return t.outlineColor + ' ' + t.color; }`);
+      if (styled !== 'rgb(4, 5, 6) rgb(7, 8, 9)') problems.push(`the mods didn't style the home view: ${styled}`);
+      for (let i = 1; i <= 2; i++) { await go(`/spa/?n=${i}`); await sleep(LOAD); } // (three: the first may come as the mods arrive)
+      // to the watch view the site's way (pushState; the home view stays in the page, hidden), and back and forth
+      await this.ext(`async () => { window.__e2eUpd.length = 0; }`);
+      const at = await this.page(`async () => { document.getElementById('go-watch').click(); return location.pathname + ', home hidden: ' + document.querySelector('section[data-kind="home"]').hidden; }`);
+      await sleep(LOAD);
+      const upd = await this.ext(`async () => window.__e2eUpd.map((u) => Object.keys(u).filter((k) => k !== 'url').map((k) => k + '=' + u[k]).join(',')).filter(Boolean)`);
+      await this.page(`async () => { document.getElementById('go-home').click(); return true; }`); await sleep(1500);
+      await this.page(`async () => { document.getElementById('go-watch').click(); return true; }`); await sleep(LOAD);
+      // the watch view's own loads: nothing they look for (they never applied there)
+      for (let i = 0; i < 4; i++) { await go(`/spa/watch?v=${i}`); await sleep(LOAD); }
+      await sleep(700);
+      const early = await cards();
+      if (early.length) problems.push(`flagged where it never applied: ${JSON.stringify(early.map((c) => c.text))}`);
+      for (const m of mods) {
+        const p = await pages(m.id);
+        if (p['/spa/watch']?.matched) problems.push(`${m.id} "matched" on the watch view: ${JSON.stringify(p['/spa/watch'])}`);
+        if (!p['/spa/']?.matched) problems.push(`${m.id} not "matched" on home: ${JSON.stringify(p)}`);
+      }
+      // genuinely broken on home: three loads without its tiles, then the cards, with the page
+      for (let i = 0; i < 3; i++) { await go(`/spa/?broken=${i}`); await sleep(LOAD); }
+      const got = await waitFor('the may-be-broken cards for home', async () => { const c = await cards(); return c.length >= 2 ? c : null; }, { timeoutMs: 8000, intervalMs: 500 }).catch(async () => cards());
+      const want = mods.map((m) => `${m.name} may be broken on 127.0.0.1/spa/: nothing it looks for is on the page any more. Want me to fix it?`).sort();
+      const texts = got.map((c) => c.text).sort();
+      if (JSON.stringify(texts) !== JSON.stringify(want)) problems.push(`the cards for home: ${JSON.stringify(texts)}; ${JSON.stringify(await Promise.all(mods.map(async (m) => [m.id, (await pages(m.id))['/spa/']])))}`);
+      if (problems.length) {
+        const all = await Promise.all(mods.map(async (m) => `${m.id}: ${JSON.stringify(await pages(m.id))}`));
+        throw new Error(`${problems.join('\n')}\n(the pushState: ${at}; tabs.onUpdated after it: ${JSON.stringify(upd)})\n${all.join('\n')}`);
+      }
+      return `pushState (${at}); tabs.onUpdated after it: ${JSON.stringify(upd)}; no flag on the watch view; home, broken, flagged (${texts.map((t) => `"${t}"`).join(', ')})`;
+    } finally {
+      for (const f of files) { try { fs.unlinkSync(f); } catch { /* gone */ } }
+      await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]).catch(() => {});
     }
   }
 

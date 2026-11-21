@@ -556,6 +556,27 @@ document.addEventListener('cm-ping', (e) => d.setAttribute('data-pings', JSON.st
     if (u.pathname === '/powers3.html') return send(200, 'text/html; charset=utf-8', POWERS3_PAGE());
     // (mods that break, scenario.js modHealthCheck: the element a style mod looks for, there with ?has=1)
     if (u.pathname === '/health.html') return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e health', `<h1 id="title">Health</h1>${u.searchParams.get('has') ? '<div id="e2e-quiet-target">here</div>' : '<p>gone</p>'}`));
+    // (mods that break on a single-page site, scenario.js spaHealthCheck: a home view and a watch view, switched
+    // with pushState, the view left kept in the page [hidden], as YouTube does; ?broken=1: the home view's tiles gone)
+    if (u.pathname === '/spa/' || u.pathname === '/spa/watch') return send(200, 'text/html; charset=utf-8', PAGE('TRIF e2e spa', `<nav><a id="go-home" href="/spa/">Home</a> <a id="go-watch" href="/spa/watch">Watch</a></nav><main id="views"></main>
+<script>
+const views = document.getElementById('views');
+const broken = new URLSearchParams(location.search).has('broken');
+const show = () => {
+  const kind = location.pathname === '/spa/watch' ? 'watch' : 'home';
+  let el = views.querySelector('section[data-kind="' + kind + '"]');
+  if (!el) {
+    el = document.createElement('section');
+    el.dataset.kind = kind;
+    el.innerHTML = kind === 'home' ? (broken ? '<p>no tiles</p>' : '<div class="grid"><div class="tile">one</div><div class="tile">two</div></div>') : '<div class="player">a video</div>';
+    views.append(el);
+  }
+  for (const s of views.children) s.hidden = s !== el;
+};
+document.addEventListener('click', (e) => { const a = e.target.closest('a'); if (!a) return; e.preventDefault(); history.pushState(null, '', a.href); show(); });
+addEventListener('popstate', show);
+show();
+</script>`));
     if (u.pathname.startsWith('/e2e-goto-')) return send(200, 'text/html; charset=utf-8', PAGE('go-to', `<p id="where">${u.pathname}</p>`));
     // (powers, site-data: small JSON the page fetches, which boxed mods filter; search-box: where it goes)
     if (u.pathname.startsWith('/e2e-api/')) return send(200, 'application/json', JSON.stringify({

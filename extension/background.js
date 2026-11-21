@@ -15,7 +15,7 @@ import {
   PANEL_OPEN_WAIT_MS, PANEL_LATE_MS, panelWindowUrl, panelWindowTarget, panelWindowBounds, panelWindowClick, panelQuery, isRobotless,
   QUEUE_MAX, CHAT_TEXT_MAX, normalizeQueue, queuedMessage, queueAfterRun,
 } from './lib.js';
-import { recordErrors, recordMatches, markNotBroken, openErrors, dismiss as dismissError, keepLogs, fixPrompt } from './modhealth.js';
+import { recordErrors, recordMatches, loadVerdicts, dropWeakEvidence, markNotBroken, openErrors, dismiss as dismissError, keepLogs, fixPrompt } from './modhealth.js';
 import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX, SETTINGS_SITE_MAX, BOX_RUN_POWERS, sandboxModCode } from './sandbox.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
@@ -265,6 +265,14 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   if (s.startsOff !== undefined) chrome.storage.local.remove('startsOff').catch(() => {});
   state.agentSites = normalizeAgentSites(s.agentSites);
   state.health = s.modHealth && typeof s.modHealth === 'object' ? s.modHealth : {};
+  // ("may be broken" judged on weak evidence, as before 11-20: forgotten, and flags raised on it gone)
+  const weak = dropWeakEvidence(state.health);
+  if (weak.length) {
+    log('info', `mods that break: ${weak.length} "may be broken" flag(s) on weak evidence cleared`);
+    save({ modHealth: state.health }).catch(() => {});
+    // (their cards in the site's chat: Not broken., as after trif not-broken, once TRIF is ready)
+    setTimeout(() => ready.then(() => markWeakCards(weak)).catch((e) => log('warn', errMsg(e))), 0);
+  }
   state.onBreak = ['ask', 'auto', 'flag'].includes(s.onBreak) ? s.onBreak : 'ask';
   state.robotless = isRobotless(s.settings);
   state.fixes = s.modFixes && typeof s.modFixes === 'object' ? s.modFixes : {};
@@ -352,7 +360,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 // Mods that break: a loaded page is read for its mods' errors and whether their selectors match (checkTab)
-chrome.tabs.onUpdated?.addListener((tabId, info) => { if (info.status === 'complete') ready.then(() => scheduleHealth(tabId)).catch(() => {}); });
+// (a load, and a single-page site's own move to another page, history.pushState, which may come without one:
+// each starts a load of its own, judged on its own address)
+chrome.tabs.onUpdated?.addListener((tabId, info, tab) => {
+  const moved = info.url && info.url.split('#')[0] !== tabLoads.get(tabId)?.url;
+  if (info.status === 'complete' || moved) ready.then(() => scheduleHealth(tabId, tab?.url || info.url || '')).catch(() => {});
+});
 chrome.tabs.onRemoved?.addListener((tabId) => { tabLoads.delete(tabId); });
 // ("Agent on this site": written here, or by another of TRIF's pages; the state follows storage)
 chrome.storage.onChanged?.addListener((changes, area) => {
@@ -1706,23 +1719,39 @@ async function runCommand(cmd, args, reqId = null) {
 // trif.hide, a free mod's trif.expect). A new error, or a mod whose selectors stopped matching on a page
 // where they matched, gets a badge on its row and the toolbar, and (Settings' "When a mod breaks") a card in
 // the site's chat, "Want me to fix it?", or a fix run of its own.
-const tabLoads = new Map(); // tabId -> { since, matched: Map(modId -> bool), hideOnly: Map(modId -> bool), counted, url }
+const tabLoads = new Map(); // tabId -> { since, matched: Map(modId -> bool), hideOnly: Map(modId -> bool), counted, url, gen }
+let healthGen = 0;
 let healthSave = null;
 
 // (when after a load: tests set shorter ones)
 const HEALTH_DELAYS = Array.isArray(globalThis.__trifHealthDelays) ? globalThis.__trifHealthDelays : [3000, 9000];
-function scheduleHealth(tabId) {
-  tabLoads.set(tabId, { since: 0, matched: new Map(), hideOnly: new Map(), counted: false, url: '' });
+function scheduleHealth(tabId, url = '') {
+  // (a newer load's looks replace an older one's still to come: its settled look, 9 s after it, would otherwise
+  // judge the newer load seconds after it began, the page perhaps still changing over)
+  const gen = ++healthGen;
+  tabLoads.set(tabId, { since: tabLoads.get(tabId)?.since || 0, matched: new Map(), hideOnly: new Map(), counted: false, url: String(url || '').split('#')[0], gen });
   setTimeout(() => checkTab(tabId, false).catch((e) => log('warn', `mod errors: ${errMsg(e)}`)), HEALTH_DELAYS[0]);
-  setTimeout(() => checkTab(tabId, true).catch((e) => log('warn', `mod errors: ${errMsg(e)}`)), HEALTH_DELAYS[1]);
+  setTimeout(() => checkTab(tabId, gen).catch((e) => log('warn', `mod errors: ${errMsg(e)}`)), HEALTH_DELAYS[1]);
 }
 
 // (in the page, MAIN or TRIF's sandbox world: the mods' errors and logs since `since`, and for each mod with
-// selectors, whether any is on the page now. Self-contained: the browser sends it to the page as text.)
+// selectors, whether any is on the page now, on the page shown: not inside a part of it that isn't shown, as a
+// single-page site's other pages kept in it hidden (YouTube's Home grid while a video plays); what the mod
+// hides itself counts. Self-contained: the browser sends it to the page as text.)
 function healthOfPage(since, styleSel, sandbox) {
   const w = sandbox ? globalThis.__trifSandbox : window.__webmods;
   if (!w) return null;
-  const any = (l) => (Array.isArray(l) ? l : []).some((sel) => { try { return !!document.querySelector(sel); } catch { return false; } });
+  const shown = (el) => {
+    try {
+      let p = el.parentElement;
+      while (p && getComputedStyle(p).display === 'contents') p = p.parentElement;
+      if (!p) return true;
+      return typeof p.checkVisibility === 'function' ? p.checkVisibility() : p.getClientRects().length > 0;
+    } catch { return true; }
+  };
+  const any = (l) => (Array.isArray(l) ? l : []).some((sel) => {
+    try { let n = 0; for (const el of document.querySelectorAll(sel)) { if (shown(el)) return true; if (++n >= 50) break; } return false; } catch { return false; }
+  });
   const matched = {};
   for (const id of Object.keys(styleSel || {})) matched[id] = any(styleSel[id]);
   const watched = w.watched || {};
@@ -1740,20 +1769,21 @@ function healthOfPage(since, styleSel, sandbox) {
 const runsInTab = (m, tabId) => isPhoneMod(m) === (tabId !== undefined && tabId !== null && phones.isPhone(tabId));
 const runningOn = (url, tabId) => state.mods.filter((m) => { if (!isEnabled(m.id) || m.held || !runsInTab(m, tabId)) return false; const lm = limitToSites(m, onSites(), sens()); return !!lm && modAppliesTo(withOffSites(lm, offSitesFor(m, state.offSites, state.groupsOff)), url); });
 
-async function checkTab(tabId, final = false) {
+async function checkTab(tabId, settledGen = false) {
   if (!checkUserScripts()) return;
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const url = tab?.url || '';
   if (!/^https?:/.test(url) || !siteOnFor(url, onSites(), sens())) return;
   const running = runningOn(url, tabId);
   if (!running.length) return;
-  // (a load from scheduleHealth counts for "may be broken"; one the panel's look finds, or a page that changed
-  // its address by itself, only for errors)
+  // (a load from scheduleHealth counts for "may be broken", judged by its settled look, 9 s on, if the page kept
+  // its address; one the panel's look finds, or a page that changed its address by itself, only for errors)
   const here = url.split('#')[0];
   let load = tabLoads.get(tabId);
   if (!load) { load = { since: 0, matched: new Map(), hideOnly: new Map(), counted: true, url: here }; tabLoads.set(tabId, load); }
   if (!load.url) load.url = here;
   else if (load.url !== here) { load = { since: load.since, matched: new Map(), hideOnly: new Map(), counted: true, url: here }; tabLoads.set(tabId, load); }
+  const final = settledGen !== false && load.gen === settledGen;
   const style = Object.fromEntries(running.filter((m) => m.rules && Array.isArray(m.selectors) && m.selectors.length).map((m) => [m.id, m.selectors]));
   const got = [];
   try { got.push(await rawPageCall(tabId, 'MAIN', healthOfPage, [load.since, style, false])); } catch { /* not readable now */ }
@@ -1772,10 +1802,11 @@ async function checkTab(tabId, final = false) {
   const fresh = recordErrors(state.health, mods, errors);
   for (const m of running) keepLogs(state.health, m, logs.filter((l) => l.mod === m.id).slice(-10));
   load.since = Math.max(load.since, ...errors.map((e) => e.time || 0), ...logs.map((e) => e.time || 0));
+  const look = new Map(); // (this look's: modId -> found)
   for (const g of got) {
     for (const [id, ok] of Object.entries(g?.matched || {})) {
       if (!mods.has(id)) continue;
-      load.matched.set(id, !!load.matched.get(id) || ok);
+      look.set(id, !!look.get(id) || ok);
       // (a mod that only hides things: a style mod whose rules all hide, rules.js hidesOnly; a boxed mod that
       // only calls trif.hide. modhealth.js waits much longer before it says one may be broken)
       const m = mods.get(id);
@@ -1783,13 +1814,15 @@ async function checkTab(tabId, final = false) {
       load.hideOnly.set(id, (load.hideOnly.get(id) ?? true) && hides);
     }
   }
-  // (one load counts once, on the later look: a page that builds itself slowly gets the time it needs)
+  // (one load counts once, on its settled look: a page that builds itself slowly gets the time it needs, and a
+  // look while a single-page site changes over isn't taken for the page: modhealth.js loadVerdicts)
   if (final && !load.counted) {
     load.counted = true;
     for (const m of running) { const f = state.fixes[m.id]; if (f && f.fixedHash === m.hash) { f.loads = (f.loads || 0) + 1; save({ modFixes: state.fixes }).catch(() => {}); } }
     const page = url.split(/[?#]/)[0];
-    for (const [id, ok] of load.matched) { if (!mods.has(id)) continue; const f = recordMatches(state.health, mods.get(id), page, ok, Date.now(), { hideOnly: load.hideOnly.get(id) === true }); if (f) fresh.push(f); }
+    for (const [id, ok] of loadVerdicts(load.matched, look)) { if (!mods.has(id)) continue; const f = recordMatches(state.health, mods.get(id), page, ok, Date.now(), { hideOnly: load.hideOnly.get(id) === true }); if (f) fresh.push(f); }
   }
+  for (const [id, ok] of look) load.matched.set(id, !!load.matched.get(id) || ok);
   if (errors.length || logs.length || final) saveHealthSoon();
   await badgeFor(tab);
   for (const f of fresh) await announceBreak(f, tab).catch((e) => log('warn', `mod errors: ${errMsg(e)}`));
@@ -1814,7 +1847,15 @@ async function badgeFor(tab) {
 
 // (awaiting Tim: docs/CLICKJACK-STRINGS.md)
 const clickjackText = (name) => `TRIF stopped a click: ${name} had hidden what you clicked, so you couldn't see what it was. The page didn't get the click. If you didn't expect this, turn ${name} off.`;
-const breakText = (name, site, quiet) => (quiet ? `${name} may be broken on ${site}: nothing it looks for is on the page any more. Want me to fix it?` : `${name} has a new error on ${site}. Want me to fix it?`);
+const breakText = (name, site, quiet, page) => (quiet ? `${name} may be broken on ${pageLabel(site, page)}: nothing it looks for is on the page any more. Want me to fix it?` : `${name} has a new error on ${site}. Want me to fix it?`);
+// (the page a "may be broken" flag is for, short: the site and the address's path, "youtube.com/watch"; the
+// site alone for its home page; a long path cut, as "…")
+function pageLabel(site, page) {
+  let path = '';
+  try { path = new URL(String(page || '')).pathname; } catch { /* the site alone */ }
+  if (!path || path === '/') return site;
+  return `${site}${path.length > 40 ? `${path.slice(0, 39)}…` : path}`;
+}
 
 /** A new error or flag: the chat's card (once per fingerprint), or with "Fix it automatically", a fix run. */
 async function announceBreak(f, tab) {
@@ -1849,7 +1890,7 @@ async function announceBreak(f, tab) {
   const afterFix = !!(fx && fx.fixedHash === mod.hash && (fx.loads || 0) <= 3);
   await updateChat(site, (chat) => {
     chat.messages.push({ role: 'trif', kind: 'modError', mod: mod.id, name, fp: f.fp, site, ...(f.quiet ? { quiet: true } : {}), ...(afterFix ? { afterFix: true } : {}), line: f.line || 0,
-      text: afterFix ? `${name}'s fix ${f.quiet ? 'may not work' : 'has a new error'} on ${site}. Undo the fix, or want me to try again?` : breakText(name, site, f.quiet), time: Date.now() });
+      text: afterFix ? `${name}'s fix ${f.quiet ? 'may not work' : 'has a new error'} on ${site}. Undo the fix, or want me to try again?` : breakText(name, site, f.quiet, f.page), time: Date.now() });
   });
 }
 
@@ -1917,6 +1958,18 @@ async function askToRun(site, args, reqId = null) {
 }
 
 // (a card done with: its buttons go; `how` says why, for the line it leaves)
+async function markWeakCards(gone) {
+  const bySite = new Map();
+  for (const { mod, fp } of gone) { const site = String(mod).split('/')[0]; if (!bySite.has(site)) bySite.set(site, new Set()); bySite.get(site).add(`${mod}\n${fp}`); }
+  for (const [site, keys] of bySite) {
+    await updateChat(site, (chat) => {
+      let changed = false;
+      for (const m of chat.messages) if (m.kind === 'modError' && keys.has(`${m.mod}\n${m.fp}`) && (!m.done || m.done === 'fixing')) { m.done = 'notBroken'; changed = true; }
+      return changed ? undefined : false;
+    });
+  }
+}
+
 async function markCards(modId, fps, how, over = []) {
   const sites = new Set();
   for (const t of await chrome.tabs.query({}).catch(() => [])) { const s = siteForUrl(t.url || ''); if (s) sites.add(s); }

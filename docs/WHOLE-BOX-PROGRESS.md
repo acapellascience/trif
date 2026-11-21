@@ -37,6 +37,11 @@ managed policy; a normal run works; the fallback happens only on the person's ch
 - [ ] **7. Bash kept on macOS, boxed.** Claude Code's own sandbox off inside, its Bash inside TRIF's box
   (the spike does this). `trif` as an MCP tool only when an organization forces Claude Code's sandbox on
   (detected from managed settings: claude-managed.js) and on Windows.
+  - [x] **7b.** *(round 4)* An organization forcing Claude Code's sandbox on: boxed runs get no Bash and
+    the `trif` tool (helper/mcp.js, from branch windows, no launcher: already in the box); MCP allow/deny
+    lists that take it away stop the run with a draft message.
+  - [ ] **7a. NEEDS TIM** (For Tim, below): in a boxed run, a policy that only loosens Claude Code's
+    settings still stops the run and asks "Use Claude Code anyway" (with words that are wrong there).
 - [ ] **3. Clear refusal errors.** When the box refuses something, the run's error names it (Seatbelt
   violation reports from the log / the relay's refusal), not a mystery failure.
 - [ ] **4. Informed fallback, never silent.** If the box can't start, the panel offers "Run this chat with
@@ -162,6 +167,29 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   sandboxlint, claudetoken, wholebox-setting, claudepin, explain, agent-tools (286 pass).
 - Not looked at in a browser: the panel's sign-in notice and Settings' line (words are drafts anyway).
 
+## For Tim (round 4)
+
+**Should a chat in TRIF's full sandbox still ask "Use Claude Code anyway" when a company's Claude Code
+settings loosen Claude Code's rules?** Today it does. For example, a company allows every command, turns
+Claude Code's sandbox off, or uses bypass mode: the chat stops and says the company's settings replace
+TRIF's sandbox, and the person can choose "Use Claude Code anyway". After that the chat is marked "no TRIF
+sandbox". In the full sandbox that's no longer true, because TRIF's box holds whatever those settings say.
+CI showed it: the loosest managed settings, and still every read and write outside the run's copy was
+refused. So the question stops the person for nothing and tells them something that isn't so. Dropping it
+changes what people are asked, so it's your call.
+
+My recommendation: in the full sandbox, don't ask, and don't mark the chat "no TRIF sandbox". Note the
+company's settings in the run's log. Settings that stop TRIF's own rules from working (plan mode, only the
+company's permission rules, the trif tool taken away) still stop the chat, as now. One more change goes
+with it: if the company's settings let the run use any command, give that chat the `trif` tool instead of
+a shell (round 4's no-shell mode). The box still holds with a shell. But a free shell could read the chat's
+own sign-in token (the one-year setup-token, which the box needs in its environment) and copy it into a
+mod. Without a shell it can't, and a company setting can't put back a tool TRIF leaves out.
+
+Alternative: keep asking in the full sandbox too, with words that are right there (for example "your
+company's settings loosen Claude Code's rules; TRIF's full sandbox still holds"). That's safe, but it's a
+question with nothing to decide.
+
 ## Findings
 
 - **setup-token under a terminal** (round 3 CI probe, pinned 2.1.330): prints Ink's "Welcome to Claude Code"
@@ -201,17 +229,46 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   connectors). Bare mode doesn't read it. Which stream it's printed on isn't documented: check with a
   fake `claude` modelled on the real output, never Tim's login.
 
+### Round 4 (11-21): step 7b, no shell when an organization forces Claude Code's sandbox on
+
+- `helper/mcp.js` (branch windows' `trif` tool server, read and copied; same file, small additions): with no
+  `launcher` in its config it starts TRIF's CLI as is (Claude Code starts the server inside TRIF's box, so
+  its children are boxed), with the run's `TRIF_*` variables and temporary folder (`env`) and working
+  folder (`cwd`); a launcher still needs its spec. util.js `shellWord`, `trifCommand`, `mcpStep`, `mcpName`
+  and agents/index.js `noShellText` copied from branch windows (contextText `noShell`).
+- claude-managed.js: `forcesSandbox` (`sandbox.enabled` true in any source) and `mcpBlocks`
+  (`allowedMcpServers` without a `serverName: "trif"` entry, `allowManagedMcpServersOnly` without one,
+  `deniedMcpServers` naming it), per source, not breaks for runs with a shell.
+- claude.js `command({mcp})`: `--tools` without Bash, no Bash allow rules, `mcp__trif__trif` allowed,
+  `--mcp-config` with that one server (`--strict-mcp-config` already); tool steps of an MCP tool told as a
+  shell's would be ("trif status"). `noShellBrokenMessage` (draft in WHOLE-BOX-STRINGS.md).
+- runs.js `_withAgent`: a boxed run with `forcesSandbox` → `run.noShell` (logged), or stopped with the
+  message when `mcpBlocks`; `_spawn` → `_trifTool` (the server's config in the run's agent folder, 0600) and
+  the context's no-shell line.
+- Tests: tests/wholebox-noshell.test.js (3: the managed checks, the command with and without, the server
+  with no launcher: words as they are, env, cwd, failures). run-sandbox.test.js, CI only (TRIF_WHOLE_BOX=1
+  with the runner's real managed settings, copied for the helper): every `trif` command through the tool in
+  the box, Bash not offered and refused, another site's `trif new` refused by the box, the model told
+  there's no shell; and with `deniedMcpServers` naming trif, the run stops with no model call. Locally:
+  wholebox-noshell, claude-managed, agents, agent-tools, helper, extension, sandboxlint, claudetoken,
+  wholebox-setting, claudepin, explain, agent-keys, run-folders, hardening, shipped (345 pass).
+
 ## Next
 
-Round 4: step 7. In the box, Claude Code's own sandbox is off and its Bash fenced by TRIF's box (done by the
-spike); what's left: (a) a managed policy that only loosens Claude Code's settings needs no "run without
-TRIF's sandbox" consent in a boxed run, since the box holds anyway (check what runs.js _withAgent's
-preflight does for boxed runs, and test it with TRIF_TEST_MANAGED=loosen on CI); (b) an organization that
-forces Claude Code's sandbox on (claude-managed.js: sandbox.enabled true): Bash can't run in the box (it
-can't nest), so `trif` as an MCP tool for those runs (helper/mcp.js exists on branch windows, read only:
-port it), no Bash; an MCP allowlist that removes it → stop with a clear message. Then step 3.
+Round 5: if Tim has answered For Tim (7a), do that (in the box: no consent for loosening-only settings,
+and no shell when they loosen commands); then step 3 (clear refusal errors: Seatbelt violation reports
+from the log / the relay's refusal named in the run's error).
 
 ## CI
+
+- Round 4, [run 44874659962](https://github.com/acapellascience/trif/actions/runs/44874659962) (whole-box.yml,
+  18ca3f6): macos **passed**: the unit tests (wholebox-noshell added); the earlier steps unchanged; **with
+  the runner's real managed settings forcing Claude Code's sandbox on, a boxed side-panel run with no
+  Bash did every `trif` command through the trif tool** (Bash not offered and refused, another site's
+  `trif new` refused by the box, the model told there's no shell), in 4.6 s; **with `deniedMcpServers`
+  naming trif as well, the run stopped before Claude Code started, no model call**. The pinned 2.1.330
+  starts with its forced sandbox and no Bash. windows passed (the spike's probe, unchanged). The repo's
+  `tests` workflow: [run 44874659973](https://github.com/acapellascience/trif/actions/runs/44874659973) passed.
 
 - Round 3, [run 44873370047](https://github.com/acapellascience/trif/actions/runs/44873370047) (whole-box.yml,
   f19e44a): macos **passed**: the unit tests; the real pin; **the setup-token probe found the URL under the

@@ -20,21 +20,20 @@ managed policy; a normal run works; the fallback happens only on the person's ch
 - [x] **1b. The setting.** "Run chats in TRIF's full sandbox" (opt-in), replaces `TRIF_WHOLE_BOX=1`;
   turning it on downloads the pinned Claude Code in the background (progress in the panel); a run before it
   is there gets the informed fallback (step 4: for now it stops with a message). *(round 2)*
-- [ ] **6. Sign-in via `claude setup-token`.** *(round 2: claudetoken.js + logins.js mode "token"; left:
-  6b below)* Run once outside the box (the panel's login flow shows the
-  URL/code), token stored in the Keychain via the helper (keyring.js; never in files, never printed),
-  passed to the boxed run as `CLAUDE_CODE_OAUTH_TOKEN` (verify the variable). The box then needs no
-  securityd. API keys keep working through the key proxy. Tests with stand-in tokens only.
-- [ ] **6b.** The boxed run gets the token (`claudetoken.readToken` → `tokenEnv` in runs.js's whole-box
-  path; keychain off in the box; with a saved API key, the key proxy as now); no token and no key → the
-  run says so and the panel offers the sign-in (panel button: `agent.login {agent:'claude', mode:'token'}`
-  through background.js, the same URL/code card); a token Anthropic refuses (expired, revoked) → "sign in
-  again"; Settings: signed in for the full sandbox, with Sign out (`removeToken`). Check the real
-  setup-token output from the CI probe first (step "Probe setup-token's output").
-  **Round 2's probe: without a terminal it prints nothing useful** (below), so logins.js mode "token" needs
-  a pseudo-terminal first: e.g. macOS's `/usr/bin/script -q /dev/null <claude> setup-token` (no new
-  dependency; Windows: ConPTY, step 9b), then probe again on CI for the URL, the code prompt and the token
-  line, and fix `parseSetupTokenLine` and the fake `claude` in tests/claudetoken.test.js to match.
+- [x] **6. Sign-in via `claude setup-token`.** *(rounds 2–3)* Run once outside the box by TRIF's
+  pinned copy under a pseudo-terminal (the panel's login flow shows the URL/code), token stored in the
+  Keychain via the helper (keyring.js; never in files, never printed), passed to the boxed run as
+  `CLAUDE_CODE_OAUTH_TOKEN` (outranking variables unset), Anthropic reached through the allowlist proxy.
+  API keys keep working through the key proxy (they win). Tests with stand-in tokens only.
+- [x] **6b.** *(round 3)* The boxed run signs in (claudetoken.prepareBoxed); no token and no key → a login
+  error, mode "token", and the panel's login notice becomes the box's sign-in (`agent.login` mode
+  token); a refused token → "sign in again" (Settings hears of it); Settings: the sign-in line and Sign out
+  (`wholeBox.signOut`, panel only). The user's own Claude Code login status is left alone by boxed runs.
+  Not checked for real: a real sign-in to the end (no account on CI; the token line's exact look is
+  unknown: the parser takes any `sk-ant-oat…` from any line, and ends a program that waits after it), and
+  a real token through the allowlist proxy to api.anthropic.com (CI's runs use a stand-in via
+  `TRIF_ANTHROPIC_URL`). Both want one manual try by Tim with his own account when he chooses (not
+  needed for the next steps).
 - [ ] **7. Bash kept on macOS, boxed.** Claude Code's own sandbox off inside, its Bash inside TRIF's box
   (the spike does this). `trif` as an MCP tool only when an organization forces Claude Code's sandbox on
   (detected from managed settings: claude-managed.js) and on Windows.
@@ -130,7 +129,49 @@ managed policy; a normal run works; the fallback happens only on the person's ch
   as it did running the downloaded binary in round 1): CI runs it. The panel wasn't looked at in a browser
   (21 test browsers from other sessions were running): the switch's look is unchecked.
 
+### Round 3 (11-21): step 6b, the sign-in end to end
+
+- `claudetoken.ptyCommand`: `setup-token` under macOS's own `/usr/bin/script` (no new dependency). script
+  refuses node's socket pipes as stdin (tcgetattr: "Operation not supported on socket"), so stdin goes
+  through `cat`, stopped when script ends (`pkill -P $$ -x cat`); the terminal is made 4000 columns wide
+  (`/bin/stty`) so nothing wraps; script returns the program's exit status; cancelling (SIGTERM to the
+  group) ends the program too (SIGHUP from the closed terminal). The code is sent with \r (it reads keys).
+- `claudetoken.termLine`: a line as it looks on screen (Ink places words with ESC[nG / ESC[nC, not
+  spaces); the logo, spinners, box and its own instructions dropped (`CHROME`); a refused code
+  (`REFUSED_CODE`) ends the login with Claude Code's own words (it would otherwise wait for Return and
+  start over with a new link the panel never sees); after the token, a program still running after 3 s is
+  ended and counted as signed in.
+- `claudetoken.prepareBoxed` (runs.js's whole-box path, in place of the adapter's prepare): API key's
+  proxy first; else the token (`CLAUDE_CODE_OAUTH_TOKEN`; `OUTRANKS` and `ANTHROPIC_BASE_URL` unset;
+  `HTTPS_PROXY` = wholebox.startProxy, the box's one port; `TRIF_ANTHROPIC_URL` in tests); else an error
+  with `signIn: 'token'` → the run's login error. runs.js: login errors in a boxed run carry `mode:
+  'token'` (and `refused` when the token was used), and never mark the user's own Claude Code logged out.
+- wholeboxsetting.js: `signedIn` (token not refused, or an API key; null until checked), `token`, `key`,
+  `refused`, `signInError`; `refreshSignIn` (on start, on switching on, on `wholeBox.status`),
+  `signedIn()` after a token login, `noteRefused()`, `signOut()`. host.js wires login/run `done`
+  events to them and adds `wholeBox.signOut` to PANEL_COMMANDS.
+- Extension: login.js `start(agent, name, fix, mode)` and the box's words; sidepanel.js `boxedInfo`
+  (the setting on + Claude Code: "logged in" = the box's sign-in, Log in = mode token); Settings' line and
+  Sign out; background.js passes `mode` and `wholeBox.signOut`. Draft words: WHOLE-BOX-STRINGS.md.
+- Tests: claudetoken.test.js 7 (the fake claude now needs a terminal, reads keys, draws like Ink, refuses
+  BADCODE and waits, GOODWAIT waits after the token; prepareBoxed; the pty); wholebox-setting.test.js 6
+  (the sign-in states; never a real keychain); run-sandbox.test.js under TRIF_WHOLE_BOX (CI): no sign-in →
+  login error mode token, no model call; a stand-in token → the run works, the stand-in Anthropic sees
+  `Bearer <token>` and no x-api-key, the token in no event or log; a 401 → refused, Settings told; Sign
+  out. fake-anthropic-server.js: `{status}` steps. Locally: agents, agent-keys, helper, extension,
+  sandboxlint, claudetoken, wholebox-setting, claudepin, explain, agent-tools (286 pass).
+- Not looked at in a browser: the panel's sign-in notice and Settings' line (words are drafts anyway).
+
 ## Findings
+
+- **setup-token under a terminal** (round 3 CI probe, pinned 2.1.330): prints Ink's "Welcome to Claude Code"
+  logo, "This will guide you through long-lived (1-year) auth token setup for your Claude account. Claude
+  subscription required.", "Opening browser to sign in…", spinners, then "Browser didn't open? Use the url
+  below to sign in (c to copy)" and the URL (`https://claude.ai/oauth/authorize?…`, one line at 4000
+  columns), then "Paste code here if prompted" over an input box. A wrong code: "Finishing sign-in…", then
+  "✘ OAuth error: That code wasn't accepted. It may be incomplete, expired, already used, or from an
+  earlier sign-in attempt. Sign in again to get a new code." and "Press Enter to retry", and it waits.
+  TERM=dumb and xterm-256color draw the same. Words are placed with cursor moves (ESC[nG), not spaces.
 
 - **`claude setup-token` needs a terminal** (round 2 CI probe, pinned 2.1.330 on macos-latest): `--help`
   works ("Set up a long-lived authentication token (requires Claude subscription)", no options but -h);
@@ -162,8 +203,13 @@ managed policy; a normal run works; the fallback happens only on the person's ch
 
 ## Next
 
-Round 3: step 6b (above): read the CI probe's real setup-token output first and fix the parser/fake to
-match; then the token into boxed runs, the panel's sign-in offer and Sign out. Then step 7.
+Round 4: step 7. In the box, Claude Code's own sandbox is off and its Bash fenced by TRIF's box (done by the
+spike); what's left: (a) a managed policy that only loosens Claude Code's settings needs no "run without
+TRIF's sandbox" consent in a boxed run, since the box holds anyway (check what runs.js _withAgent's
+preflight does for boxed runs, and test it with TRIF_TEST_MANAGED=loosen on CI); (b) an organization that
+forces Claude Code's sandbox on (claude-managed.js: sandbox.enabled true): Bash can't run in the box (it
+can't nest), so `trif` as an MCP tool for those runs (helper/mcp.js exists on branch windows, read only:
+port it), no Bash; an MCP allowlist that removes it → stop with a clear message. Then step 3.
 
 ## CI
 

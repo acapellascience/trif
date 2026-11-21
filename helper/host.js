@@ -655,7 +655,7 @@ function onAgentEvent(runId, event) {
   // whose token Claude Code refused, or one with no sign-in at all; Settings and the panel's offer follow.)
   if (event && event.kind === 'done' && event.login && event.mode === 'token' && event.ok) wholeBoxSetting().signedIn().catch(() => {});
   if (event && event.kind === 'done' && event.error && event.error.kind === 'login' && event.error.mode === 'token') {
-    if (event.error.refused) wholeBoxSetting().noteRefused(); else wholeBoxSetting().refreshSignIn().catch(() => {});
+    if (event.error.refused) wholeBoxSetting().noteRefused().catch(() => {}); else wholeBoxSetting().refreshSignIn().catch(() => {});
   }
   // Every run goes to the extension (panels ignore runs they didn't start).
   if (state.stdoutOpen) {

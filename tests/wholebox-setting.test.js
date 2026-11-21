@@ -203,7 +203,7 @@ test('the sign-in (step 6b): a saved API key or the setup-token token; a refused
   k.token = true;
   let st = await s.refreshSignIn();
   assert.deepStrictEqual([st.signedIn, st.token, st.refused], [true, true, undefined]);
-  st = s.noteRefused();
+  st = await s.noteRefused();
   assert.deepStrictEqual([st.signedIn, st.refused], [false, true], 'a boxed run\'s token refused: sign in again');
   assert.strictEqual(sent.at(-1).refused, true, 'sent to the panel');
   st = await s.refreshSignIn();
@@ -211,7 +211,7 @@ test('the sign-in (step 6b): a saved API key or the setup-token token; a refused
   st = await s.signedIn();
   assert.deepStrictEqual([st.signedIn, st.refused], [true, undefined], 'a new sign-in');
   k.key = true;
-  s.noteRefused();
+  await s.noteRefused();
   st = await s.refreshSignIn();
   assert.strictEqual(st.signedIn, true, 'a saved API key: runs use it (the key proxy) whatever the token');
   k.key = false;

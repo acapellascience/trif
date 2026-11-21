@@ -107,7 +107,8 @@ function createWholeBoxSetting({ getWorkspace, setConfigKey, onChange = () => {}
     /** A sign-in (logins.js mode "token") finished: a new token, so not refused. */
     signedIn() { signIn = { ...signIn, refused: false }; return refreshSignIn(); },
     /** A boxed run's token was refused by Claude Code (runs.js done.error.refused). */
-    noteRefused() { if (!signIn.refused) { signIn = { ...signIn, refused: true }; log('info', 'TRIF\'s full sandbox: Claude Code refused its sign-in'); send(true); } return status(); },
+    // (and looks again: what it last saw may be from before the token was saved)
+    noteRefused() { if (!signIn.refused) log('info', 'TRIF\'s full sandbox: Claude Code refused its sign-in'); signIn = { ...signIn, refused: true }; return refreshSignIn(); },
     /** Settings' Sign out: the token leaves the keyring. Resolves the status. */
     async signOut() {
       const r = await ct.removeToken({ env });

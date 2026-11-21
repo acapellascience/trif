@@ -120,6 +120,8 @@ function safariManifest(m) {
   // SITE_ACCESS): what Safari doesn't allow, it doesn't let TRIF touch either way.
   f.host_permissions = ['<all_urls>'];
   delete f.optional_host_permissions;
+  // (and so no "Let TRIF see this tab" shortcut: it gives activeTab, which the screenshots there don't need)
+  delete f.commands;
   return f;
 }
 

@@ -249,6 +249,10 @@ TRIF never switches tabs or focuses windows (the user may be browsing, or other 
     is refused unless you add --force; and if the copy ends up on a site the run may not touch, or one
     TRIF is off for, it's closed without a capture.
   - Safari: only a tab that's showing.
+Without access to every site (TRIF has only the sites the user turned it on for), Chrome, Edge and
+Firefox capture only the tab in front, and only once the user has clicked TRIF's toolbar button on it
+(or pressed TRIF's shortcut there) since it came to that site: until then, if TRIF's panel is open beside
+it, the panel asks the user for that click and the command waits for it (up to 60 s), then captures.
 --full captures the whole page (up to 12000 px): Firefox from the tab itself; Chrome only with --copy,
 stitched from several captures of the copy (fixed and sticky elements only at the top). --json prints
 {file, how: visible|tab|copy, full, note}.`,

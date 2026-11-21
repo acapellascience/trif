@@ -938,7 +938,7 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
     userScripts: Object.assign(mockUserScripts(), userScripts), // (extras: configureWorld, execute, for the sandbox world)
     tabs: {
       query: async () => structuredClone(tabs), create: async (o) => { created.push(o); return { id: 99, ...o }; },
-      update: async () => ({}), get: async (id) => structuredClone(tabs.find((t) => t.id === id) || {}), onUpdated,
+      update: async () => ({}), get: async (id) => structuredClone(tabs.find((t) => t.id === id) || {}), onUpdated, onRemoved: chromeEvent(),
       reload: async (id) => { reloaded.push(id); setImmediate(() => onUpdated.emit(id, { status: 'complete' })); },
     },
     windows: { update: async () => ({}), getLastFocused: async () => ({ id: 1 }), ...windows },
@@ -952,6 +952,8 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
     }),
     scripting,
     action: { onClicked: chromeEvent() },
+    // (TRIF's "Let TRIF see this tab" shortcut; `shortcut` '' as when the user has none)
+    commands: { shortcut: 'Alt+Shift+S', onCommand: chromeEvent(), async getAll() { return [{ name: '_execute_action', shortcut: '' }, { name: 'see-tab', shortcut: chromeMock.commands.shortcut }]; } },
     ...(permissions ? { permissions: perms } : {}),
   };
   globalThis.chrome = chromeMock;
@@ -3441,6 +3443,76 @@ test('background: sites setup turns on are disconnected until connected, then on
     assert.strictEqual(r.ok, false);
     assert.match(r.error, /only after the user clicks TRIF's button on it.*robot icon at the top right/);
   } finally { bg.restore(); }
+});
+
+test('background: without every site, a screenshot refused for want of the click waits for it with a note in the panel; the click (or the shortcut) lets it go and leaves the panel open', async () => {
+  globalThis.__trifGrantWaitMs = 400;
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://www.google.com/' }, { id: 6, windowId: 1, index: 1, active: false, url: 'https://www.google.com/b' }];
+  const bg = await loadBackground({ storage: { sitesOn: ['google.com'] }, granted: PER_SITE('google.com'), tabs, windows: { get: async () => ({ id: 1, state: 'normal' }), getAll: async () => [] } });
+  try {
+    await settle(20);
+    const granted = new Set();
+    bg.chrome.tabs.query = async (q) => structuredClone(tabs.filter((t) => (q.active === undefined || t.active === q.active) && (q.windowId === undefined || t.windowId === q.windowId)));
+    bg.chrome.tabs.captureVisibleTab = async () => { const front = tabs.find((t) => t.active); if (!granted.has(front.id)) throw new Error("Either the '<all_urls>' or 'activeTab' permission is required."); return 'data:image/png;base64,AAAA'; };
+    // The browser's grant follows the click (or the shortcut), as the real one does.
+    const click = (tab) => { granted.add(tab.id); bg.chrome.action.onClicked.emit(tab); };
+    const press = (tab) => { granted.add(tab.id); bg.chrome.commands.onCommand.emit('see-tab', tab); };
+    const call = (args) => { const id = `h-${Math.random()}`; bg.native.emit({ type: 'request', id, cmd: 'screenshot', args }); return id; };
+    const answer = async (id) => { for (let i = 0; i < 300; i++) { const r = bg.native.sent.find((m) => m.type === 'response' && m.id === id); if (r) return r; await sleep(5); } throw new Error('no response'); };
+    // No panel open in that window: refused at once, as before (nothing to wait in).
+    let r = await bg.native.call('screenshot', { tab: 5, scope: 'google.com' });
+    assert.match(r.error, /only after the user clicks TRIF's button on it \(or press Alt\+Shift\+S with this tab in front\) \(TRIF has access/);
+    assert.ok(!bg.native.sent.some((m) => m.type === 'requestWaiting'));
+    // The side panel open in window 1: the screenshot waits, the helper's timer is made longer, the panel shows the note.
+    const panel = bg.connectPanel();
+    panel.onMessage.emit({ type: 'panel.window', windowId: 1 });
+    let id = call({ tab: 5, scope: 'google.com' });
+    await settle(20);
+    assert.deepStrictEqual(bg.native.sent.filter((m) => m.type === 'requestWaiting').map((m) => [m.id, m.ms]), [[id, 2400]]);
+    const st = (await panel.ask({ type: 'status' })).result.seeTab;
+    assert.deepStrictEqual(st.map(({ tabId, windowId, site, shortcut }) => ({ tabId, windowId, site, shortcut })), [{ tabId: 5, windowId: 1, site: 'google.com', shortcut: 'Alt+Shift+S' }]);
+    assert.ok(panel.sent.some((m) => m.type === 'statusChanged'));
+    // Another tab's click doesn't count; this one's does, at once, and the panel stays open.
+    granted.add(6); bg.chrome.action.onClicked.emit({ ...tabs[1] });
+    assert.deepStrictEqual(bg.panelCalls, [['close', { windowId: 1 }]], 'a click with nothing waiting on its tab: as before');
+    bg.panelCalls.length = 0;
+    click({ ...tabs[0] });
+    r = await answer(id);
+    assert.strictEqual(r.ok, true, r.error);
+    assert.strictEqual(r.result.how, 'visible');
+    assert.deepStrictEqual(bg.panelCalls, [], 'the click that let TRIF see the tab left the panel open');
+    assert.deepStrictEqual((await panel.ask({ type: 'status' })).result.seeTab, [], 'the note is gone');
+    // Captured now without waiting (the grant lasts on that origin).
+    assert.strictEqual((await bg.native.call('screenshot', { tab: 5, scope: 'google.com' })).ok, true);
+    // The tab goes to another origin: the browser takes the grant back; the shortcut gives it again (panel open: stays open).
+    granted.delete(5);
+    bg.chrome.tabs.onUpdated.emit(5, { url: 'https://mail.google.com/' }, { ...tabs[0], url: 'https://mail.google.com/' });
+    id = call({ tab: 5, scope: 'google.com' });
+    await settle(20);
+    assert.strictEqual((await panel.ask({ type: 'status' })).result.seeTab.length, 1);
+    press({ ...tabs[0] });
+    r = await answer(id);
+    assert.strictEqual(r.ok, true, r.error);
+    assert.deepStrictEqual(bg.panelCalls, []);
+    // No click in time: the error says the panel asked; the note goes.
+    granted.delete(5);
+    id = call({ tab: 5, scope: 'google.com' });
+    r = await answer(id);
+    assert.match(r.error, /and they didn't: TRIF's panel showed them a note asking for that click/);
+    assert.deepStrictEqual((await panel.ask({ type: 'status' })).result.seeTab, []);
+    // The tab closes while it waits: the error at once.
+    id = call({ tab: 5, scope: 'google.com' });
+    await settle(20);
+    bg.chrome.tabs.onRemoved.emit(5);
+    r = await answer(id);
+    assert.match(r.error, /Ask the user to go to this tab/);
+    assert.doesNotMatch(r.error, /they didn't/);
+    // The shortcut with the panel closed opens it (Chrome: from the shortcut itself).
+    panel.onDisconnect.emit();
+    bg.panelCalls.length = 0;
+    press({ ...tabs[0] });
+    assert.deepStrictEqual(bg.panelCalls, [['open', { windowId: 1 }]]);
+  } finally { delete globalThis.__trifGrantWaitMs; bg.restore(); }
 });
 
 test('background (Safari): TRIF doesn\'t check site access (Safari asks per site itself)', async () => {

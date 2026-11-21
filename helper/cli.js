@@ -946,7 +946,9 @@ const handlers = {
 
   async screenshot(ctx) {
     // --copy: a copy loaded in a window of its own (a tab that isn't showing, in Chrome) takes a page load or more.
-    const r = await ctx.call('screenshot', { full: !!ctx.opts['--full'], copy: !!ctx.opts['--copy'], ...(ctx.opts['--force'] ? { force: true } : {}), timeout: 60000, ...tabArgs(ctx.opts) });
+    // (and, without access to every site, up to 60 s more while the panel asks the user to click TRIF's button on the
+    // tab: extension/capturegrant.js GRANT_WAIT_MS, which the extension adds to the helper's timer, requestWaiting)
+    const r = await ctx.call('screenshot', { full: !!ctx.opts['--full'], copy: !!ctx.opts['--copy'], ...(ctx.opts['--force'] ? { force: true } : {}), timeout: 60000, ...tabArgs(ctx.opts) }, 60000 + 8000 + 62000);
     const m = /^data:image\/(\w+);base64,(.*)$/s.exec((r && r.dataUrl) || '');
     if (!m) throw new HelperError('the extension returned no image data', 'command');
     let file = ctx.opts['-o'];

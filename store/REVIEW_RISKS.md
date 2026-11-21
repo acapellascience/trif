@@ -91,7 +91,8 @@ Mitigations:
   install warning; the justification in `listing.md` says why.
 - `activeTab` (no install warning) is for screenshots: Chrome's `captureVisibleTab` wants `<all_urls>` or
   `activeTab`, a site's own access isn't enough. The toolbar button opens the side panel from
-  `action.onClicked` so that its click grants it.
+  `action.onClicked` so that its click grants it, and TRIF's keyboard shortcut ("Let TRIF see this tab",
+  a `commands` entry) grants it the same way.
 - `scripting` is used for page text and debugging reads. Its justification is specific. Keep it.
 
 ## 5. Privacy disclosures must match the code (medium)

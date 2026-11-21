@@ -20,6 +20,7 @@ import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX, SETTINGS_SITE_MAX, BOX_RUN_PO
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
 import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
+import { createCaptureGrants, GRANT_WAIT_MS, shortcutText } from './capturegrant.js';
 import { createTabLocks, leakGuard } from './tablock.js';
 import { facePaths, toolbarFace } from './faces.js';
 import { agentCheck, agentSiteOf, normalizeAgentSites, agentLevel, COMMAND_NEEDS, modsSiteOf, normalizeModsReadable, modsVisibility } from './agentsites.js';
@@ -390,14 +391,31 @@ chrome.runtime.onConnect.addListener((port) => {
 if (FIREFOX) {
   // Firefox has a sidebar instead of the side panel; the toolbar button toggles it (toggle() must run
   // synchronously in the click handler).
-  chrome.action.onClicked.addListener(() => { (globalThis.browser ?? chrome).sidebarAction.toggle(); });
+  // (the click gives TRIF activeTab on that tab, for screenshots: noteGrant; while a screenshot waits for it, the
+  // click opens the sidebar rather than closing it)
+  chrome.action.onClicked.addListener((tab) => {
+    const sidebar = (globalThis.browser ?? chrome).sidebarAction;
+    if (noteGrant(tab, 'click')) sidebar.open(); else sidebar.toggle();
+  });
 } else if (!PERSISTENT_HOST) {
   // Chrome and the other Chromium browsers (Safari's panel window is safari.js's): the toolbar button opens
   // the side panel from here rather than by itself (openPanelOnActionClick), because only a click that
   // reaches the extension gives it activeTab on that tab, which is what lets `trif screenshot` capture it
   // without access to every site (screenshot.js). Where no side panel shows up, a panel window instead
   // (see "the panel in a window" below).
-  chrome.action.onClicked.addListener(onToolbarClick);
+  chrome.action.onClicked.addListener((tab) => onToolbarClick(tab));
+}
+// TRIF's shortcut, "Let TRIF see this tab" (the manifest's see-tab command, Alt+Shift+S): like the toolbar button
+// it gives TRIF activeTab on the tab in front (with the focus in the page or in the panel), and opens the panel if
+// it isn't open in that window; it never closes it. Not in Safari (no such command there: it has every site).
+if (!PERSISTENT_HOST) {
+  chrome.commands?.onCommand?.addListener((name, tab) => {
+    if (name !== SEE_TAB) return;
+    // (Firefox: the sidebar opens from the shortcut itself, before anything is awaited)
+    if (FIREFOX) { try { (globalThis.browser ?? chrome).sidebarAction.open(); } catch { /* opens on the next click */ } }
+    if (!tab) { chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => noteGrant(t, 'shortcut'), () => {}); return; }
+    if (FIREFOX) noteGrant(tab, 'shortcut'); else onToolbarClick(tab, { how: 'shortcut' });
+  });
 }
 // Optional permissions: Firefox's userScripts (the setup page or the panel asks for it), and in every
 // browser the sites the user lets TRIF work on, which they can also take back in the browser's settings.
@@ -1441,11 +1459,15 @@ const commands = {
   // TRIF never switches tabs or focuses windows to capture one: several agents can be working at once
   // while the user browses. A tab that isn't showing is captured by Firefox as it is; Chrome, only with
   // `copy`, captures a fresh copy in a window of its own (extension/screenshot.js), and says so in `note`.
-  async screenshot(args) {
+  // Without access to every site, the tab in front refused for want of the user's click: the panel asks for it and
+  // the screenshot waits (waitForGrant).
+  async screenshot(args, reqId = null) {
     const tab = await scopedTab(args);
     const timeout = Number(args.timeout) > 4000 ? Number(args.timeout) - 3000 : 45000;
     return captureScreenshot(chrome, tab, { full: !!args.full, copy: !!args.copy, force: !!args.force, timeout }, {
       browser: BROWSER, family: FAMILY, allUrls: state.access.allUrls,
+      grants: captureGrants, shortcut: seeTabShortcut,
+      waitForGrant: (t, { shortcut }) => waitForGrant(t, { site: args.scope ? normalizeSite(args.scope) : siteOfHost(hostOf(t.url || '')), shortcut, reqId }),
       pageCall: (tabId, func, a = []) => pageCall(tabId, 'ISOLATED', func, a),
       stitch: stitchShots,
       onProbe: rememberProbe,
@@ -1713,7 +1735,7 @@ async function runCommand(cmd, args, reqId = null) {
   // which is all the page commands check; `phoneRun` says where it came from)
   if (args && isPhoneSite(args.scope)) { args.scope = phoneBase(args.scope); args.phoneRun = true; }
   await agentGate(cmd, args, reqId);
-  return fn(args);
+  return fn(args, reqId);
 }
 
 // ---- Mods that break (modhealth.js) -------------------------------------------------------------------
@@ -2358,12 +2380,76 @@ async function uiStatus() {
     // (sensitive sites: the ones of their own TRIF knows of, and the hosts the upgrade asks about)
     sensitive: { splits: sens().splits, pending: state.sensitivePending },
     agentAsks: [...state.agentAsks.entries()].map(([id, a]) => ({ id, site: a.site })),
+    // (screenshots waiting for the user's click on their tab: the panel's note, capturegrant.js)
+    seeTab: captureGrants.waiting().map(({ tabId, windowId, site, shortcut, until }) => ({ tabId, windowId, site, shortcut, until })),
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
     lockedTabs: tabLocks.list(),
     groupsOff: state.groupsOff,
     // Storage stopped working: the panel can't read switches from it, so they come from here.
     ...(storageHealth.broken ? { storageBroken: true, disabled: state.disabled, offSites: state.offSites } : {}),
   };
+}
+
+// ---- letting TRIF see a tab: screenshots without access to every site (capturegrant.js) ---------------------
+// The browser gives TRIF activeTab on a tab when the user clicks the toolbar button there or presses TRIF's
+// shortcut (SEE_TAB); TRIF keeps a record of it, by the browser's rules for taking it back, in session storage
+// (which the browser empties as it restarts, as it does the grants).
+
+const SEE_TAB = 'see-tab';
+const GRANTS_KEY = 'captureGrants';
+// (how long a screenshot waits for the click: tests set a shorter one)
+const GRANT_WAIT = Number(globalThis.__trifGrantWaitMs) > 0 ? Number(globalThis.__trifGrantWaitMs) : GRANT_WAIT_MS;
+const MAC = /Mac/.test(globalThis.navigator?.userAgent || '');
+const captureGrants = createCaptureGrants({
+  family: FAMILY,
+  save: (dump) => { chrome.storage.session?.set({ [GRANTS_KEY]: dump })?.catch?.(() => {}); },
+});
+const grantsLoaded = (async () => {
+  try { captureGrants.load((await chrome.storage.session.get(GRANTS_KEY))[GRANTS_KEY]); } catch { /* no session storage: from now on */ }
+})();
+chrome.tabs.onUpdated?.addListener((tabId, info, tab) => { grantsLoaded.then(() => captureGrants.updated(tabId, info, tab)); });
+chrome.tabs.onRemoved?.addListener((tabId) => {
+  const waited = captureGrants.isWaiting(tabId);
+  grantsLoaded.then(() => captureGrants.removed(tabId));
+  if (waited) notifyPanels();
+});
+
+/** The click or the shortcut on `tab` (synchronous: the click decides from it). Returns how many screenshots it lets go on. */
+function noteGrant(tab, how) {
+  const n = captureGrants.grant(tab, how);
+  if (n) notifyPanels();
+  return n;
+}
+
+/**
+ * Whether TRIF can take a screenshot of `tab` now as far as it knows: it has every site, or the user's click on
+ * that tab, by the record (a hint: the browser decides). For what would rather skip the picture than ask.
+ */
+function hasCaptureGrant(tab) {
+  if (!tab || !Number.isInteger(tab.id)) return false;
+  return state.access.allUrls !== false || captureGrants.has(tab.id, tab.url || tab.pendingUrl || '');
+}
+
+/** TRIF's shortcut as the user's keyboard says it ('⌥⇧S' on a Mac), or '' when the user has none (removed, or taken). */
+async function seeTabShortcut() {
+  try { return shortcutText((await chrome.commands.getAll()).find((c) => c.name === SEE_TAB)?.shortcut || '', MAC); } catch { return ''; }
+}
+
+/**
+ * A screenshot of `tab` (in front in its window) refused for want of the click: with TRIF's panel open in that
+ * window, its note asks the user to click the robot, and this waits up to GRANT_WAIT (60 s) for it. Returns
+ * {granted, waited}; with no panel there to ask in, {granted: false, waited: 0} at once.
+ */
+async function waitForGrant(tab, { site = '', shortcut = '', reqId = null } = {}) {
+  const panelThere = [...state.panelWindows.values()].some((p) => p.windowId === tab.windowId);
+  if (!panelThere) return { granted: false, waited: 0 };
+  // (the helper's timer for this request: longer by the wait, helper/host.js onRequestWaiting)
+  if (reqId) { try { post({ type: 'requestWaiting', id: reqId, ms: GRANT_WAIT + 2000 }); } catch { /* the reply says */ } }
+  const p = captureGrants.wait(tab, { ms: GRANT_WAIT, site, shortcut });
+  notifyPanels();
+  const result = await p;
+  notifyPanels();
+  return { granted: result === 'granted', waited: result === 'timeout' ? GRANT_WAIT : 0 };
 }
 
 // ---- the toolbar button, and the panel in a window ---------------------------------------------
@@ -2386,12 +2472,16 @@ const lateWindows = new Map();  // browser window -> {id: the panel window opene
 const panelWindowOpening = new Set(); // browser windows a panel window is being opened for (a double click opens one)
 const focusedAt = new Map();    // window id -> when it was last focused (watched while panel windows are open)
 
-function onToolbarClick(tab) {
+// The click (or TRIF's shortcut, `how`) gives TRIF activeTab on the tab (noteGrant). While a screenshot waits for
+// that, or from the shortcut, it opens the panel and never closes it: the panel's note asked for the click.
+function onToolbarClick(tab, { how = 'click' } = {}) {
   const windowId = tab?.windowId;
   if (!Number.isInteger(windowId)) return;
   const at = Date.now();
+  const keep = noteGrant(tab, how) > 0 || how === 'shortcut';
   // Both side panel calls must come from the click itself, so nothing is awaited before them.
   if (sidePanelIn(windowId) && chrome.sidePanel?.close) {
+    if (keep) return;
     chrome.sidePanel.close({ windowId }).catch((e) => console.warn('[TRIF] the side panel didn\'t close', e));
     return;
   }
@@ -2400,15 +2490,15 @@ function onToolbarClick(tab) {
     try { opening = Promise.resolve(chrome.sidePanel.open({ windowId })); } catch (e) { opening = Promise.reject(e); }
     opening.catch((e) => { if (!state.panelInWindow) console.warn('[TRIF] the side panel didn\'t open', e); });
   }
-  ready.then(() => panelOrWindow(windowId, opening, at)).catch((e) => console.warn('[TRIF] the panel didn\'t open', e));
+  ready.then(() => panelOrWindow(windowId, opening, at, keep)).catch((e) => console.warn('[TRIF] the panel didn\'t open', e));
 }
 
-async function panelOrWindow(windowId, opening, at) {
-  // A panel window open for it already: the click brings it back, or closes it.
+async function panelOrWindow(windowId, opening, at, keep = false) {
+  // A panel window open for it already: the click brings it back, or closes it (`keep`: only brings it back).
   const existing = await findPanelWindow(windowId);
   if (existing) {
     const browser = await chrome.windows.get(windowId).catch(() => null);
-    if (panelWindowClick({ panel: existing, browser, focusedAt: Object.fromEntries(focusedAt), now: at }) === 'focus') {
+    if (keep || panelWindowClick({ panel: existing, browser, focusedAt: Object.fromEntries(focusedAt), now: at }) === 'focus') {
       await chrome.windows.update(existing.id, { focused: true });
     } else {
       await chrome.windows.remove(existing.id);

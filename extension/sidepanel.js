@@ -3,6 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
+import { SEE_TAB_TITLE, seeTabWhere } from './capturegrant.js';
 import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, SAFARI, BROWSER, setBrowser, SETUP_COMMAND, PHONE_PREFIX, isPhoneMod,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, sensitiveSites, splitForPage,
   normalizeModOrder, orderMods, moveId, setModOrder,
@@ -67,6 +68,7 @@ const ui = {
   siteStarter: $('#site-starter'), siteStarterLink: $('#site-starter-link'), siteStarterErr: $('#site-starter-err'),
   notice: $('#notice'), paused: $('#paused'), tabLock: $('#tab-lock'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsReviewNote: $('#mods-review-note'), modsLive: $('#mods-live'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'), queue: $('#queue'),
+  seeTab: $('#see-tab'), seeTabTitle: $('#see-tab-title'), seeTabWhere: $('#see-tab-where'),
 
   noSandbox: $('#no-sandbox'),
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
@@ -824,6 +826,7 @@ function render() {
   renderSiteStarter();
   renderMessages();
   renderQueue();
+  renderSeeTab();
   renderNoSandbox();
 
   ui.empty.hidden = !site || chat.messages.length > 0;
@@ -1004,6 +1007,18 @@ function renderPausedAll() {
  * Another kind (TABLOCK-AUDIT TL-4): another tab of a site the agent ran code in, locked with it (the same
  * rules: no posting, no other sites) until that tab reloads, with a button to show that tab.
  */
+/**
+ * A screenshot of this tab waiting for the click on TRIF's robot (background.js waitForGrant): one line in the chat,
+ * where the robot is, and TRIF's shortcut. It goes as the click comes (the screenshot is taken) or the wait ends.
+ */
+function renderSeeTab() {
+  const w = view.tab && (view.status?.seeTab || []).find((x) => x.tabId === view.tab.id);
+  ui.seeTab.hidden = !w;
+  if (!w) return;
+  ui.seeTabTitle.textContent = SEE_TAB_TITLE;
+  ui.seeTabWhere.textContent = seeTabWhere(BROWSER, w.shortcut);
+}
+
 function renderTabLock() {
   const n = ui.tabLock;
   const lock = view.tab && (view.status?.lockedTabs || []).find((l) => l.tabId === view.tab.id);

@@ -319,6 +319,67 @@ test('without access to every site: only the tab in front, after the toolbar cli
   assert.ok(!ff.calls.some((c) => c[0] === 'captureTab' || c[0] === 'windows.create'), 'nothing tried, no window opened');
 });
 
+test('without access to every site, refused for want of the click: waits for it (waitForGrant), then captures; no click, the error says it waited; never a copy', async () => {
+  const tab = { id: 5, windowId: 1, active: true, url: 'https://x.com/home' };
+  const REFUSED = "Either the '<all_urls>' or 'activeTab' permission is required.";
+  const G = await import('../extension/capturegrant.js');
+  // Refused until the user's click (the wait resolves when it comes), then the picture.
+  let granted = false;
+  const api = mockApi();
+  api.tabs.captureVisibleTab = async (w, o) => { api.calls.push(['captureVisibleTab', w, o]); if (!granted) throw new Error(REFUSED); return PNG(1); };
+  const grants = G.createCaptureGrants();
+  grants.grant(tab, 'click'); // (an old record: the browser's refusal wins)
+  const asked = [];
+  const r = await S.captureScreenshot(api, tab, { copy: true }, {
+    browser: 'Chrome', allUrls: false, pageCall: async () => null, grants, shortcut: () => '⌥⇧S',
+    waitForGrant: async (t, o) => { asked.push([t.id, o, grants.has(5)]); granted = true; return { granted: true, waited: 0 }; },
+  });
+  assert.strictEqual(r.how, 'visible');
+  assert.strictEqual(r.dataUrl, PNG(1));
+  assert.deepStrictEqual(asked, [[5, { shortcut: '⌥⇧S' }, false]], 'the refusal forgot the old record, then waited once');
+  assert.strictEqual(grants.has(5), true, 'the capture that worked: recorded');
+  assert.strictEqual(api.calls.filter((c) => c[0] === 'captureVisibleTab').length, 2);
+  assert.ok(!api.calls.some((c) => c[0] === 'windows.create'), 'no copy window, though --copy was asked for');
+  // No click in time: the error says the panel asked and for how long, names the shortcut, and tells the agent to try again.
+  const no = mockApi();
+  no.tabs.captureVisibleTab = async () => { throw new Error(REFUSED); };
+  await assert.rejects(S.captureScreenshot(no, tab, { copy: true }, {
+    browser: 'Chrome', allUrls: false, pageCall: async () => null, shortcut: async () => '⌥⇧S',
+    waitForGrant: async () => ({ granted: false, waited: G.GRANT_WAIT_MS }),
+  }), (e) => {
+    assert.match(e.message, /only after the user clicks TRIF's button on it \(or press ⌥⇧S with this tab in front\), and they didn't: TRIF's panel showed them a note asking for that click for 60 s/);
+    assert.match(e.message, /`--copy` needs the same click.*run `trif screenshot` again, which waits for the click again.*`trif sweep`/);
+    return true;
+  });
+  assert.ok(!no.calls.some((c) => c[0] === 'windows.create'));
+  // No panel to ask in (waitForGrant says so at once): the error as before.
+  await assert.rejects(S.captureScreenshot(no, tab, {}, { browser: 'Chrome', allUrls: false, pageCall: async () => null, waitForGrant: async () => ({ granted: false, waited: 0 }) }),
+    /only after the user clicks TRIF's button on it \(TRIF has access.*Ask the user to go to this tab and click TRIF's robot icon/);
+  // Granted, but refused again (the tab moved to another origin meanwhile): the error, once.
+  let n = 0;
+  const again = mockApi();
+  again.tabs.captureVisibleTab = async () => { n++; throw new Error(REFUSED); };
+  await assert.rejects(S.captureScreenshot(again, tab, {}, { browser: 'Chrome', allUrls: false, pageCall: async () => null, waitForGrant: async () => ({ granted: true, waited: 0 }) }), /Ask the user to go to this tab/);
+  assert.strictEqual(n, 2);
+  // The user switched tabs while it waited: no picture of the other one.
+  const sw = mockApi();
+  let showing = 5;
+  sw.tabs.query = async () => [{ id: showing, url: 'https://x.com/home' }];
+  let ok = false;
+  sw.tabs.captureVisibleTab = async () => { if (!ok) throw new Error(REFUSED); return PNG(2); };
+  await assert.rejects(S.captureScreenshot(sw, tab, {}, { browser: 'Chrome', allUrls: false, pageCall: async () => null, waitForGrant: async () => { showing = 6; ok = true; return { granted: true, waited: 0 }; } }),
+    /stopped being the one showing/);
+  // Other errors aren't waited on; with every site nothing waits.
+  const other = mockApi();
+  other.tabs.captureVisibleTab = async () => { throw new Error('Cannot access contents of the page'); };
+  let waited = false;
+  await assert.rejects(S.captureScreenshot(other, tab, {}, { browser: 'Chrome', allUrls: false, pageCall: async () => null, waitForGrant: async () => { waited = true; return { granted: true }; } }), /Cannot access/);
+  const all = mockApi();
+  all.tabs.captureVisibleTab = async () => { throw new Error(REFUSED); };
+  await assert.rejects(S.captureScreenshot(all, tab, {}, { browser: 'Chrome', pageCall: async () => null, waitForGrant: async () => { waited = true; return { granted: true }; } }), /permission is required/);
+  assert.strictEqual(waited, false);
+});
+
 test('a tab that is showing: the picture is of that tab or there is none (the user switching tabs meanwhile; a site the agent may not see)', async () => {
   // the window's active tab, asked right before and right after the capture
   const withQuery = (answers) => { const api = mockApi(); let n = 0; api.tabs.query = async (q) => { api.calls.push(['tabs.query', q]); const a = answers[Math.min(n++, answers.length - 1)]; return a ? [a] : []; }; return api; };

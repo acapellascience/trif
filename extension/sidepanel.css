@@ -901,6 +901,12 @@ body.needs-login .approval .ap-robot .code { stroke: var(--led-yellow); }
 .agent-level-item span { color: var(--muted); }
 .agent-level-foot { margin: 6px 6px 2px; color: var(--muted); font-size: 11px; }
 /* the first line of a sensitive site's chat, as TRIF's own note */
+/* A screenshot waiting for the click on TRIF's robot (sidepanel.js renderSeeTab): one small line in the chat. */
+.see-tab { display: flex; align-items: flex-start; gap: 8px; margin: 6px 0 4px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--raised); font-size: 12px; line-height: 1.4; }
+.see-tab[hidden] { display: none; }
+.see-tab p { margin: 0; }
+.see-tab-icon { flex: none; width: 16px; height: 16px; margin-top: 1px; }
+.see-tab span { color: var(--muted); }
 .agent-site-note { margin: 0 0 10px; padding: 0 2px; color: var(--muted); font-size: 12px; }
 .agent-site-note[hidden] { display: none; }
 .agent-sites-list select { margin-left: auto; font-size: 12px; }

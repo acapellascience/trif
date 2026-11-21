@@ -263,6 +263,9 @@
   </div>
   <ol id="messages" class="messages" aria-live="polite" aria-relevant="additions"></ol>
   <div id="working" class="working" hidden role="status"><span class="pulse" aria-hidden="true"></span>Working…</div>
+  <!-- A screenshot waiting for a click on TRIF's robot on this tab (sidepanel.js renderSeeTab; background.js
+       waitForGrant, capturegrant.js): the browser lets TRIF see the tab only after that click or TRIF's shortcut. -->
+  <div id="see-tab" class="see-tab" hidden role="status"><img class="see-tab-icon" src="icons/robot-32.png" alt=""><p><b id="see-tab-title"></b> <span id="see-tab-where"></span></p></div>
   <!-- Messages typed while the agent works, waiting to go (sidepanel.js renderQueue). -->
   <ol id="queue" class="queue" aria-label="Waiting to send" hidden></ol>
 </main>

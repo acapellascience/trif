@@ -130,7 +130,7 @@ The main interface is a side panel: the user chats with their coding agent about
 
 **activeTab**
 ```
-Lets the user's agent take a screenshot of the tab the user is looking at, after the user clicks the TRIF toolbar button on it. Chrome's captureVisibleTab needs activeTab or access to every site, and TRIF only asks for the sites the user turns it on for. Nothing else uses it: TRIF reads and changes only the sites the user allowed.
+Lets the user's agent take a screenshot of the tab the user is looking at, after the user clicks the TRIF toolbar button on it or presses TRIF's keyboard shortcut there. Chrome's captureVisibleTab needs activeTab or access to every site, and TRIF only asks for the sites the user turns it on for. Nothing else uses it: TRIF reads and changes only the sites the user allowed.
 ```
 
 **declarativeNetRequest**

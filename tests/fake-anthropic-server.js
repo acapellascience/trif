@@ -7,7 +7,7 @@
 
 const http = require('http');
 
-function startFakeAnthropic({ script = [{ say: 'ok' }] } = {}) {
+function startFakeAnthropic({ script = [{ say: 'ok' }], port: listenPort = 0 } = {}) {
   const requests = [];
   let step = 0;
   const server = http.createServer((req, res) => {
@@ -53,7 +53,7 @@ function startFakeAnthropic({ script = [{ say: 'ok' }] } = {}) {
     });
   });
   return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(listenPort, '127.0.0.1', () => {
       const { port } = server.address();
       resolve({
         port, url: `http://127.0.0.1:${port}`, requests,

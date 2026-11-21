@@ -67,7 +67,7 @@ jobs:
           node helper/lib/claudepin.js pin "$V"
           node -e "const p=require('./helper/claude-code.json');require('fs').writeFileSync(process.env.RUNNER_TEMP+'/tested.json',JSON.stringify({version:p.version,pins:p,commit:process.env.GITHUB_SHA,ran:new Date().toISOString()},null,2))"
       - name: TRIF's pinned Claude Code, unit tests (a stand-in registry), and the Settings switch
-        run: TRIF_TEST_BOX_REPORTS=1 node --test tests/claudepin.test.js tests/wholebox-setting.test.js tests/claudetoken.test.js tests/wholebox-noshell.test.js tests/wholebox-refusals.test.js tests/relay.test.js tests/wholebox-org.test.js
+        run: TRIF_TEST_BOX_REPORTS=1 node --test tests/claudepin.test.js tests/wholebox-setting.test.js tests/claudetoken.test.js tests/wholebox-noshell.test.js tests/wholebox-refusals.test.js tests/relay.test.js tests/wholebox-org.test.js tests/winbox.test.js
       # TRIF's pinned Claude Code (helper/claude-code.json), installed as the helper does: from the npm
       # registry, its sha512 checked against the pin, Anthropic's signature checked.
       - uses: actions/cache@v4
@@ -209,6 +209,12 @@ jobs:
       # Step 9: the boxed claude.exe reaching TRIF's relay with no administrator step and no internetClient:
       # a named pipe the run's container may open (pipe-bridge.cs, outside) and a shim inside giving Claude
       # Code a port of the container's own. The real api.anthropic.com only with a made-up token (401).
+      # Step 9b' (Tim's pick W3): one administrator step (the runner is one) gives TRIF's one container the
+      # loopback exemption and firewall rules; the box then reaches TRIF's relay and key proxy and nothing else.
+      - name: W3, the administrator step, the box reaching only TRIF's ports (strict)
+        run: |
+          node --test tests/winbox.test.js
+          node tests/whole-box/win-w3-probe.js
       - name: The network without the loopback exemption (named pipe), the pinned claude.exe
         env:
           WBX_REAL_RELAY: '1'

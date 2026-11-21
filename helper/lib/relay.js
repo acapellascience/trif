@@ -137,11 +137,12 @@ function localAddress(addr) {
 const lookupAll = (host) => new Promise((resolve, reject) => dns.lookup(host, { all: true, verbatim: false }, (e, a) => (e ? reject(e) : resolve(a))));
 
 /**
- * start({allow, connect, lookup, limits}) -> Promise<{port, seen, close, tunnels()}>.
+ * start({allow, connect, lookup, limits, port}) -> Promise<{port, seen, close, tunnels()}>. `port`: a fixed
+ * one (Windows' box: the port its firewall rules leave open, winbox.js); default any free one.
  * `allow`: [{host, port, local?}] (default Anthropic's hosts on 443). `connect(port, address, host)` and
  * `lookup(host)` -> [{address, family}]: tests (instead of the internet and DNS).
  */
-function start({ allow = ANTHROPIC, connect = (port, address) => net.connect({ port, host: address }), lookup = lookupAll, limits = {} } = {}) {
+function start({ allow = ANTHROPIC, connect = (port, address) => net.connect({ port, host: address }), lookup = lookupAll, limits = {}, port: listenPort = 0 } = {}) {
   const L = { ...LIMITS, ...limits };
   const rules = normRules(allow);
   const seen = [];
@@ -244,7 +245,7 @@ function start({ allow = ANTHROPIC, connect = (port, address) => net.connect({ p
 
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => resolve({
+    server.listen(listenPort, '127.0.0.1', () => resolve({
       port: server.address().port,
       seen,
       dropped: () => dropped,

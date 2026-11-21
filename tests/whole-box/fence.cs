@@ -16,6 +16,11 @@
 //   capability  a made-up capability name; its SID is given to every run, for what all runs may read
 //               (TRIF's code, node)
 //   capabilities  more capability names, Windows' own (an lpac needs "registryRead" for node to start)
+//   runCapability (whole box on Windows, W3) a made-up capability name, one per run: the run's own SID
+//               instead of its container's. Every boxed run shares ONE container (`name`, fixed: the
+//               administrator's loopback exemption and firewall rules name it), so each run's entries
+//               (grants "to": "run", readonly) name this capability, which only that run's token holds;
+//               cleanup takes them out and keeps the container
 //   lpac        true: a less-privileged AppContainer (no ALL APPLICATION PACKAGES: what Windows lets
 //               every packaged app read is closed too)
 //   grant       [{path, rights: "r"|"rw"|"r+mkdir"|"stat", to: "run"|"capability", inherit: true|false|
@@ -211,8 +216,20 @@ static class Fence {
   }
 
   // The run's entries on its folders (and the capability's on what every run reads).
+  // Whom the run's own entries name: its per-run capability in the shared container (runCapability), else
+  // its own container.
+  static SecurityIdentifier RunSid(Dictionary<string, object> spec, bool make) {
+    string rc = Str(spec, "runCapability", null);
+    if (rc != null) return new SecurityIdentifier(CapabilitySid(rc));
+    string name = Str(spec, "name", null);
+    if (make) return new SecurityIdentifier(ContainerSid(name));
+    IntPtr sid;
+    return DeriveAppContainerSidFromAppContainerName(name, out sid) == 0 ? new SecurityIdentifier(sid) : null;
+  }
+
   static void Prepare(Dictionary<string, object> spec) {
-    SecurityIdentifier run = new SecurityIdentifier(ContainerSid(Str(spec, "name", null)));
+    ContainerSid(Str(spec, "name", null));
+    SecurityIdentifier run = RunSid(spec, true);
     string capName = Str(spec, "capability", null);
     SecurityIdentifier cap = capName != null ? new SecurityIdentifier(CapabilitySid(capName)) : null;
     foreach (Dictionary<string, object> g in List(spec, "grant")) {
@@ -230,9 +247,8 @@ static class Fence {
   // Every entry that names the run, off the folders the spec gave it; then its container's profile.
   static void Cleanup(Dictionary<string, object> spec) {
     string name = Str(spec, "name", null);
-    IntPtr sid;
-    if (DeriveAppContainerSidFromAppContainerName(name, out sid) == 0) {
-      SecurityIdentifier run = new SecurityIdentifier(sid);
+    SecurityIdentifier run = RunSid(spec, false);
+    if (run != null) {
       List<string> paths = new List<string>(Strings(spec, "readonly"));
       foreach (Dictionary<string, object> g in List(spec, "grant")) { if (Str(g, "to", "run") != "capability") paths.Add(Str(g, "path", "")); }
       foreach (string p in paths) {
@@ -242,7 +258,7 @@ static class Fence {
         } catch (Exception) { /* the folder went with the run */ }
       }
     }
-    DeleteAppContainerProfile(name);
+    if (Str(spec, "runCapability", null) == null) DeleteAppContainerProfile(name);
   }
 
   // One argument as CreateProcess's command line carries it (what CommandLineToArgvW reads back).
@@ -268,6 +284,8 @@ static class Fence {
     List<IntPtr> capSids = new List<IntPtr>();
     string capName = Str(spec, "capability", null);
     if (capName != null) capSids.Add(CapabilitySid(capName));
+    string runCap = Str(spec, "runCapability", null);
+    if (runCap != null) capSids.Add(CapabilitySid(runCap));
     foreach (string c in Strings(spec, "capabilities")) capSids.Add(CapabilitySid(c));
 
     // The attribute list: the container (with its capabilities), and for lpac the opt-out of ALL

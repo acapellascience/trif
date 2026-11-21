@@ -1,0 +1,29 @@
+# Step 2 of docs/WHOLE-BOX-PROGRESS.md: every day, all of TRIF's full-sandbox tests (whole-box.yml) on npm's
+# newest Claude Code in place of TRIF's pin, so a break is known before the pin moves. A passing run records
+# the version and its packages' checksums (artifact claude-code-tested), which `node scripts/release.js
+# claude-pin <version>` requires before it moves the pin. As whole-box.yml: no secrets, no account; the one
+# real call to Anthropic carries a made-up token, which Anthropic refuses.
+# (GitHub runs a schedule only from the default branch: daily once this file is on main. Until then it
+# runs when this file changes on whole-box, or by hand: gh workflow run whole-box-latest.yml -f claude-code=<v>.)
+name: whole-box-latest
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      claude-code:
+        description: A Claude Code version or npm dist-tag
+        default: latest
+  push:
+    branches: [whole-box]
+    paths: ['.github/workflows/whole-box-latest.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  box:
+    uses: ./.github/workflows/whole-box.yml
+    with:
+      claude-code: ${{ inputs.claude-code || 'latest' }}

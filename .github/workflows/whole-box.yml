@@ -8,12 +8,19 @@ on:
   push:
     branches: [whole-box]
   workflow_dispatch:
+  # (step 2: whole-box-latest.yml runs all of this daily on npm's newest Claude Code in place of the pin)
+  workflow_call:
+    inputs:
+      claude-code:
+        description: A Claude Code version or npm dist-tag to test in place of TRIF's pin ('' = the pin)
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: whole-box-${{ github.ref }}
+  group: whole-box-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -47,6 +54,18 @@ jobs:
           echo "== log show (tag)"; log show --last 1m --style compact --predicate "eventMessage CONTAINS \"$T\"" | head -20
           echo "== log show (Sandbox)"; log show --last 1m --style compact --predicate 'sender == "Sandbox"' | head -20
           sw_vers; id
+      # (step 2, whole-box-latest.yml: another Claude Code in place of the pin, made as the release step makes
+      # it, `claudepin.js pin`, checksums from the registry; everything below then tests that one)
+      - name: Pin the Claude Code under test (the daily run)
+        if: ${{ inputs.claude-code != '' && inputs.claude-code != null }}
+        env:
+          WANT: ${{ inputs.claude-code }}
+        run: |
+          case "$WANT" in *[!A-Za-z0-9.-]*) echo "not a version or tag: $WANT"; exit 1;; esac
+          V=$(npm view "@anthropic-ai/claude-code@$WANT" version | tail -1)
+          echo "Claude Code $WANT = $V (TRIF's pin: $(node -p "require('./helper/claude-code.json').version"))"
+          node helper/lib/claudepin.js pin "$V"
+          node -e "const p=require('./helper/claude-code.json');require('fs').writeFileSync(process.env.RUNNER_TEMP+'/tested.json',JSON.stringify({version:p.version,pins:p,commit:process.env.GITHUB_SHA,ran:new Date().toISOString()},null,2))"
       - name: TRIF's pinned Claude Code, unit tests (a stand-in registry), and the Settings switch
         run: TRIF_TEST_BOX_REPORTS=1 node --test tests/claudepin.test.js tests/wholebox-setting.test.js tests/claudetoken.test.js tests/wholebox-noshell.test.js tests/wholebox-refusals.test.js tests/relay.test.js tests/wholebox-org.test.js
       # TRIF's pinned Claude Code (helper/claude-code.json), installed as the helper does: from the npm
@@ -138,6 +157,14 @@ jobs:
       - name: Remove the managed settings
         if: always()
         run: sudo rm -f "/Library/Application Support/ClaudeCode/managed-settings.json"
+      # (step 2: what release.js claude-pin checks before moving the pin: this run passed on these packages)
+      - name: Record the Claude Code these tests passed on
+        if: ${{ success() && inputs.claude-code != '' && inputs.claude-code != null }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-code-tested
+          path: ${{ runner.temp }}/tested.json
+          retention-days: 90
 
   # claude.exe in an AppContainer (TRIF's fence launcher), exploration.
   windows:

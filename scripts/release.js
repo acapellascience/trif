@@ -13,6 +13,16 @@
 //                                             so one is due when there's been no release for ~6 weeks.
 //                                             Then commit and push updates/ on main. Signs the mods feed
 //                                             (updates/mods.json) again too.
+//   node scripts/release.js claude-pin <version> [--dry-run]
+//                                             move TRIF's pinned Claude Code (helper/claude-code.json, the
+//                                             one runs in TRIF's full sandbox use: helper/lib/claudepin.js)
+//                                             to <version>, only once the box tests have passed on exactly
+//                                             it: a successful run of the whole-box-latest workflow (daily
+//                                             against npm's latest; or `gh workflow run whole-box-latest.yml
+//                                             -f claude-code=<version>`) whose claude-code-tested artifact
+//                                             names that version with the same packages and checksums the
+//                                             registry gives now. Writes the pin file; commit it, and the next
+//                                             release ships it.
 //   node scripts/release.js mods-feed [--dry-run] [--only <id,id>] [--min-trif <version>]
 //                                             between releases: new versions of Tim's mods without a
 //                                             release. Writes updates/mods.json (+ .sig, the release key)
@@ -707,13 +717,61 @@ async function release(version, { dryRun, skipTests }) {
   console.log(`Beta zips for new testers: ${zips.map((z) => path.relative(ROOT, z)).join(', ')}`);
 }
 
+// ---------------------------------------------------------------- the pinned Claude Code (TRIF's full sandbox)
+
+/**
+ * Why `tested` (a whole-box-latest run's claude-code-tested artifact: {version, pins}) doesn't show the box
+ * tests passed on `pins` (makePins' for the version being pinned), or null: the same version, and for every
+ * platform package the same name, tarball and integrity (the bytes the tests ran are the bytes TRIF pins).
+ */
+function pinTestedProblem(tested, pins) {
+  if (!tested || typeof tested !== 'object' || !tested.pins || typeof tested.pins !== 'object') return 'no test record';
+  if (tested.version !== pins.version || tested.pins.version !== pins.version) return `it tested ${tested.version || 'another version'}`;
+  for (const [key, p] of Object.entries(pins.packages || {})) {
+    const t = (tested.pins.packages || {})[key];
+    if (!t || t.name !== p.name || t.tarball !== p.tarball || t.integrity !== p.integrity) return `its ${key} package isn't the registry's now`;
+  }
+  return null;
+}
+
+async function claudePinCommand(version, { dryRun = false } = {}) {
+  const cp = require('../helper/lib/claudepin');
+  if (!/^\d+\.\d+\.\d+$/.test(String(version || ''))) fail('usage: node scripts/release.js claude-pin <version> [--dry-run]');
+  const current = cp.readPins().version;
+  if (compareVersions(version, current) <= 0) fail(`Claude Code ${version} isn't newer than the pinned ${current}`);
+  const pins = await cp.makePins(version);
+  let runs;
+  try {
+    runs = JSON.parse(sh('gh', ['run', 'list', '--workflow', 'whole-box-latest.yml', '--status', 'success', '--limit', '40', '--json', 'databaseId,headBranch,createdAt,url']));
+  } catch (e) { fail(`couldn't list the whole-box-latest workflow's runs (gh): ${e.message}`); }
+  let passed = null;
+  const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'trif-pin-'));
+  try {
+    for (const run of runs) {
+      const dir = path.join(tmp, String(run.databaseId));
+      try { sh('gh', ['run', 'download', String(run.databaseId), '-n', 'claude-code-tested', '-D', dir]); } catch { continue; } // (a run without it)
+      let tested = null;
+      try { tested = readJson(path.join(dir, 'tested.json')); } catch { continue; }
+      if (!pinTestedProblem(tested, pins)) { passed = run; break; }
+    }
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  if (!passed) {
+    fail(`the box tests haven't passed on Claude Code ${version} yet. Run them: gh workflow run whole-box-latest.yml -f claude-code=${version} (its run must pass), then try again.`);
+  }
+  console.log(`The box tests passed on Claude Code ${version}: ${passed.url} (${passed.headBranch}, ${passed.createdAt}).`);
+  if (dryRun) { console.log(`--dry-run: ${path.relative(ROOT, cp.PIN_FILE)} not changed (would pin ${current} → ${version}).`); return; }
+  writeJson(cp.PIN_FILE, pins);
+  console.log(`Pinned Claude Code ${version} (was ${current}) in ${path.relative(ROOT, cp.PIN_FILE)}. Commit it; the next release ships it.`);
+}
+
 if (require.main === module) {
   const args = process.argv.slice(2);
   const flags = new Set(args.filter((a) => a.startsWith('--')));
   const [cmd] = args.filter((a) => !a.startsWith('--'));
-  if (!cmd) fail('usage: node scripts/release.js keygen | refresh-feed [--dry-run] | mods-feed [--dry-run] [--only <id,id>] [--min-trif <version>] | <version> [--dry-run] [--skip-tests]');
+  if (!cmd) fail('usage: node scripts/release.js keygen | refresh-feed [--dry-run] | claude-pin <version> [--dry-run] | mods-feed [--dry-run] [--only <id,id>] [--min-trif <version>] | <version> [--dry-run] [--skip-tests]');
   const value = (flag) => { const i = args.indexOf(flag); return i === -1 ? null : args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : fail(`${flag} needs a value`); };
   if (cmd === 'keygen') keygen(flags.has('--force'));
+  else if (cmd === 'claude-pin') claudePinCommand(args.filter((a) => !a.startsWith('--'))[1], { dryRun: flags.has('--dry-run') }).catch((e) => fail(e.stack || e.message));
   else if (cmd === 'refresh-feed') refreshFeedCommand({ dryRun: flags.has('--dry-run') });
   else if (cmd === 'mods-feed') {
     const only = value('--only');
@@ -722,4 +780,4 @@ if (require.main === module) {
   else release(cmd, { dryRun: flags.has('--dry-run'), skipTests: flags.has('--skip-tests') }).catch((e) => fail(e.stack || e.message));
 }
 
-module.exports = { modsFeedBytes, modsFeedEntries, refreshModsFeed, AMO_ISSUER, AMO_SECRET, keychain, keychainItem, keychainWriteInput, saveKeychainItem, refreshFeed, feedStaleOn, webExtSignArgs, webExtEnv, WEB_EXT_CONFIG, changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };
+module.exports = { pinTestedProblem, modsFeedBytes, modsFeedEntries, refreshModsFeed, AMO_ISSUER, AMO_SECRET, keychain, keychainItem, keychainWriteInput, saveKeychainItem, refreshFeed, feedStaleOn, webExtSignArgs, webExtEnv, WEB_EXT_CONFIG, changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };

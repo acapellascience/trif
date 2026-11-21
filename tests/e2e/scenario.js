@@ -5508,7 +5508,7 @@ if (nb) {
   let said = '';
   try { said = require('child_process').execSync(nb[1], { encoding: 'utf8' }); } catch (e) { said = 'FAILED: ' + (e.stderr || e.message); }
   fs.writeFileSync(${JSON.stringify(path.join(standin, 'not-broken.txt'))}, said);
-  const t = 'Nothing is broken: the part it hides just isn\x27t on the page this time.';
+  const t = "Nothing is broken: the part it looks for just isn't on the page this time.";
   say({ type: 'assistant', message: { model: 'claude-e2e', content: [{ type: 'text', text: t }] } });
   say({ type: 'result', subtype: 'success', is_error: false, result: t, session_id: 'e2e-fix' });
   process.exit(0);
@@ -5532,6 +5532,8 @@ say({ type: 'result', subtype: 'success', is_error: false, result: text, session
     const problems = [];
     this.sandboxPage = true; // (the throwing mod's console error is expected)
     try {
+      // (TRIF's own page to ask the browser from, again if a check skipped before left it elsewhere: TRIF_E2E_ONLY)
+      if (!(await this.ext(`async () => !!(globalThis.chrome && chrome.storage)`).catch(() => false))) this.control = await this.d.openTab(`${this.d.origin}/onboarding.html`);
       await this.ext(`async (k) => { await chrome.storage.local.remove(k); }`, [`chat:${site}`]);
       fs.writeFileSync(brokeFile, broke(1));
       fs.writeFileSync(quietFile, `${head('E2E Quiet', '// @style\n')}{ "css": "#e2e-quiet-target { outline: 2px solid rgb(1, 2, 3) }" }\n`);

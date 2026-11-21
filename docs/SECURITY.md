@@ -184,8 +184,10 @@ allowlisted things: no `click`, `dispatchEvent`, `submit`, `innerHTML`, `on*`, `
 `iframe` or `form`. The rule each guard and power is argued against: *a boxed mod may only name things that
 are its own, or copy addresses the page already has* (its ids and classes start `trif-box-`, so the page's
 frameworks find nothing to act on). Typed text, keys pressed in fields and the page's canvases aren't
-read. The 21 powers are narrowed exceptions (`click` only the header's selectors, `write-drafts` refusing
-text that adds an address, `site-data` only removing or reordering what the site sent…); every pair and
+read. The 22 powers are narrowed exceptions (`click` only the header's selectors, `write-drafts` refusing
+text that adds an address, `site-data` only removing or reordering what the site sent, `load` only GETs,
+without cookies, of the header's addresses, built again by TRIF's background from the header and values the
+server sent back, so nothing the mod reads goes into one as text: extension/loadpower.js…); every pair and
 triple has a warning or a reason it adds nothing (helper/lib/combinations.js), and the sandbox refuses an
 act while another boxed mod's power on the page would make a warned pair the user didn't approve
 (`partnersOk`, `soundOk`): two mods can't split a dangerous pair between them. The agent's own `trif run`

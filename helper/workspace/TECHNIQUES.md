@@ -74,11 +74,16 @@ is flagged as code TRIF can't check, which is a worse question to put to the use
   to). If none of it is on a page where it was before, three loads in a row, TRIF flags the mod as maybe
   broken (the site changed) and offers a fix. It only notes the selector; call it once, at the start.
   Style mods and boxed mods don't need it: TRIF knows their selectors (rules, `trif.observe`, `trif.hide`).
-- Your code isn't subject to the page's Content Security Policy, but what it creates may be: an iframe or
-  image from another origin, an inline `<script>`, sometimes a `<style>` element. Sites with **Trusted
+- **The page's Content Security Policy**: your code runs even on pages with a strict one (TRIF puts it
+  there), but what it loads or sends from the page follows that policy, as the page's own code does:
+  `fetch`, XHR, WebSocket, EventSource, images, iframes, fonts, an inline `<script>`, sometimes a `<style>`
+  element. On x.com, for one, a `fetch` to any other server is blocked (its `connect-src`). For data from
+  another server, write a boxed mod with the `load` power instead (BOXED.md, "Powers"): TRIF fetches the
+  header's addresses itself, outside the page, where the page's policy doesn't apply. Sites with **Trusted
   Types** (many Google sites) throw on `el.innerHTML = '...'`: build DOM with `createElement` and
-  `textContent` instead. CSP blocks are console messages, not exceptions; to see them, listen for
-  `securitypolicyviolation` and `trif.warn` the `blockedURI`.
+  `textContent` instead. A blocked load is a console message (a blocked `fetch` also rejects with a
+  TypeError), not an exception at the line that made it; to see them, listen for `securitypolicyviolation`
+  and `trif.warn` the `blockedURI`.
 
 ## Techniques, most robust first
 

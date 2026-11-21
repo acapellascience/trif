@@ -297,7 +297,9 @@ until the user approves that *set* (held.js keys `power:<name>`: an update with 
 power waits for itself; the quiet ones, `sound`, `controls`, `mods`, `preload`, `embeds` and `media`, are listed but
 never hold alone, while a warned combination one makes does: docs/POWERS.md "How approval works"), and passes the set to the
 extension with the mod; the sandbox (extension/sandbox.js) gives each mod what its set grants and refuses
-the rest. All twelve of 0.2 are built (phases 1 to 3), and the nine of 0.3 (below); phase 1's, with what each gives:
+the rest. All twelve of 0.2 are built (phases 1 to 3), and the nine of 0.3 (below), and `load` (11-21: data from
+the header's addresses, which TRIF's background fetches outside the page; GET, no cookies, and nothing of the
+mod's own in an address: docs/POWERS.md, extension/loadpower.js); phase 1's, with what each gives:
 - `sound`: `trif.audio()`, TRIF's facade over Web Audio (oscillators, gains, filters, delays, panners,
   noise, sounds decoded from `data:audio/…;base64`): no address, no microphone, no worklet, no page media;
   browser errors reach the mod as plain TypeErrors.
@@ -414,15 +416,15 @@ page already has"):
 
 ## Combinations (branch powers)
 
-The table: `helper/lib/combinations.js`, written out in docs/POWER-COMBINATIONS.md. Every pair (210) and
-triple (1330) of the 21 powers, each with the warning a hold shows or a one-line reason it adds nothing;
+The table: `helper/lib/combinations.js`, written out in docs/POWER-COMBINATIONS.md. Every pair (231) and
+triple (1540) of the 22 powers, each with the warning a hold shows or a one-line reason it adds nothing;
 tests/combinations.test.js checks it covers all of them, that its reasoning holds (below), that the doc is
 the table, that the counts here are its counts, and that the sandbox's page-wide rules follow it. The
 twelve powers of 0.2 keep their literal table; the combinations with a power added in 0.3 follow rules,
 by what each power is (a read, a way out, an act).
 
 **How the table is reasoned.** No power sends anything a mod makes up, and the addresses a mod can reach
-(links, images, go-to, click, search-box) are the page's own or the header's. So what a boxed mod reads can
+(links, images, go-to, click, search-box, load) are the page's own or the header's. So what a boxed mod reads can
 leave the site only through a way out: what's posted, what's clicked (both public on most sites), what the
 page's own code is told or sees, what the site keeps, which of the page's pictures and videos load, how
 the page's media plays (another site's host sees those requests), and sound in the room. Everything else
@@ -435,8 +437,10 @@ shows.
   you"), `page-events` (handed to the page's own code, which may post or send it), `site-storage` (kept
   where the site's own code, and boxed mods on later pages, find it), `block-events`'s function form (which
   of the user's actions the page's code sees), `media` (by how it plays), `image-variants` and `preload`
-  (which pictures load), `embeds` (which video it offers) and `sound` (sounds a device nearby could pick
-  up). Several are narrow channels (timing, a choice among the page's own pictures or videos, a listening
+  (which pictures load), `embeds` (which video it offers), `load` (which of the header's addresses it loads
+  from another server, with which of their values, and when: "could put what it reads into an address it
+  loads", though TRIF builds every address from the header and values that server sent, so no text of the
+  mod's goes into one) and `sound` (sounds a device nearby could pick up). Several are narrow channels (timing, a choice among the page's own pictures or videos, a listening
   device near the user), listed because they exist. `site-storage`, `image-variants` and `edit-uploads` are
   reads and ways out both, so they warn with the other reads.
 - Acts that combine warn: `write-drafts` or `edit-uploads` with `click` or `page-events` ("could write a
@@ -458,7 +462,7 @@ shows.
   read), `controls` (the mod's own inputs: only what the user gives it on purpose), `rewrite-requests` (fixed
   in the header, made by TRIF) or `mods`; `mods` with anything (a channel between its own boxed mods, which
   the page-wide rules treat as one); acts that don't combine.
-- Counts: 91 of 210 pairs warn; 32 of 1330 triples have their own warning; 952 more show their pairs'.
+- Counts: 99 of 231 pairs warn; 32 of 1540 triples have their own warning; 1093 more show their pairs'.
 
 **The hold.** Each warned combination a mod has is a need of its own, keyed by its powers
 (`power:together:keys+click+write-drafts`), so approving a pair doesn't cover a triple; the panel's

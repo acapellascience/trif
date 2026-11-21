@@ -207,7 +207,7 @@ const SEE = [['read-drafts', 'what you type'], ['keys', 'the keys you press'], [
 const ACT = [['click', null], ['write-drafts', 'write into your drafts'], ['page-events', 'signal the page\'s code'], ['go-to', 'take you to pages'],
   ['rewrite-requests', (s) => `change what ${s} receives`], ['block-events', 'keep some of what you do from the site']];
 const GO = [['write-drafts', 'your posts and drafts'], ['edit-uploads', 'pictures you post'], ['site-storage', (s) => `${s}'s storage`], ['click', 'clicks the site sees'],
-  ['page-events', 'the page\'s own code'], ['block-events', 'clicks the site sees'], ['image-variants', 'which pictures load'], ['preload', 'which pictures load'], ['embeds', 'which videos load'],
+  ['page-events', 'the page\'s own code'], ['block-events', 'clicks the site sees'], ['image-variants', 'which pictures load'], ['preload', 'which pictures load'], ['embeds', 'which videos load'], ['load', 'which addresses they load'],
   ['media', 'how media plays'], ['sound', 'sound']];
 const FLAGS = { sent: 'So something they read could be sent from your account.', post: 'So they could post for you.' };
 const HEADS = { act: (s) => `Your ${s} mods can:`, see: () => 'They can see:', go: () => 'It could end up in:' };

@@ -143,3 +143,10 @@ ruby mobile/browser-probe/make-project.rb   # rewrites the Xcode project (gem in
   into `shared/gen/browser-checks.json`, which the app reads. `Checks.swift` has the ones that need the app.
 - `shared/gen/sandbox-runtime.js` is TRIF's sandbox runtime wrapped so a probe can start it inside a `try`.
   Run `prepare.js` after `extension/sandbox.js` changes; the smoke test fails when it's stale.
+- **The `load` power (11-21) isn't in the phone apps yet.** On desktop a boxed mod's `trif.load(url)` is fetched
+  by TRIF's background (extension/background.js `loadForMod`, rules in extension/loadpower.js), outside the page.
+  `shared/gen/sandbox-runtime.js` has `trif.load` too, but it only asks: a phone's runtime answers
+  `{trifSandbox: 'load'}` with nothing yet, so the mod gets "trif.load isn't in this version of TRIF here". The
+  iOS and Android boxed runtimes need the same power later (their native side doing the fetch, with
+  loadpower.js's checks, and the per-site access); until then a phone's hold for such a mod should wait, as
+  Safari's does (lib.js `sandboxFallback`). For docs/MOBILE-BEHAVIOUR.md (branch ios-poc), under "Mods and holds".

@@ -82,17 +82,18 @@ an image or link it sets is an address the page already shows; it writes only in
 is null, editors' text hidden), which key was pressed while focus is in anything that is or may hold a
 field (including shadow roots), the page's own canvases.
 
-**Powers** (`// @powers a, b`): 21 named, narrowed exceptions, each held until the user approves that set
+**Powers** (`// @powers a, b`): 22 named, narrowed exceptions, each held until the user approves that set
 of powers (approval is keyed by the set, not the code: a later version with the same powers runs, a new
 power waits). None of them sends anything the mod makes up. Examples: `sound` (Web Audio facade, no
 addresses, no mic), `read-drafts` (field text, never password/card/OTP fields), `write-drafts` (text into
 fields, refusing any text that would add an address that isn't already there), `click` (only selectors
 listed in the header, never submit/reset or cross-origin links), `go-to` (only paths listed in the header),
 `site-data` (filter the site's own responses: remove or reorder only, every output value must occur in the
-input). The full list, each argued against the rule: docs/SAFE-MODS.md "Powers"; the user-facing sentences:
+input), `load` (GET only, no cookies, from the header's addresses, fetched by TRIF's background outside the
+page; query values only the header's, small numbers, or what that server sent back: extension/loadpower.js). The full list, each argued against the rule: docs/SAFE-MODS.md "Powers"; the user-facing sentences:
 docs/WIDEN-STRINGS.md, docs/POWERS-STRINGS.md.
 
-**Combinations.** Every pair (210) and triple (1330) of powers is in a table (helper/lib/combinations.js,
+**Combinations.** Every pair (231) and triple (1540) of powers is in a table (helper/lib/combinations.js,
 written out in docs/POWER-COMBINATIONS.md), each with a warning the approval shows or a one-line reason it
 adds nothing; more than three powers gets one general warning. Two mods splitting a dangerous pair between
 them is handled at run time: the sandbox tracks every boxed mod's powers on the page and refuses an act

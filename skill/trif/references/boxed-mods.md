@@ -169,7 +169,13 @@ new doesn't ask again; one that adds a power waits for it), and gives it those a
 powers (`sound`, `controls`, `mods`, `preload`, `embeds`, `media`) don't make it wait on their own; a warned
 combination one of them makes does. No power
 sends anything the mod makes up (go-to and click go only where the header or the page's links say), so ask
-only for what the mod needs; a mod that needs the network is a free mod.
+only for what the mod needs. Data from another server is the `load` power (below); anything else on the
+network (posting to a server, a socket) is a free mod's, and a free mod's requests follow the page's Content
+Security Policy.
+
+Boxed mods can have powers free mods don't, because TRIF does the risky part itself, under rules: it loads
+the data, plays the video, clicks the button, from outside the page and only as the header says, so the
+page's limits don't stand in the way and the mod gets only what the rules let through.
 
 - `sound`: `trif.audio()`: `tone({frequency, duration, volume, type, at})`, `play(dataUrl, {volume})`,
   and nodes for your own graph: `oscillator({type, frequency, wave: {real, imag}})` (and `setWave(real,
@@ -266,6 +272,23 @@ only for what the mod needs; a mod that needs the network is a free mod.
 - `embeds`: `trif.embed(link, {label})` gives TRIF's button for a video a link on the page names; the
   user's click plays it inside the page from the header's player (`// @powers embeds www.youtube.com/embed`;
   also `www.youtube-nocookie.com/embed`, `player.vimeo.com/video`): the video's id only, no referrer.
+- `load`: `await trif.load(url, {as})`: data from another server, fetched by TRIF outside the page, so the
+  page's Content Security Policy doesn't stop it (x.com's blocks a free mod's `fetch` to anywhere else):
+  `{ok, status, type: 'json' | 'text', data}` (JSON parsed; `{as: 'text'}` or `'json'` to choose). The
+  header lists each address, whole: `// @powers load https://tweetstack.app/api/feed?cursor={next_cursor}&limit=[20|50]`.
+  A part that changes is a whole path segment or a query value, and only: the header's own text, one of its
+  `[words]`, a whole number in its `{min-max}` (at most 1000 apart), or `{key}`: what the same server sent
+  back under that key in its latest JSON answer to this mod on this page (the first one in it: a next-page
+  cursor; `null` there ends it). Nothing else goes in: no parameter the header doesn't name, no text of
+  yours (what the mod read on the page can't ride in an address), no `#`, no wildcard. TRIF builds the
+  address again from the header and those values. Read only: GET, no body, no headers or cookies of yours,
+  so it never acts as the user there; https (http only for localhost and `*.test`); up to 2 MB, 15 s, 3 at
+  once and 30 a minute; text or JSON only (not pictures: a feed's own pictures aren't this power's);
+  redirects only within that server. The user's browser asks once for its access to each site it loads
+  from, when they allow the mod; until it has it, trif.load says so (the mod's row has "needs access").
+  The server sees which of the header's addresses you load, and when: beside a read power (yours, or another
+  boxed mod's on the page) the hold warns, and the page-wide rule refuses (Combinations). Not in Safari or
+  the phone apps yet: the mod waits there.
 - `local-fonts`: `await trif.localFonts()`: `[{family, fullName, style, postscriptName}]`, after the
   browser's own prompt (call it from the user's click).
 - `preload` (quiet: doesn't make the mod wait on its own): `el.loadSooner()` on the page's own lazy `<img>`.
@@ -279,6 +302,40 @@ only for what the mod needs; a mod that needs the network is a free mod.
   once in 10 seconds), a query from a list (`/?mods=[red|blue]`: `trif.goTo('/?mods=red,blue')`), and
   `trif.goTo(page, {inApp: true})` (TRIF moves the address and tells the page's router). `media` also hears
   the page's video and audio: `on('play' | 'pause' | 'ended' | 'timeupdate' | 'volumechange' | …)`.
+
+**A feed from another service, with `load`** (a tab of its own on x.com, say). The answers' shape here is made
+up: read the service's own documentation, and `trif.log` what comes back the first time.
+
+```js
+// ==WebMod==
+// @name        Archive feed
+// @description The Community Archive's feed, beside the timeline
+// @match       https://x.com/*
+// @boxed
+// @powers      load https://tweetstack.app/api/feed?cursor={next_cursor}&limit=[20|50]
+// ==/WebMod==
+const box = page.create('section');
+box.setAttr('id', 'trif-box-archive');
+const more = page.create('button');
+more.setText('More');
+let next = null; // (the cursor tweetstack.app last sent: the only one TRIF lets back into an address)
+const load = async () => {
+  const q = next ? `&cursor=${encodeURIComponent(next)}` : '';
+  const { ok, status, data } = await trif.load(`https://tweetstack.app/api/feed?limit=20${q}`);
+  if (!ok) return trif.warn('the archive answered', status);
+  for (const post of data.posts || []) {
+    const p = page.create('p');
+    p.setText(`${post.author}: ${post.text}`);
+    more.before(p);
+  }
+  next = data.next_cursor;
+  if (!next) more.hide();
+};
+more.on('click', () => load().catch((e) => trif.error(e.message)));
+box.append(more);
+trif.observe('[data-testid=primaryColumn]', (col) => { if (!page.find('#trif-box-archive')) col.prepend(box); });
+await load();
+```
 
 **Combinations.** Some powers together warn the user in the hold ("Together, it could put what it reads into
 something you post"; the list: docs/POWER-COMBINATIONS.md in TRIF's repository, or `trif check`), and more

@@ -1903,6 +1903,19 @@ function modItem(m) {
     badge.addEventListener('click', (e) => { e.stopPropagation(); openCodeView(m.id, { error: first }); });
     name.append(badge);
   }
+  // (the load power, running here, without the browser's access to a site it loads from: a tag that asks for it)
+  if (!m.held && Array.isArray(m.loadMissing) && m.loadMissing.length) {
+    const need = el('button', 'tag row-tag mod-load-access', 'needs access');
+    need.type = 'button';
+    need.dataset.rank = '3';
+    need.title = `This mod loads data from ${m.loadMissing.join(', ')}. Click to give TRIF that site (your browser asks).`;
+    need.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const asking = loadAccessAsk([{ loadSites: m.loadMissing }]);
+      if (asking) asking.then((ok) => { if (!ok) rowError(m.id, loadRefusedWords([{ loadSites: m.loadMissing }])); else refreshStatus(); });
+    });
+    name.append(need);
+  }
   if (m.fixUndo) {
     const undo = el('button', 'tag fix-undo', 'Undo fix');
     undo.type = 'button';
@@ -2057,9 +2070,13 @@ function factsBox(m, info, kind) {
   });
   const decide = (type, label, title) => {
     const b = button(label, type === 'mod.approve' ? 'primary' : '', async () => {
+      const loading = type === 'mod.approve' ? loadAccessAsk([m]) : null; // (in the click: loadAccessAsk)
       b.disabled = true;
       clearRowError(m.id);
-      try { await request({ type, id: m.id, hash: info.hash, tab: view.tab?.id }); } catch (e) { b.disabled = false; rowError(m.id, String(e?.message ?? e)); }
+      try {
+        if (loading && !(await loading)) throw new Error(loadRefusedWords([m]));
+        await request({ type, id: m.id, hash: info.hash, tab: view.tab?.id });
+      } catch (e) { b.disabled = false; rowError(m.id, String(e?.message ?? e)); }
     });
     b.title = title;
     return b;
@@ -2327,7 +2344,7 @@ const FACT_ICONS = {
   'read-drafts': '✎', keys: '⌨', 'site-data': '⇣', 'page-data': '◫', sound: '♪', controls: '◐', mods: '⇆', media: '▶',
   'search-box': '⌕', 'go-to': '↪', click: '◉', 'write-drafts': '⇄',
   'site-storage': '▤', 'local-fonts': 'Aa', 'image-variants': '▣', preload: '⇡', embeds: '▷', 'rewrite-requests': '⇌', 'block-events': '⊘', 'page-events': '↯', 'edit-uploads': '⧉', migrate: '⇢',
-  sends: '↗', loads: '↗', site: '↗', acts: '◉', navigates: '↪', hidden: '?', match: '◎', risk2: '⚠', tier: '⚠',
+  load: '⇣', sends: '↗', loads: '↗', site: '↗', acts: '◉', navigates: '↪', hidden: '?', match: '◎', risk2: '⚠', tier: '⚠',
 };
 const iconOf = (key) => {
   const k = String(key || '');
@@ -2516,7 +2533,8 @@ function renderApproval() {
   P.siteBox.hidden = !P.siteBox.childNodes.length;
   const fromAgent = kind !== 'sandbox' && info.by !== 'outside' && info.by !== 'switch' && info.by !== 'edit';
   const who = info.by === 'switch' ? 'You switched it on, and it adds to what this site\'s boxed mods can do together.' : info.by === 'edit' ? 'You edited it.' : m.imported && !fromAgent ? 'You imported it from a file.' : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : fromPhone(info) || 'It\'s new or changed since TRIF last let it run.';
-  P.note.textContent = kind === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
+  P.note.textContent = kind === 'sandbox' && info.cant ? 'It runs once a version of TRIF here can do that.'
+    : kind === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
     : kind === 'pending' ? `${who} The version before keeps running until you decide.`
       : info.asks ? `${who} Updates that ask for the same powers won't ask again.`
         : who; // (a free mod's: its warning above says what it can do)
@@ -2530,6 +2548,8 @@ function renderApproval() {
   P.show.textContent = kind === 'pending' ? 'Show what changed' : 'Show code';
   P.show.hidden = false;
   P.reject.hidden = kind !== 'pending';
+  // (a boxed mod this browser can't give its powers to (the load power in Safari: lib.js sandboxFallback): no Allow)
+  P.allow.hidden = kind === 'sandbox' && !!info.cant;
   for (const b of [P.allow, P.show, P.reject]) b.disabled = false;
 }
 
@@ -2612,9 +2632,13 @@ async function decideApproval(type) {
   const m = approval.queue[approval.at];
   if (!m) return;
   const info = holdOf(m);
+  // (the load power: the browser's access to the sites it loads from, asked for now, in the click (the browser
+  // asks only within one); its usual per-site prompt, nothing asked when it's there already)
+  const loading = type === 'mod.approve' ? loadAccessAsk(m.group || [m]) : null;
   P.allow.disabled = P.reject.disabled = true;
   P.err.hidden = true;
   try {
+    if (loading && !(await loading)) throw new Error(loadRefusedWords(m.group || [m]));
     // (a request's mods: Allow is for all of them, one after another)
     if (m.group) { for (const x of m.group) { await request({ type, id: x.id, hash: holdOf(x).hash, tab: view.tab?.id }); approval.done.add(holdKey(x)); } }
     else await request({ type, id: m.id, hash: info.hash, tab: view.tab?.id });
@@ -2631,6 +2655,19 @@ async function decideApproval(type) {
   }
   renderWaitingBadge();
 }
+
+// The load power's sites (background.js loadSites): the browser's access to them, asked for from a click (Allow on
+// the hold, or the row's "needs access" tag). Null when there's nothing to ask (or the browser asks per site itself:
+// Safari), else a promise of whether the browser gave it.
+function loadAccessAsk(mods) {
+  const sites = [...new Set(mods.flatMap((x) => (Array.isArray(x.loadSites) ? x.loadSites : [])))];
+  if (!sites.length || !SITE_ACCESS) return null;
+  return chrome.permissions.request({ origins: [...new Set(sites.flatMap(siteOrigins))] }).catch(() => false);
+}
+const loadRefusedWords = (mods) => {
+  const sites = [...new Set(mods.flatMap((x) => (Array.isArray(x.loadSites) ? x.loadSites : [])))];
+  return `Your browser didn't give TRIF ${sites.join(', ')}, which this mod loads from. Click Allow again to be asked again.`;
+};
 
 function renderWaitingBadge() {
   if (!ui.waitingBadge) return;

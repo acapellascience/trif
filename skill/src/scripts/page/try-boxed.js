@@ -256,7 +256,7 @@
     audio: power('audio', 'sound'), searchBox: power('searchBox', 'search-box'), channel: power('channel', 'mods'), block: power('block', 'block-events'),
     signal: power('signal', 'page-events'), storage: power('storage', 'site-storage'), goTo: power('goTo', 'go-to'), reload: power('reload', 'go-to'),
     imageVariant: power('imageVariant', 'image-variants'), onUpload: power('onUpload', 'edit-uploads'), embed: power('embed', 'embeds'), localFonts: power('localFonts', 'local-fonts'),
-    filterEmbedded: power('filterEmbedded', 'site-data'), filterGlobal: power('filterGlobal', 'site-data'),
+    filterEmbedded: power('filterEmbedded', 'site-data'), filterGlobal: power('filterGlobal', 'site-data'), load: power('load', 'load'),
   };
 
   // ---- what the box doesn't have reads as undefined (the `with (__trifBox.scope)` line); timers are tracked

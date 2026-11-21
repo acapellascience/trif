@@ -526,7 +526,7 @@ const handlers = {
       }
       const rel = path.relative(ctx.ws.modsDir, path.resolve(file)).split(path.sep);
       const needs = bp.powerNeeds({ site: rel.length === 2 ? rel[0] : '', powers: asked, powerArgs: askedArgs });
-      const lint = require('./lib/sandboxlint').sandboxLint(code, { powers: asked });
+      const lint = require('./lib/sandboxlint').sandboxLint(code, { powers: asked, loadAddresses: askedArgs.load || [] });
       if (ctx.json) return printJson({ ok: true, file: path.resolve(file), sandboxed: true, powers: needs.map((n) => ({ key: n.key, power: n.power, fact: n.fact, holds: !n.soft })), lint, ...styleJson });
       out(`ok: ${path.resolve(file)} is a boxed mod and parses`);
       styleNote();
@@ -538,6 +538,11 @@ const handlers = {
         const hard = needs.filter((n) => !n.soft);
         out(hard.length ? 'It waits for the user\'s OK once for this set of powers (not for each change to its code: only a new power asks again). The hold will say it:' : 'Those don\'t make it wait for the user\'s OK on their own. A hold would list it:');
         for (const l of bp.factLines(needs.map((n) => n.key), needs.map((n) => n.fact))) out(`- ${l}`);
+      }
+      // (the load power: what it reaches and how, as TRIF's background will apply it: extension/loadpower.js)
+      if (asked.includes('load')) {
+        out(`trif.load(url) reaches only these, read only (GET, no cookies), fetched by TRIF outside the page, so the page's Content Security Policy doesn't apply: ${(askedArgs.load || []).join(', ')}.`);
+        out('Each value in an address is the header\'s own, one of its [words], a number in its {range}, or {a_key}: what that server last sent back under that key (a cursor). Anything else is refused, and so are other parameters. Up to 2 MB, 15 s, 30 a minute; text or JSON. The user\'s browser asks once for access to each site it loads from, when they allow the mod. In Safari, and in the phone apps, it waits: not there yet.');
       }
       if (!lint.length) return out('TRIF finds nothing in it that the sandbox would refuse.');
       const lines = code.split('\n');

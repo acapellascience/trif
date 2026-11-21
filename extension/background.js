@@ -26,6 +26,7 @@ import { createTabLocks, leakGuard } from './tablock.js';
 import { facePaths, toolbarFace } from './faces.js';
 import { agentCheck, agentSiteOf, normalizeAgentSites, agentLevel, COMMAND_NEEDS, modsSiteOf, normalizeModsReadable, modsVisibility } from './agentsites.js';
 import { createPhones, isPhoneRule, PHONE, navTarget, phoneRoute } from './phone.js';
+import { parseLoadAddresses, matchLoad, harvest, returnedKeys, loadOptions, fetchLoad, loadStart, loadDone, LoadError } from './loadpower.js';
 
 const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
@@ -804,6 +805,8 @@ function onSandboxMessage(msg, sender, sendResponse) {
       return { ok: true };
     }
     if (!site || !mod || !key || key.length > 100 || !state.mods.some((m) => m.id === mod && m.sandboxed)) return { ok: false, error: 'not a boxed mod here' };
+    // (the load power: TRIF fetches the header's address here, outside the page: loadForMod)
+    if (msg.trifSandbox === 'load') return loadForMod(mod, msg, sender);
     // (go-to's reload: at most once in 10 seconds in a tab, whatever reloads in between)
     if (msg.trifSandbox === 'reload') {
       const tab = sender.tab && sender.tab.id;
@@ -850,6 +853,60 @@ function onSandboxMessage(msg, sender, sendResponse) {
   if (FIREFOX) return answer;
   answer.then(sendResponse);
   return true;
+}
+
+// ---- the load power (extension/loadpower.js has the rules; docs/POWERS.md, BOXED.md "Powers"): a boxed mod's
+// trif.load(url), asked for by TRIF's code in the sandbox world (onSandboxMessage: only that world can send),
+// fetched here, outside the page, so the page's Content Security Policy doesn't apply. The address is checked
+// against this background's own copy of the mod's header (state.mods, from the helper), never the message's;
+// the values a server sent back ({next_cursor}) are kept here too, per tab, frame and mod, for the document they
+// came to (a new document starts again). GET, no body, only Accept, no cookies (`credentials: 'omit'`), no
+// referrer; redirects only within the origin; 2 MB, 15 s, 3 at once and 30 a minute per mod in a tab; text or
+// JSON. The browser's access to the address's site is the usual per-site one, asked for when the user allows
+// the mod (sidepanel.js decideApproval) or from the mod's row (its "needs access" tag).
+const loadState = new Map(); // "<tab> <frame> <mod>" -> {doc, returned: Map, times: [], inFlight}
+chrome.tabs.onRemoved?.addListener((tabId) => { for (const k of loadState.keys()) if (k.startsWith(`${tabId} `)) loadState.delete(k); });
+/** The sites a mod's load power reaches (for the browser's access): [site], each as scopeFor has it. */
+function loadSites(m) {
+  const out = [];
+  if (!m || !m.sandboxed || !(m.powers || []).includes('load')) return out;
+  let parsed = [];
+  try { parsed = parseLoadAddresses(m.powerArgs && m.powerArgs.load); } catch { return out; }
+  for (const p of parsed) { const s = scopeFor(p.hostname.replace(/^\[|\]$/g, '')) || p.hostname; if (!out.includes(s)) out.push(s); }
+  return out;
+}
+async function loadForMod(modId, msg, sender) {
+  const m = state.mods.find((x) => x.id === modId && x.sandboxed);
+  if (!m || m.held || m.unsandboxed || !(m.powers || []).includes('load')) return { ok: false, error: 'that needs the load power (// @powers load <addresses> in the mod\'s header, which the user approves)' };
+  const tab = sender.tab && sender.tab.id;
+  if (typeof tab !== 'number') return { ok: false, error: 'trif.load works in a tab' };
+  if (tabLocks.isLocked(tab)) return { ok: false, error: 'trif.load is off in a tab where an agent\'s code ran (the tab is paused): it\'s back when the page reloads' };
+  let parsed, as;
+  try { parsed = parseLoadAddresses(m.powerArgs && m.powerArgs.load); as = loadOptions(msg.as === null || msg.as === undefined ? undefined : { as: msg.as }); } catch (e) { return { ok: false, error: `trif.load: ${errMsg(e)}` }; }
+  const k = `${tab} ${sender.frameId || 0} ${modId}`;
+  const doc = String(sender.documentId || '');
+  let st = loadState.get(k);
+  if (!st || st.doc !== doc) { st = { doc, returned: new Map(), times: [], inFlight: 0 }; loadState.set(k, st); }
+  const hit = matchLoad(typeof msg.url === 'string' ? msg.url : null, parsed, st.returned);
+  if (!hit.ok) return { ok: false, error: `trif.load: ${hit.error}` };
+  const u = new URL(hit.url);
+  const host = u.hostname;
+  // (Safari never gets here: a mod with load waits there, lib.js sandboxFallback)
+  if (SITE_ACCESS && !(await chrome.permissions.contains({ origins: [`${u.protocol}//${host}/*`] }).catch(() => false))) {
+    return { ok: false, error: `trif.load: TRIF doesn't have your browser's access to ${host} yet, so it can't load from there: click "needs access" on the mod's row in TRIF's panel` };
+  }
+  const busy = loadStart(st);
+  if (busy) return { ok: false, error: `trif.load: ${busy}` };
+  try {
+    const out = await fetchLoad((url, init) => fetch(url, init), hit, as);
+    // (the values the addresses take back, from a JSON answer that worked: for the next address)
+    if (out.type === 'json' && out.ok) harvest(out.data, returnedKeys(parsed).get(hit.origin), hit.origin, st.returned);
+    return { ok: true, res: { ok: out.ok, status: out.status, type: out.type, data: out.data } };
+  } catch (e) {
+    return { ok: false, error: `trif.load: ${e instanceof LoadError ? e.message : errMsg(e).slice(0, 300)}` };
+  } finally {
+    loadDone(st);
+  }
 }
 
 function reportApplied(res) {
@@ -2366,6 +2423,8 @@ async function uiStatus() {
       matches: m.matches || [], excludes: m.excludes || [], registered: !!live.get(m.id)?.registered, enabled: live.get(m.id)?.enabled ?? isEnabled(m.id),
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
       held: m.held || null, pending: m.pending || null, review: m.held || m.pending ? null : m.review || null, risk: m.risk || null,
+      // (the load power's sites, for the browser's access: asked for at Allow, and from the row while missing)
+      ...(loadSites(m).length ? { loadSites: loadSites(m), loadMissing: SITE_ACCESS ? loadSites(m).filter((x) => !hasSiteAccess(s.access || state.access, x)) : [] } : {}),
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
       source: m.source || null, sourceChanged: !!m.sourceChanged, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed, powers: Array.isArray(m.powers) ? m.powers : [], powerInfo: m.powerInfo || null, siteReach: Array.isArray(m.siteReach) ? m.siteReach : null, found: Array.isArray(m.found) ? m.found : [],
       newOff: state.newOff[m.id] && !(live.get(m.id)?.enabled ?? isEnabled(m.id)) ? state.newOff[m.id] : null,
@@ -2976,6 +3035,7 @@ async function onPanelMessage(msg, { fromPanel = false, sender = null } = {}) {
       // in this browser, to run as a page script, this version only. Panel only.
       const sbx = state.mods.find((m) => m.id === msg.id && m.held && m.held.by === 'sandbox');
       if (sbx) {
+        if (sbx.held.cant) throw new Error(sbx.held.reason);
         if (typeof msg.hash === 'string' && msg.hash !== sbx.held.hash) throw new Error(`${sbx.id} changed again since you looked at it: look at what's waiting now`);
         // (by its code's version when it has a style section: an edit of that alone doesn't ask again)
         state.unsandboxedOk = { ...state.unsandboxedOk, [sbx.id]: sbx.held.codeHash ? `code:${sbx.held.codeHash}` : sbx.held.hash };

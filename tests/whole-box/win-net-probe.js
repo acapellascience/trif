@@ -226,6 +226,58 @@ async function realRelayRun(fence, bridgeExe, specFile, L, claude, sid, tag = ''
   }
 }
 
+// ANTHROPIC_UNIX_SOCKET (a name in claude.exe, undocumented): does Claude Code send its API requests over a
+// socket it's given, here the pipe itself (no shim, no listening in the box)? (a) the stand-in API: the
+// bridge carries the pipe to it (plain http); (b) the real one: the bridge carries the pipe to a forwarder
+// outside that only connects to api.anthropic.com:443 (if Claude Code still speaks TLS over the socket,
+// Anthropic answers 401 for the made-up token, and the forwarder saw only ciphertext).
+async function unixSocketRuns(fence, bridgeExe, specFile, L, claude, sid) {
+  const api = await startFakeAnthropic({ script: [{ tool: 'Read', input: { file_path: L.own } }, { tool: 'Read', input: { file_path: L.secret } }, { say: 'done' }] });
+  const b = await startBridge(bridgeExe, sid, 'none', Number(new URL(api.url).port));
+  const mcp = path.join(L.box, 'mcp-none.json');
+  fs.writeFileSync(mcp, JSON.stringify({ mcpServers: {} }));
+  for (const [what, env] of [['base URL http://localhost', { ANTHROPIC_BASE_URL: 'http://localhost', ANTHROPIC_API_KEY: 'trif-stand-in-key' }], ['no base URL', { ANTHROPIC_API_KEY: 'trif-stand-in-key' }]]) {
+    const before = api.requests.length;
+    const r = await fenceExec(fence, specFile, [...claude.argv, ...claudeArgs(mcp, ['--model', 'claude-haiku-stand-in'])], { stdin: 'probe', timeout: 60000, env: { ...env, ANTHROPIC_UNIX_SOCKET: b.name, CLAUDE_CODE_MAX_RETRIES: '0' } });
+    const { result } = parseStream(r.stdout);
+    const got = api.toolResults();
+    console.log(`\n>>> ANTHROPIC_UNIX_SOCKET = the pipe (the stand-in API, ${what}): exit ${r.code} in ${r.ms} ms; requests: ${api.requests.length - before}`);
+    console.log(`  tool results: ${JSON.stringify(got).slice(0, 300)}`);
+    if (got.some((x) => String(x).includes(SECRET))) { escaped = true; console.log('  <== SECRET GOT OUT'); }
+    console.log(`  result: ${result ? JSON.stringify({ is_error: result.is_error, result: String(result.result || '').slice(0, 300) }) : '(none)'}`);
+    if (!result) show('stdout', r.stdout.slice(-1200));
+    if (r.stderr.trim()) show('stderr', r.stderr.slice(-1200));
+    verdict[`ANTHROPIC_UNIX_SOCKET, the stand-in, ${what}`] = !!(result && !result.is_error && api.requests.length > before);
+  }
+  console.log(`  bridge: ${b.lines().filter((l) => !l.startsWith('listening')).slice(0, 12).join(' | ')}`);
+  b.close();
+  await api.close();
+  if (!process.env.WBX_REAL_RELAY) return;
+  const seen = [];
+  const fwd = net.createServer((c) => {
+    const e = { up: 0, down: 0, first: '' };
+    seen.push(e);
+    const up = net.connect(443, 'api.anthropic.com');
+    c.on('data', (d) => { if (!e.up) e.first = d.slice(0, 3).toString('hex'); e.up += d.length; });
+    up.on('data', (d) => { e.down += d.length; });
+    c.pipe(up); up.pipe(c);
+    c.on('error', () => up.destroy()); up.on('error', () => c.destroy());
+  });
+  await new Promise((r) => fwd.listen(0, '127.0.0.1', r));
+  const b2 = await startBridge(bridgeExe, sid, 'none', fwd.address().port);
+  const token = `sk-ant-oat01-${'MadeUpForCI'.repeat(8)}AA`;
+  const r = await fenceExec(fence, specFile, [...claude.argv, ...claudeArgs(mcp)], { stdin: 'Say hi.', timeout: 60000, env: { ANTHROPIC_UNIX_SOCKET: b2.name, CLAUDE_CODE_OAUTH_TOKEN: token, CLAUDE_CODE_MAX_RETRIES: '0' } });
+  const { result } = parseStream(r.stdout);
+  console.log(`\n>>> ANTHROPIC_UNIX_SOCKET = the pipe → api.anthropic.com:443 (a made-up token): exit ${r.code} in ${r.ms} ms`);
+  console.log(`  forwarder saw (first bytes 160301.. = TLS): ${JSON.stringify(seen)}`);
+  console.log(`  result: ${result ? JSON.stringify({ is_error: result.is_error, result: String(result.result || '').slice(0, 300) }) : '(none)'}`);
+  if (!result) show('stdout', r.stdout.slice(-1200));
+  if (r.stderr.trim()) show('stderr', r.stderr.slice(-1200));
+  verdict['ANTHROPIC_UNIX_SOCKET, the real Anthropic over TLS through the pipe (401)'] = seen.some((e) => e.first.startsWith('16') && e.down > 0) && /401|OAuth|authenticat/i.test(`${r.stdout}${r.stderr}`);
+  b2.close();
+  fwd.close();
+}
+
 (async () => {
   const L = layout();
   const fence = compile('fence.cs', path.join(L.bin, 'trif-fence.exe'), ['System.Web.Extensions.dll']);
@@ -288,8 +340,7 @@ async function realRelayRun(fence, bridgeExe, specFile, L, claude, sid, tag = ''
       verdict['127.0.0.1 outside stays closed'] = o['this computer, 127.0.0.1'] !== 'echo ok';
       verdict['the internet stays closed'] = o['the internet, 1.1.1.1:443'] !== 'echo ok';
       if (o['this computer, 127.0.0.1'] === 'echo ok' || o['the internet, 1.1.1.1:443'] === 'echo ok') { escaped = true; console.log('  <== A WAY OUT WITHOUT THE PIPE'); }
-      await standInRun(fence, bridgeExe, specFile, L, claude, sid);
-      if (process.env.WBX_REAL_RELAY) await realRelayRun(fence, bridgeExe, specFile, L, claude, sid);
+      await unixSocketRuns(fence, bridgeExe, specFile, L, claude, sid);
     } else {
       const tag = ' (privateNetworkClientServer)';
       verdict[`container's own loopback, another process${tag}`] = o['loopback, another process'] || o['loopback, listen'];
@@ -307,7 +358,7 @@ async function realRelayRun(fence, bridgeExe, specFile, L, claude, sid, tag = ''
   try { fs.rmSync(L.secret, { force: true }); fs.rmSync(path.join(os.homedir(), 'wbn-planted.txt'), { force: true }); } catch { /* gone */ }
   show('VERDICT', Object.entries(verdict).map(([k, x]) => `${String(x).padEnd(6)} ${k}`).join('\n'));
   console.log(escaped ? '\nA SECRET, A WRITE OR A WAY OUT GOT PAST THE BOX' : '\nnothing got out of the box');
-  const need = ['container\'s own loopback (another process)', 'pipe with the container named + low label', 'stand-in run through the pipe', ...(process.env.WBX_REAL_RELAY ? ['the real Anthropic through the pipe and the relay (401 for the made-up token)', 'control: the relay\'s port straight from the box is refused'] : [])];
+  const need = ['pipe with the container named + low label', 'stand-in run through the pipe (privateNetworkClientServer)'];
   const short = need.filter((k) => verdict[k] !== true);
   if (process.env.WBX_STRICT && short.length) console.log(`\nSTRICT: not shown: ${short.join('; ')}`);
   process.exit(escaped || (process.env.WBX_STRICT && short.length) ? 1 : 0);

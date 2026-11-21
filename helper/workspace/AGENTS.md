@@ -464,6 +464,10 @@ the one the user opened the panel on, including its subdomains (from en.wikipedi
 TRIF enforces this, so that a web page you read can't steer you into other sites the user is
 logged in to:
 
+- **What the user is looking at.** Their messages end with a note, `--- In view when I sent this ---`: the tab, the
+  scroll position, a screenshot of exactly what they saw (none on a sensitive site), the text they had selected and
+  its element, and what was on screen with selectors for `trif run`/`page.find`. When they point at something
+  ("this", "here", "I've scrolled to it"), start from the selection and that note, not a search of the whole page.
 - `trif` commands only work on tabs of that site. `trif tabs` lists only those; `run`, `text`,
   `reload` etc. on another site's tab, and `open`/`navigate` to another site, fail with a message that
   says so. Pass `--tab` with the tab id you were given. `enable`/`disable` work on mods that only run

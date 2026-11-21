@@ -21,6 +21,7 @@ import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
 import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
 import { createCaptureGrants, GRANT_WAIT_MS, shortcutText } from './capturegrant.js';
+import { captureInView, withInView } from './inview.js';
 import { createTabLocks, leakGuard } from './tablock.js';
 import { facePaths, toolbarFace } from './faces.js';
 import { agentCheck, agentSiteOf, normalizeAgentSites, agentLevel, COMMAND_NEEDS, modsSiteOf, normalizeModsReadable, modsVisibility } from './agentsites.js';
@@ -2691,11 +2692,14 @@ async function onPanelMessage(msg, { fromPanel = false, sender = null } = {}) {
     case 'agent.openModel.removeKey': return helperRequest('agent.openModel.removeKey', {}, 60000);
     case 'instructions.get': return helperRequest('instructions.get', {}, 10000);
     case 'instructions.set': return helperRequest('instructions.set', { text: String(msg.text ?? '') }, 10000);
-    case 'agent.start': return startAgent(msg);
+    // (`withView`: a message the person sent, with what's in view as they sent it: inview.js; the panel's alone)
+    case 'agent.start': return startAgent({ ...msg, withView: fromPanel && msg.withView === true });
+    // (the note a message would carry now: for the tests, and for looking at it)
+    case 'inview.capture': if (!fromPanel) throw new Error('only from TRIF\'s panel'); return inViewFor(msg.tabId, normalizeSite(msg.site));
     case 'agent.stop': return stopAgent(msg.runId);
     // Messages typed while the agent works (lib.js "messages sent while the agent works"): the panel's own,
     // from a click or Enter in its message box. Nothing else (a page, a mod, a run) may queue anything.
-    case 'chat.queue': if (!fromPanel) throw new Error('only from TRIF\'s panel'); return queueMessage(msg);
+    case 'chat.queue': if (!fromPanel) throw new Error('only from TRIF\'s panel'); return queueMessage({ ...msg, withView: msg.withView === true });
     case 'chat.unqueue': if (!fromPanel) throw new Error('only from TRIF\'s panel'); return unqueue(msg.site, String(msg.id ?? ''));
     case 'chat.sendNow': if (!fromPanel) throw new Error('only from TRIF\'s panel'); return sendNow(msg.site, String(msg.id ?? ''));
     case 'agent.login': return startLogin(msg);
@@ -3115,10 +3119,14 @@ function answerCard(site, time, choice) {
   });
 }
 
-async function startAgent(msg, { fromQueue = null } = {}) {
+async function startAgent(msg, { fromQueue = null, inView = null } = {}) {
   // (the phone view's chat: its site's phone twin, phone~x.com, a chat of its own whose run writes the phone twin's
   // folder only and reads the site's desktop mods: phone.js, helper/lib/scope.js)
   const chatSite = normalizeSite(msg.site);
+  // What's in view, from the moment of Send (inview.js): taken while the message goes into the chat, and put after
+  // it in what the agent gets. (`inView`: messages that waited, their notes taken as each was sent.)
+  const viewTab = Number.isInteger(msg.tabId) ? msg.tabId : undefined;
+  const viewP = inView ? Promise.resolve(inView) : msg.withView && String(msg.prompt ?? '').trim() ? inViewFor(viewTab, chatSite).then((r) => (r ? [{ ...r, text: String(msg.prompt) }] : [])) : null;
   const phoneChat = isPhoneSite(chatSite);
   const site = phoneBase(chatSite);
   const prompt = String(msg.prompt ?? '').trim();
@@ -3140,12 +3148,14 @@ async function startAgent(msg, { fromQueue = null } = {}) {
     chat.run = { runId: null, startedAt };
     chat.last = null;
   });
+  const notes = viewP ? await viewP.catch(() => []) : [];
+  if (notes.length) await markInView(chatSite, (m) => m.role === 'user' && m.time === startedAt, notes).catch(() => {});
   // (the run's scope: the site this host is in, a sensitive one of its own too; and the sites of their own
   // TRIF knows of, so the helper gives the run the right folder: helper/lib/scope.js scopeOf)
   // (a chat in the phone view: the agent is told the tab is one, phone.js)
   // (width: the page's as measured, which an ordinary window can keep a little over the phone's 390: phone.js)
   const phone = phoneChat ? { device: PHONE.name, width: (tabId !== undefined && Number.isFinite(phones.get(tabId)?.width) ? phones.get(tabId).width : PHONE.viewport.width), ...(tabId !== undefined && phones.isPhone(tabId) ? {} : { away: true }) } : undefined;
-  const args = { site, scope: phoneChat ? PHONE_PREFIX + siteOfHost(site) : siteOfHost(site), splits: sens().splits, url: String(msg.url ?? ''), tabId, ...(phone ? { phone } : {}), prompt: withAttached(prompt, chatSite), agent, agentLevel: agentLevelOf(String(msg.url ?? '') || site),
+  const args = { site, scope: phoneChat ? PHONE_PREFIX + siteOfHost(site) : siteOfHost(site), splits: sens().splits, url: String(msg.url ?? ''), tabId, ...(phone ? { phone } : {}), prompt: withInView(withAttached(prompt, chatSite), notes), agent, agentLevel: agentLevelOf(String(msg.url ?? '') || site),
     // (which other sites' mods the chat may read: the user's choices and the sensitive list; the helper has the rule)
     visibility: modsVisibility({ choices: state.modsReadable, sensitive: state.sensitiveSites }), ...(msg.fix && typeof msg.fix === 'object' ? { fix: true } : {}) };
   if (msg.sessionId) args.sessionId = String(msg.sessionId);
@@ -3188,6 +3198,77 @@ async function startAgent(msg, { fromQueue = null } = {}) {
   return { runId };
 }
 
+// ---- what's in view as a message is sent (inview.js) ----------------------------------------------------------
+
+const inViewWaiting = new Map(); // a waiting message's id -> the promise of its note, until it's kept with it
+
+/**
+ * The note for the panel's tab now (inview.js captureInView), or null: the tab isn't on the chat's site, TRIF is
+ * off there, or "Agent on this site" is Off. Never throws. In the phone view, the phone view's tab.
+ */
+async function inViewFor(tabId, chatSite) {
+  try {
+    if (!Number.isInteger(tabId) || !chatSite) return null;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    const url = tab ? tab.url || '' : '';
+    const host = hostOf(url);
+    const site = siteOfHost(phoneBase(chatSite));
+    if (!host || !hostInScope(host, site) || !siteOnFor(url, onSites(), sens())) return null;
+    const level = agentLevel(host, agentSettings()).level;
+    // (a sensitive site is never pictured, whatever "Agent on this site" says)
+    const sensitive = !!sensitiveHit(host, state.sensitiveSites, state.sensitivePending.map((p) => p.host));
+    const phone = phones.isPhone(tabId) ? { device: PHONE.name, width: Number.isFinite(phones.get(tabId)?.width) ? phones.get(tabId).width : PHONE.viewport.width } : null;
+    const scope = isPhoneSite(chatSite) ? PHONE_PREFIX + site : site;
+    return await captureInView({
+      tab, level, sensitive, phone,
+      pageCall: (func, args) => pageCall(tabId, 'ISOLATED', func, args, { scope: site }),
+      // (the visible viewport only: never the copy window, nor a tab that isn't showing)
+      capture: async () => {
+        try {
+          return (await captureScreenshot(chrome, tab, { full: false, copy: false, format: 'jpeg', quality: 80 }, {
+            browser: BROWSER, family: FAMILY, allUrls: state.access.allUrls, pageCall: (id, func, a = []) => pageCall(id, 'ISOLATED', func, a),
+            // (no waitForGrant: at Send nothing waits for the click; the record of grants learns from it: capturegrant.js)
+            grants: captureGrants,
+            checkShown: (u) => { if (!hostInScope(hostOf(u), site)) throw new Error('another site was showing in that window'); },
+          })).dataUrl;
+        } catch (e) {
+          const m = errMsg(e);
+          if (/clicks TRIF's button|activeTab|all_urls/i.test(m)) throw new Error(`${BROWSER} lets TRIF picture a tab only after the user clicks TRIF's toolbar button on it (since the browser started, on this site), and TRIF has only this site's access, not every site's; the rest of this note is read from the page itself`);
+          if (/isn't showing|stopped being the one showing/i.test(m)) throw new Error('the tab wasn\'t the one showing in its window as the message was sent');
+          throw e;
+        }
+      },
+      saveShot: async (dataUrl) => (await helperRequest('inview.shot', { scope, dataUrl }, 10000)).file,
+    });
+  } catch (e) {
+    log('warn', `couldn't note what's in view: ${errMsg(e)}`);
+    return null;
+  }
+}
+
+/** Messages that waited: their notes, in order ([{note, pictured, text}]), each as taken when it was sent. */
+async function notesOf(items) {
+  const out = [];
+  for (const x of items || []) {
+    let v = x.inView;
+    if (!v && inViewWaiting.has(x.id)) v = await inViewWaiting.get(x.id).catch(() => null);
+    if (v && typeof v.note === 'string' && v.note) out.push({ note: v.note, pictured: !!v.pictured, text: x.text });
+  }
+  return out;
+}
+
+/** What the chat keeps on the message about its note (the panel's "with what's in view"): {inView: 'shot' | 'outline'}. */
+const inViewMark = (notes) => (notes && notes.length ? { inView: notes.some((n) => n.pictured) ? 'shot' : 'outline' } : {});
+function markInView(chatSite, which, notes) {
+  const mark = inViewMark(notes);
+  if (!mark.inView) return Promise.resolve();
+  return updateChat(chatSite, (chat) => {
+    const m = [...chat.messages].reverse().find(which);
+    if (!m) return false;
+    m.inView = mark.inView;
+  });
+}
+
 /** The message as the agent gets it: with where the files it attaches are ("[attached: files/<name>]"). */
 function withAttached(prompt, chatSite) {
   // (the phone view's chat: its phone twin's files, sites/phone~x.com/files/, where its panel adds them)
@@ -3219,6 +3300,16 @@ async function queueMessage(msg) {
   if (!text) throw new Error('empty message');
   if (text.length > CHAT_TEXT_MAX) throw new Error(`that message is too long (over ${CHAT_TEXT_MAX} characters)`);
   const item = { id: queueId(), text, time: Date.now(), opts: queueOpts(msg) };
+  // (what's in view as it was sent: taken now, kept with it once it's there, inview.js)
+  if (msg.withView) {
+    const p = inViewFor(item.opts.tabId, chatSite);
+    inViewWaiting.set(item.id, p);
+    p.then((r) => (r ? updateChat(chatSite, (chat) => {
+      const x = normalizeQueue(chat.queue).find((y) => y.id === item.id);
+      if (!x) return false;
+      x.inView = { note: r.note, pictured: r.pictured };
+    }) : null)).catch(() => {}).finally(() => { setTimeout(() => inViewWaiting.delete(item.id), 60000); });
+  }
   let idle = false;
   await updateChat(chatSite, (chat) => {
     const q = normalizeQueue(chat.queue);
@@ -3264,7 +3355,7 @@ async function sendQueue(chatSite, { ids = null } = {}) {
   }
   const sessionId = chat.sessionId && (!chat.agent || !o.agent || chat.agent === o.agent) ? chat.sessionId : undefined;
   try {
-    return await startAgent({ site: chatSite, tabId: o.tabId, url, prompt: m.text, sessionId, agent: o.agent, model: o.model, effort: o.effort, ...(o.openModel ? { openModel: o.openModel } : {}) }, { fromQueue: m.ids });
+    return await startAgent({ site: chatSite, tabId: o.tabId, url, prompt: m.text, sessionId, agent: o.agent, model: o.model, effort: o.effort, ...(o.openModel ? { openModel: o.openModel } : {}) }, { fromQueue: m.ids, inView: notesOf(m.items) });
   } catch (e) {
     // (already working: another send won; anything else is in the chat already, or says why here)
     if (!/^already working/.test(errMsg(e))) {
@@ -3295,14 +3386,15 @@ async function sendNow(site, id) {
   const runId = chat.run.runId;
   const run = runId ? state.runs.get(runId) : null;
   let r = { injected: false, why: 'starting' };
+  const notes = run && !run.stopping ? await notesOf([item]) : [];
   if (run && !run.stopping) {
-    try { r = (await helperRequest('agent.inject', { runId, text: withAttached(item.text, chatSite), id }, 10000)) || r; } catch (e) { r = { injected: false, why: errMsg(e) }; }
+    try { r = (await helperRequest('agent.inject', { runId, text: withInView(withAttached(item.text, chatSite), notes), id }, 10000)) || r; } catch (e) { r = { injected: false, why: errMsg(e) }; }
   }
   if (r.injected) {
     (run.pushed || (run.pushed = new Map())).set(id, item);
     await updateChat(chatSite, (c) => {
       c.queue = normalizeQueue(c.queue).filter((x) => x.id !== id);
-      c.messages.push({ role: 'user', text: item.text, time: Date.now(), pushed: id });
+      c.messages.push({ role: 'user', text: item.text, time: Date.now(), pushed: id, ...inViewMark(notes) });
     });
     return { how: 'pushed' };
   }

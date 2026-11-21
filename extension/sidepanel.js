@@ -36,6 +36,12 @@ const QUEUE_WORDS = {
   edit: 'Click to edit',
   pushed: 'Sent while your agent was working',
 };
+// A sent message's note of what was in view (background.js inViewFor, inview.js): drafts, docs/IN-VIEW-STRINGS.md.
+const IN_VIEW_WORDS = {
+  chip: 'with what’s in view',
+  shot: 'Your agent also got a screenshot of the page as you saw it, and a list of what was on screen.',
+  outline: 'Your agent also got a list of what was on screen (no screenshot).',
+};
 
 const ui = {
   modsMore: document.getElementById('mods-more'), modsMenu: document.getElementById('mods-menu'), importMod: document.getElementById('import-mod'), pasteMod: document.getElementById('paste-mod'), exportSite: document.getElementById('export-site'),
@@ -694,6 +700,11 @@ function messageNode(m) {
   if (m.role === 'assistant' || m.role === 'error') setMarkdown(li, m.text);
   else li.textContent = m.text;
   if (m.role === 'user' && m.pushed) li.title = QUEUE_WORDS.pushed; // (Send now, while it worked)
+  if (m.role === 'user' && (m.inView === 'shot' || m.inView === 'outline')) {
+    const chip = el('span', 'in-view-chip', IN_VIEW_WORDS.chip);
+    chip.title = IN_VIEW_WORDS[m.inView];
+    li.append(chip);
+  }
   if (m.role === 'tool') li.title = m.text;
   // "x.js was deleted." from the panel's trash icon: Undo until it's used (the restore adds its own line).
   if (m.undo && !m.undone) {
@@ -4528,7 +4539,7 @@ async function send() {
   ui.input.value = '';
   // While the agent works (or messages wait already): it waits too, and goes when the agent is done.
   if (view.chat.run || view.chat.queue?.length) {
-    try { await queueMessage(text); } catch (e) {
+    try { await queueMessage(text, { withView: true }); } catch (e) {
       if (!ui.input.value) ui.input.value = text;
       request({ type: 'chat.note', site: chatSite(), text: `Couldn't keep that message: ${e?.message ?? e}` }).catch(() => {});
     }
@@ -4536,7 +4547,8 @@ async function send() {
   }
   const tabId = view.tab.id;
   try {
-    const runId = await startRun(text);
+    // (with what's in view as it's sent: background.js inViewFor)
+    const runId = await startRun(text, { withView: true });
     view.myRuns.set(runId, { prompt: text, tabId }); // (to put it back if the agent needs logging in)
   } catch (e) {
     // The background records start failures in the chat; anything earlier goes back in the box.
@@ -4547,11 +4559,11 @@ async function send() {
 }
 
 /** `text` waits for the run going (or, with none, goes now with the others waiting): background.js queueMessage. */
-async function queueMessage(text) {
+async function queueMessage(text, extra = {}) {
   const { id: agent } = currentAgent();
   await keepSettings();
   return request({
-    type: 'chat.queue', site: chatSite(), text, tabId: view.tab.id, url: view.tab.url,
+    type: 'chat.queue', site: chatSite(), text, tabId: view.tab.id, url: view.tab.url, ...extra,
     agent: agent || undefined, model: chosenModel(agent) || undefined, effort: chosenEffort(agent) || undefined,
   });
 }

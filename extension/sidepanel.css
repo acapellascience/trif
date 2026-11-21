@@ -517,6 +517,8 @@ h3.mod-name { margin: 0; font-size: inherit; line-height: inherit; }
   white-space: pre-wrap;
 }
 
+.msg.user .in-view-chip { display: block; margin-top: 3px; font-size: 11px; color: var(--muted); white-space: normal; text-align: right; }
+
 .msg.assistant { padding: 0 2px; }
 .msg.assistant > :first-child { margin-top: 0; }
 .msg.assistant > :last-child { margin-bottom: 0; }

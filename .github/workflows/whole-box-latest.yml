@@ -5,6 +5,8 @@
 # real call to Anthropic carries a made-up token, which Anthropic refuses.
 # (GitHub runs a schedule only from the default branch: daily once this file is on main. Until then it
 # runs when this file changes on whole-box, or by hand: gh workflow run whole-box-latest.yml -f claude-code=<v>.)
+# (A failed scheduled run: GitHub emails whoever last changed the schedule. The pin doesn't move until a run
+# on the new version passes: `node scripts/release.js claude-pin <v> --dry-run` says whether one has.)
 name: whole-box-latest
 
 on:

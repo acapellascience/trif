@@ -157,11 +157,15 @@ test('Seatbelt for real: the run\'s tag in its reports, read back as this run\'s
   fs.writeFileSync(path.join(box, 'p.sb'), profile);
   const w = br.watch(tag, { readyMs: 15000 }); // (a fresh CI runner's first `log stream` is slow to start)
   if (!(await w.ready)) { w.close(); t.skip(`log stream refused (${w.unavailable()}): not an administrator account?`); return; }
-  const r = spawnSync('/usr/bin/sandbox-exec', ['-f', path.join(box, 'p.sb'), '/bin/sh', '-c', `cat ${path.join(outside, 'secret.txt')}; echo x > ${path.join(box, 'ro', 'y')}; echo ok > ${path.join(box, 'ok')}`], { encoding: 'utf8', timeout: 20000 });
-  assert.ok(!r.stdout.includes('SECRET'), r.stdout);
-  assert.equal(fs.readFileSync(path.join(box, 'ok'), 'utf8'), 'ok\n', `the box let the shell write its own folder: ${r.stderr}`);
-  // (reports arrive a moment later)
-  for (let i = 0; i < 100 && w.refusals().length < 2; i++) await new Promise((res) => setTimeout(res, 100));
+  // (reports arrive a moment later; now and then none reaches the log at all, the kernel's reports being
+  // best effort, round 8's daily run: up to three tries, a new shell each time)
+  let r;
+  for (let attempt = 0; attempt < 3 && w.refusals().length < 2; attempt++) {
+    r = spawnSync('/usr/bin/sandbox-exec', ['-f', path.join(box, 'p.sb'), '/bin/sh', '-c', `cat ${path.join(outside, 'secret.txt')}; echo x > ${path.join(box, 'ro', 'y')}; echo ok > ${path.join(box, 'ok')}`], { encoding: 'utf8', timeout: 20000 });
+    assert.ok(!r.stdout.includes('SECRET'), r.stdout);
+    assert.equal(fs.readFileSync(path.join(box, 'ok'), 'utf8'), 'ok\n', `the box let the shell write its own folder: ${r.stderr}`);
+    for (let i = 0; i < 60 && w.refusals().length < 2; i++) await new Promise((res) => setTimeout(res, 100));
+  }
   w.close();
   const got = w.refusals();
   // (Reports are best effort: with the whole suite running at once, CI's `tests` workflow saw none in 10 s,

@@ -46,6 +46,7 @@ jobs:
       # (step 6: what the real pinned copy prints for `setup-token` without a terminal; never completed, no account)
       - name: Probe setup-token's output (TRIF's pinned Claude Code)
         continue-on-error: true
+        timeout-minutes: 2
         run: node tests/whole-box/setup-token-probe.js "$(ls -d "$RUNNER_TEMP"/claude-pin/runtime/claude-code-*/)claude"
       - name: The box, and the loosest Claude Code in it
         run: node --test --test-timeout=300000 tests/whole-box.test.js

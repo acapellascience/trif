@@ -149,7 +149,7 @@ nothing else.
 
 All of it with `--dangerously-skip-permissions`, every tool allowed and `--add-dir` on the home folder:
 nothing got out ("nothing got out of the box"). A second pass with a real loosening
-`C:\Program Files\ClaudeCode\managed-settings.json` on the runner: WIN_MANAGED.
+`C:\Program Files\ClaudeCode\managed-settings.json` on the runner (every tool allowed, `bypassPermissions`, `C:\` as an extra folder), [run 44867250215](https://github.com/acapellascience/trif/actions/runs/44867250215): the same answers in both containers, nothing got out, and Claude Code reported no trouble loading them (the less-privileged container is given an entry on `C:\Program Files\ClaudeCode` for that).
 
 So on Windows:
 
@@ -178,7 +178,7 @@ So on Windows:
 
 Tested for real on GitHub's macOS runner: the workflow writes
 `/Library/Application Support/ClaudeCode/managed-settings.json` with sudo (never on anyone's computer),
-[run 44867149601](https://github.com/acapellascience/trif/actions/runs/44867149601) (the `macos` job).
+[run 44867149601](https://github.com/acapellascience/trif/actions/runs/44867149601) and again in [run 44867250215](https://github.com/acapellascience/trif/actions/runs/44867250215) (the `macos` jobs).
 
 1. **Loosen everything** (`Read(//**)`, `Edit(//**)`, `Bash(*)`… allowed, `bypassPermissions`, the whole disk
    as an extra folder, Claude Code's sandbox off). The control run without the box read every secret; in

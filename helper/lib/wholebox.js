@@ -1,5 +1,5 @@
 'use strict';
-// SPIKE (docs/WHOLE-BOX.md), opt-in with TRIF_WHOLE_BOX=1: the side-panel run's whole agent process, not
+// TRIF's full sandbox (docs/WHOLE-BOX.md), opt-in (Settings: wholeboxsetting.js): the side-panel run's whole agent process, not
 // only its shell commands, inside an operating-system sandbox of TRIF's own. Then Claude Code's own file
 // tools (Read, Write, Edit, Glob, Grep) are fenced by the system as its commands are, whatever Claude
 // Code's settings say (an organization's managed settings can loosen Claude Code's rules, never this).
@@ -30,8 +30,6 @@ const os = require('os');
 const net = require('net');
 const path = require('path');
 
-const FLAG = 'TRIF_WHOLE_BOX';
-const enabled = (env = process.env) => env[FLAG] === '1';
 
 const real = (p) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
 const q = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
@@ -140,7 +138,7 @@ function limitsToBox(limits, { agentBin, configDir, extraRead = [] } = {}) {
  * written to `profileFile` (it names the run's site: not on the command line, which other programs read).
  */
 function wrap({ file, args, env = {} }, { limits, configDir, profileFile, keychain = false, platform = process.platform, extraRead = [] }) {
-  if (platform !== 'darwin') throw new Error('TRIF_WHOLE_BOX is a macOS prototype (Windows: tests/whole-box/win-probe.js)');
+  if (platform !== 'darwin') throw new Error('TRIF\'s full sandbox is macOS only for now (Windows: tests/whole-box/win-probe.js)');
   const box = limitsToBox(limits, { agentBin: file, configDir, extraRead });
   const profile = macProfile({ ...box, ports: localPorts(env), keychain });
   fs.writeFileSync(profileFile, profile, { mode: 0o600 });
@@ -195,4 +193,4 @@ function startProxy({ hosts = ANTHROPIC_HOSTS, connect = (port, host) => net.con
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ port: server.address().port, seen, close: () => new Promise((r) => server.close(r)) })));
 }
 
-module.exports = { FLAG, enabled, macProfile, localPorts, limitsToBox, wrap, startProxy, hostAllowed, ANTHROPIC_HOSTS };
+module.exports = { macProfile, localPorts, limitsToBox, wrap, startProxy, hostAllowed, ANTHROPIC_HOSTS };

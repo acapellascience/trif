@@ -81,7 +81,7 @@ function allowedUrl(url) {
  * GET `url` into `file`, streamed (the tarball is large), hashing as it goes. Resolves the sha512 as npm
  * writes it ("sha512-<base64>"). https only (http to this computer: tests), at most maxBytes.
  */
-function download(url, file, { maxBytes = TARBALL_MAX, timeoutMs = 120000, redirects = 5 } = {}) {
+function download(url, file, { maxBytes = TARBALL_MAX, timeoutMs = 120000, redirects = 5, onProgress = null } = {}) {
   return new Promise((resolve, reject) => {
     if (!allowedUrl(url)) return reject(new PinError(`refusing to download ${url} (https only)`));
     const lib = url.startsWith('https:') ? require('https') : require('http');
@@ -89,23 +89,28 @@ function download(url, file, { maxBytes = TARBALL_MAX, timeoutMs = 120000, redir
       if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
         if (redirects <= 0) return reject(new PinError(`too many redirects fetching ${url}`));
-        return resolve(download(new URL(res.headers.location, url).href, file, { maxBytes, timeoutMs, redirects: redirects - 1 }));
+        return resolve(download(new URL(res.headers.location, url).href, file, { maxBytes, timeoutMs, redirects: redirects - 1, onProgress }));
       }
       if (res.statusCode !== 200) { res.resume(); return reject(new PinError(`${url} answered HTTP ${res.statusCode}`)); }
       const hash = crypto.createHash('sha512');
       const out = fs.createWriteStream(file, { flags: 'wx', mode: 0o600 });
       let size = 0;
       let failed = false;
+      // (progress: bytes so far, and the size the server says, if it says one; at most every 256 KB)
+      const total = Number(res.headers['content-length']) || 0;
+      let told = 0;
+      const tell = (force) => { if (onProgress && (force || size - told >= 262144)) { told = size; try { onProgress(size, total); } catch { /* a listener's problem */ } } };
       const fail = (e) => { if (failed) return; failed = true; req.destroy(); out.destroy(); reject(e); };
       res.on('data', (c) => {
         size += c.length;
         if (size > maxBytes) return fail(new PinError(`${url} is larger than ${maxBytes} bytes`));
         hash.update(c);
+        tell(false);
       });
       res.on('error', (e) => fail(new PinError(`couldn't download ${url}: ${e.message}`)));
       res.on('aborted', () => fail(new PinError(`the download of ${url} stopped part way`)));
       out.on('error', (e) => fail(new PinError(`couldn't save ${url}: ${e.message}`)));
-      out.on('finish', () => { if (!failed) resolve(`sha512-${hash.digest('base64')}`); });
+      out.on('finish', () => { if (!failed) { tell(true); resolve(`sha512-${hash.digest('base64')}`); } });
       res.pipe(out);
     });
     req.on('timeout', () => req.destroy(new PinError(`timed out fetching ${url}`)));
@@ -123,13 +128,14 @@ async function checkSignature(bin, team) {
   return null;
 }
 
-const inFlight = new Map(); // dest folder -> Promise: one download at a time per pin
+const inFlight = new Map(); // dest folder -> { promise, listeners }: one download at a time per pin
 
 /**
  * Make sure the pinned Claude Code is in <home>/runtime, downloading it if not. Resolves
  * { bin, dir, version, key, fetched }; throws PinError, leaving nothing behind, when this platform has no
  * pin, the download fails, its checksum isn't the pinned one, it has no binary, or (macOS) the binary
- * isn't Anthropic's. `onProgress(bytes)` is not called yet (the panel's progress: step 1b).
+ * isn't Anthropic's. `onProgress(bytes, total)` (total 0 if unknown) as the tarball comes in: every caller's,
+ * the one download shared (the setting's background download and a run's check may ask at once).
  */
 function ensurePinned(home, opts = {}) {
   const pins = opts.pins || pinsInUse(opts.env || process.env);
@@ -138,14 +144,26 @@ function ensurePinned(home, opts = {}) {
   const key = platformKey(platform, arch, pins);
   if (!key) return Promise.reject(new PinError(`TRIF has no pinned Claude Code for ${platform}-${arch}`));
   const dest = path.join(root(home), dirName(key, pins));
-  if (!inFlight.has(dest)) {
-    const p = ensureOnce(home, { ...opts, pins, platform, arch, key, dest }).finally(() => inFlight.delete(dest));
-    inFlight.set(dest, p);
+  let job = inFlight.get(dest);
+  if (!job) {
+    const listeners = new Set();
+    const onProgress = (got, total) => { for (const f of listeners) { try { f(got, total); } catch { /* a listener's problem */ } } };
+    job = { listeners, promise: null };
+    job.promise = ensureOnce(home, { ...opts, pins, platform, arch, key, dest, onProgress }).finally(() => inFlight.delete(dest));
+    inFlight.set(dest, job);
   }
-  return inFlight.get(dest);
+  if (typeof opts.onProgress === 'function') job.listeners.add(opts.onProgress);
+  return job.promise;
 }
 
-async function ensureOnce(home, { pins, platform, arch, key, dest, tar = 'tar' }) {
+/** Is the pinned Claude Code for `home` being downloaded now? */
+function pinning(home, { platform = process.platform, arch = process.arch, pins = null, env = process.env } = {}) {
+  pins = pins || pinsInUse(env);
+  const key = platformKey(platform, arch, pins);
+  return !!key && inFlight.has(path.join(root(home), dirName(key, pins)));
+}
+
+async function ensureOnce(home, { pins, platform, arch, key, dest, tar = 'tar', onProgress = null }) {
   const have = installedPinned(home, { platform, arch, pins });
   if (have) return { ...have, fetched: false };
   const pkg = pins.packages[key];
@@ -156,7 +174,7 @@ async function ensureOnce(home, { pins, platform, arch, key, dest, tar = 'tar' }
   const tmp = fs.mkdtempSync(path.join(root(home), '.claude-fetch-'));
   try {
     const file = path.join(tmp, 'pkg.tgz');
-    const got = await download(pkg.tarball, file);
+    const got = await download(pkg.tarball, file, { onProgress });
     if (got !== pkg.integrity) throw new PinError(`the download of Claude Code ${pins.version} (${key}) doesn't match its pinned checksum; not using it`);
     const unpacked = path.join(tmp, 'x');
     fs.mkdirSync(unpacked);
@@ -286,5 +304,5 @@ if (require.main === module && process.argv[2] === 'ensure') {
 
 module.exports = {
   PIN_FILE, MARK, PLATFORMS, PinError, readPins, pinsInUse, platformKey, root, dirName, binName,
-  installedPinned, ensurePinned, checkPinned, prunePinned, makePins, download, checkSignature,
+  installedPinned, ensurePinned, pinning, checkPinned, prunePinned, makePins, download, checkSignature,
 };

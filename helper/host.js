@@ -227,6 +227,8 @@ function onExtensionMessage(msg) {
       // (mod files the user downloads: only when they switched it on, lib/downloads.js)
       if (ws.config?.watchDownloads === true) downloadsWatcher().start().catch((e) => logger.warn(`downloads: ${e.message}`));
       else sendDownloads();
+      // (TRIF's full sandbox: its switch's state; on, with TRIF's copy of Claude Code missing, it's downloaded)
+      wholeBoxSetting().start();
       break;
     case 'requestWaiting':
       onRequestWaiting(msg);
@@ -582,7 +584,8 @@ const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.histo
 // a run, which also has its mailbox), only from the extension's own connection (onExtensionRequest),
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
 // sandboxes have no network and can't write the private folder, where the consent is kept.
-const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'downloads.status', 'downloads.setWatch', 'downloads.take', 'downloads.done', 'downloads.ignore']);
+const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'downloads.status', 'downloads.setWatch', 'downloads.take', 'downloads.done', 'downloads.ignore',
+  'wholeBox.status', 'wholeBox.set', 'wholeBox.retry']);
 // Helper-local too, but a run may use them, on its own site's mods only (lib/trash.js siteInScope; runMod below).
 // (mod.code and mod.diff only read: a mod's text, a waiting change against the version that ran)
 const MOD_FILE_COMMANDS = new Set(['mod.delete', 'mod.restore', 'mod.code', 'mod.diff']);
@@ -1070,6 +1073,34 @@ function downloadsCommand(cmd, args) {
   }
 }
 
+// Settings' "Run chats in TRIF's full sandbox" (lib/wholeboxsetting.js): the side panel's alone (PANEL_COMMANDS),
+// so neither a terminal nor a run can switch it, on or off.
+let wholeBox = null;
+function wholeBoxSetting() {
+  if (!wholeBox) {
+    wholeBox = require('./lib/wholeboxsetting').createWholeBoxSetting({
+      getWorkspace: () => ws, setConfigKey: update.setConfigKey, onChange: sendWholeBox,
+      log: (level, m) => (level === 'warn' ? logger.warn(m) : logger.info(m)),
+    });
+  }
+  return wholeBox;
+}
+function sendWholeBox(status) {
+  if (!state.stdoutOpen) return;
+  try { sendToExtension({ type: 'wholeBox', wholeBox: status }); } catch (e) { logger.warn(`could not send the full sandbox setting: ${e.message}`); }
+}
+function wholeBoxCommand(cmd, args) {
+  switch (cmd) {
+    case 'wholeBox.status': return wholeBoxSetting().status();
+    case 'wholeBox.set': {
+      if (typeof args.on !== 'boolean') throw new Error('on must be true or false');
+      return wholeBoxSetting().set(args.on);
+    }
+    case 'wholeBox.retry': return wholeBoxSetting().retry();
+    default: throw new Error(`unknown command "${cmd}"`);
+  }
+}
+
 let downloads = null;
 function downloadsWatcher() {
   if (!downloads) {
@@ -1262,6 +1293,7 @@ function panelCommand(cmd, args) {
     return agents.logout(agent, workspace(ws.home)).then((r) => { logger.info(`${agent} logged out (Settings in the side panel)`); return r; });
   }
   if (cmd.startsWith('downloads.')) return downloadsCommand(cmd, args);
+  if (cmd.startsWith('wholeBox.')) return wholeBoxCommand(cmd, args);
   if (cmd !== 'agent.withoutSandbox') throw new Error(`unknown command "${cmd}"`);
   const agent = typeof args.agent === 'string' ? args.agent : '';
   if (typeof args.allow !== 'boolean') throw new Error('allow must be true or false');
@@ -1472,7 +1504,8 @@ function onClientLine(sock, line) {
   if (typeof cmd !== 'string' || !cmd) return reply(sock, { id, ok: false, error: 'missing cmd' });
 
   // The side panel's alone, whoever asks here (PANEL_COMMANDS).
-  if (PANEL_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: cmd.startsWith('downloads.') ? 'only a click in TRIF\'s side panel can do this (Settings: Offer to add mod files I download)' : 'only a click in TRIF\'s side panel can change this (Settings, under the agent)' });
+  if (PANEL_COMMANDS.has(cmd)) return reply(sock, { id, ok: false, error: cmd.startsWith('downloads.') ? 'only a click in TRIF\'s side panel can do this (Settings: Offer to add mod files I download)'
+    : cmd.startsWith('wholeBox.') ? 'only a click in TRIF\'s side panel can change this (Settings: Run chats in TRIF\'s full sandbox)' : 'only a click in TRIF\'s side panel can change this (Settings, under the agent)' });
   // From inside an agent run (`trif` sends the run's token): only page commands, limited to its site.
   let run = null;
   if (req.token !== undefined) {

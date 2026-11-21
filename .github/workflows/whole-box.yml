@@ -29,8 +29,8 @@ jobs:
       # (the user's own Claude Code: npm's newest, for today's sandbox; boxed runs use TRIF's pin, below)
       - run: npm install -g @anthropic-ai/claude-code
       - run: claude --version; ls -la "$(command -v claude)"; file "$(readlink -f "$(command -v claude)")" || true
-      - name: TRIF's pinned Claude Code, unit tests (a stand-in registry)
-        run: node --test tests/claudepin.test.js
+      - name: TRIF's pinned Claude Code, unit tests (a stand-in registry), and the Settings switch
+        run: node --test tests/claudepin.test.js tests/wholebox-setting.test.js
       # TRIF's pinned Claude Code (helper/claude-code.json), installed as the helper does: from the npm
       # registry, its sha512 checked against the pin, Anthropic's signature checked.
       - uses: actions/cache@v4
@@ -47,6 +47,7 @@ jobs:
         run: node --test --test-timeout=300000 tests/whole-box.test.js
       - name: A side-panel run, every trif command (today's sandbox)
         run: TRIF_TEST_NO_REAL_CODEX=1 node --test --test-timeout=300000 --test-name-pattern="Claude Code" tests/run-sandbox.test.js
+      # (TRIF_WHOLE_BOX=1: the test switches Settings' "Run chats in TRIF's full sandbox" on, config.json "wholeBox")
       - name: The same, the whole process in TRIF's box
         run: TRIF_WHOLE_BOX=1 TRIF_TEST_NO_REAL_CODEX=1 node --test --test-timeout=300000 --test-name-pattern="Claude Code" tests/run-sandbox.test.js
       # An organization's managed settings, for real (the runner's own /Library, with sudo; never anyone's

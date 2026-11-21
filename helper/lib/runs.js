@@ -781,17 +781,19 @@ class Runs {
     // (TRIF_RUN_MODS_DIR: where the run's `trif` reads and writes mods, its copy's sites/; TRIF_RUN_LIVE_MODS_DIR:
     // the mods folder, a path into which `trif` takes as the same path in the copy)
     const env = { ...agents.agentEnv(ws), TRIF_RUN_TOKEN: run.token, TRIF_RUN_BOX: run.box, TRIF_RUN_SCREENSHOTS: run.screenshots, TRIF_RUN_MODS_DIR: run.stage.sites, TRIF_RUN_LIVE_MODS_DIR: ws.modsDir };
-    // TRIF's full sandbox (docs/WHOLE-BOX.md; for now TRIF_WHOLE_BOX=1, macOS, staged Claude Code runs): the
-    // whole agent process in TRIF's own box, and the agent is TRIF's pinned Claude Code (claudepin.js), the
-    // version the box was tested with, never the user's own. Checked unchanged since it was downloaded.
-    run.wholeBox = require('./wholebox').enabled(process.env) && process.platform === 'darwin' && run.agent === 'claude';
+    // TRIF's full sandbox (docs/WHOLE-BOX.md; Settings' switch, config.json "wholeBox": wholeboxsetting.js;
+    // macOS, staged Claude Code runs): the whole agent process in TRIF's own box, and the agent is TRIF's
+    // pinned Claude Code (claudepin.js), the version the box was tested with, never the user's own. Checked
+    // unchanged since it was downloaded.
+    run.wholeBox = require('./wholeboxsetting').isOn(ws) && process.platform === 'darwin' && run.agent === 'claude';
     if (run.wholeBox) {
       const cp = require('./claudepin');
       cp.checkPinned(ws.home).then((pin) => {
         if (run.stopped || run.finished) return this._finish(run, { code: null, signal: null });
         // (WHOLE-BOX-STRINGS.md; the offer of the older protection instead: step 4)
         if (!pin || pin.problem) {
-          const message = !pin ? "TRIF's own copy of Claude Code isn't downloaded yet, so this chat can't run in TRIF's full sandbox."
+          const message = !pin ? (cp.pinning(ws.home) ? "TRIF's own copy of Claude Code is still downloading (Settings shows how far), so this chat can't run in TRIF's full sandbox yet."
+            : "TRIF's own copy of Claude Code isn't downloaded yet, so this chat can't run in TRIF's full sandbox.")
             : `TRIF's own copy of Claude Code wasn't started: ${pin.problem}.`;
           if (pin) this.logger.warn(`agent run ${run.id}: the pinned Claude Code (${pin.bin}): ${pin.problem}`);
           this._emit(run, { kind: 'error', message });
@@ -892,7 +894,7 @@ class Runs {
     let { file, args } = cmd;
     const { locked } = cmd;
     if (cmd.env) env = { ...env, ...cmd.env }; // (claude: its temporary folder)
-    // SPIKE (docs/WHOLE-BOX.md): the whole agent process in TRIF's own box, opt-in (TRIF_WHOLE_BOX=1),
+    // TRIF's full sandbox (docs/WHOLE-BOX.md): the whole agent process in TRIF's own box, opt-in (Settings),
     // macOS, staged runs only.
     if (limits.wholeBox) {
       try {

@@ -98,8 +98,6 @@ async function setup() {
     TRIF_DEFAULT_AGENT_DIRS: '', TRIF_UPDATE_DELAY: '2000000000', TRIF_NO_LAUNCHCTL: '1',
     TRIF_BOX_ROOT: path.join(home, 'Library', 'Caches', 'TRIF', 'boxes'), // (where they are by default)
     TRIF_CLAUDE_MANAGED_DIR: path.join(S, 'no-claude-managed'), ...kc.env,
-    // (SPIKE, docs/WHOLE-BOX.md: the same test with the whole agent in TRIF's box)
-    ...(process.env.TRIF_WHOLE_BOX ? { TRIF_WHOLE_BOX: process.env.TRIF_WHOLE_BOX } : {}),
   };
   // The workspace, by the copy's own setup (non-interactive: no browser opened, no wait, no CLI link).
   const r = spawnSync(process.execPath, [path.join(code, 'helper', 'cli.js'), 'setup', '--link', '--no-link', '--no-examples', '--native-dir', path.join(S, 'native')],
@@ -112,7 +110,9 @@ async function setup() {
   // config.json: what setup wrote, and something no run may read.
   const cfgFile = path.join(priv, 'config.json');
   const cfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
-  fs.writeFileSync(cfgFile, JSON.stringify({ ...cfg, env: { ...(cfg.env || {}), PATH }, secret: SECRET }));
+  // (TRIF_WHOLE_BOX=1, docs/WHOLE-BOX.md: the same tests with the whole agent in TRIF's full sandbox, switched on
+  // as Settings does: config.json "wholeBox", helper/lib/wholeboxsetting.js)
+  fs.writeFileSync(cfgFile, JSON.stringify({ ...cfg, env: { ...(cfg.env || {}), PATH }, secret: SECRET, ...(process.env.TRIF_WHOLE_BOX ? { wholeBox: true } : {}) }));
   fs.writeFileSync(path.join(keychainDir, 'login.keychain-db'), SECRET);
   // Another site's mods: read-only to runs (the sandbox's doing, runs.js runLimits readOnly).
   fs.mkdirSync(path.join(ws, 'sites', 'other.net'), { recursive: true });

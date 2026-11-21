@@ -42,6 +42,7 @@ const ui = {
   settings: $('#settings'), agent: $('#agent'), agentNote: $('#agent-note'), agentLogin: $('#agent-login'), withoutSandbox: $('#without-sandbox'), model: $('#model'),
   using: $('#using'), modelCustomRow: $('#model-custom-row'), modelCustom: $('#model-custom'), modelNote: $('#model-note'),
   instructions: $('#instructions'), instructionsNote: $('#instructions-note'),
+  wholeBoxRow: $('#whole-box-row'), wholeBox: $('#whole-box'), wholeBoxNote: $('#whole-box-note'), wholeBoxActions: $('#whole-box-actions'), wholeBoxRetry: $('#whole-box-retry'),
   autoUpdate: $('#auto-update'), watchDownloads: $('#watch-downloads'), downloadsNote: $('#downloads-note'), downloadOffer: $('#download-offer'), pauseAll: $('#pause-all'), pausedAll: $('#paused-all'), updateNote: $('#update-note'), modsFeedNote: $('#mods-feed-note'), update: $('#update'),
   starter: $('#starter'), starterList: $('#starter-list'), starterErr: $('#starter-err'),
   siteStarter: $('#site-starter'), siteStarterLink: $('#site-starter-link'), siteStarterErr: $('#site-starter-err'),
@@ -4239,6 +4240,7 @@ const UPDATED_SHOWN_MS = 24 * 60 * 60 * 1000;
 
 function renderUpdate() {
   renderDownloads();
+  renderWholeBox();
   const n = ui.update;
   const u = view.status?.helper?.connected ? view.status.update : null;
   const done = view.updated && Date.now() - view.updated.at < UPDATED_SHOWN_MS && view.updated.to === (u?.current || view.status?.version) ? view.updated : null;
@@ -4426,6 +4428,40 @@ ui.watchDownloads?.addEventListener('change', async () => {
   view.downloadsBusy = false;
   refreshStatus();
 });
+
+// ---- TRIF's full sandbox (helper/lib/wholeboxsetting.js; docs/WHOLE-BOX-STRINGS.md: drafts) -------------------
+// Off by default. On: chats with Claude Code run wholly inside TRIF's own sandbox, with TRIF's copy of Claude Code,
+// downloaded in the background when it's switched on (its progress here).
+const mb = (n) => Math.round(n / 1048576);
+function wholeBoxNote(w) {
+  if (!w.on) return 'The whole chat, not only its commands, runs inside TRIF’s own sandbox, with a copy of Claude Code TRIF has tested. Your own Claude Code isn’t changed.';
+  if (w.pin === 'ready') return `On for chats with Claude Code: they use TRIF’s copy of Claude Code${w.version ? ` (${w.version})` : ''}. Your own Claude Code isn’t changed.`;
+  if (w.pin === 'failed') return `Couldn’t download TRIF’s copy of Claude Code: ${w.error || 'something went wrong'}. Chats can’t run in TRIF’s full sandbox until it’s there.`;
+  if (w.got && w.total) return `Downloading TRIF’s copy of Claude Code${w.version ? ` ${w.version}` : ''}: ${mb(w.got)} of ${mb(w.total)} MB…`;
+  if (w.got) return `Downloading TRIF’s copy of Claude Code${w.version ? ` ${w.version}` : ''}: ${mb(w.got)} MB…`;
+  return `Downloading TRIF’s copy of Claude Code${w.version ? ` ${w.version}` : ''}…`;
+}
+function renderWholeBox() {
+  if (!ui.wholeBoxRow) return;
+  const connected = !!view.status?.helper?.connected;
+  const w = connected ? view.status.wholeBox : null;
+  ui.wholeBoxRow.hidden = !w?.available;
+  if (!w?.available) return;
+  ui.wholeBox.checked = !!w.on;
+  ui.wholeBox.disabled = !!view.wholeBoxBusy;
+  const note = view.wholeBoxError || wholeBoxNote(w);
+  if (ui.wholeBoxNote.textContent !== note) ui.wholeBoxNote.textContent = note;
+  ui.wholeBoxNote.classList.toggle('error', !!view.wholeBoxError || (w.on && w.pin === 'failed'));
+  ui.wholeBoxActions.hidden = !(w.on && w.pin === 'failed');
+}
+async function wholeBoxRequest(msg) {
+  view.wholeBoxBusy = true; view.wholeBoxError = null; renderWholeBox();
+  try { await request(msg); } catch (e) { view.wholeBoxError = `Couldn’t change it: ${String(e?.message ?? e)}`; }
+  view.wholeBoxBusy = false;
+  refreshStatus();
+}
+ui.wholeBox?.addEventListener('change', () => wholeBoxRequest({ type: 'wholeBox.set', on: ui.wholeBox.checked }));
+ui.wholeBoxRetry?.addEventListener('click', () => wholeBoxRequest({ type: 'wholeBox.retry' }));
 
 ui.autoUpdate.addEventListener('change', async () => {
   const on = ui.autoUpdate.checked;

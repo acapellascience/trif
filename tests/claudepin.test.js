@@ -50,7 +50,7 @@ function registry(routes) {
     if (!r) { res.writeHead(404); return res.end(); }
     if (r.redirect) { res.writeHead(302, { location: r.redirect }); return res.end(); }
     if (r.truncate) { res.writeHead(200, { 'content-length': r.body.length }); res.write(r.body.subarray(0, r.body.length >> 1)); return res.destroy(); }
-    res.writeHead(r.status || 200); res.end(r.body);
+    res.writeHead(r.status || 200, r.length ? { 'content-length': r.body.length } : {}); res.end(r.body);
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({
     url: `http://127.0.0.1:${server.address().port}`, hits, close: () => new Promise((r) => server.close(r)),
@@ -71,6 +71,35 @@ test('the pin file: one version, every platform, npm sha512s, registry tarballs 
     assert.match(p.integrity, /^sha512-[A-Za-z0-9+/]{86}==$/);
     assert.strictEqual(p.tarball, `https://registry.npmjs.org/@anthropic-ai/claude-code-${key}/-/claude-code-${key}-${pins.version}.tgz`);
   }
+});
+
+test('progress while it downloads: every caller hears it, the one download shared; the size the server gives', async () => {
+  // (random bytes don't compress: a tarball of a few MB, so progress is told along the way, not only at the end)
+  const BIG = tarball({ claude: PROGRAM + '#' + crypto.randomBytes(3 * 1024 * 1024).toString('base64'), 'LICENSE.md': 'licence' });
+  const reg = await registry({ '/big.tgz': { body: BIG, length: true }, '/nolen.tgz': { body: BIG } });
+  try {
+    const home = fresh('home');
+    const pins = pinsFor(reg.url, '/big.tgz', sri(BIG));
+    const a = [];
+    const b = [];
+    const [x, y] = await Promise.all([cp.ensurePinned(home, { pins, onProgress: (got, total) => a.push([got, total]) }),
+      cp.ensurePinned(home, { pins, onProgress: (got, total) => b.push([got, total]) })]);
+    assert.strictEqual(x, y);
+    assert.strictEqual(reg.hits.filter((h) => h === '/big.tgz').length, 1, 'one download');
+    for (const calls of [a, b]) {
+      assert.ok(calls.length >= 4, `told along the way: ${calls.length}`);
+      assert.deepStrictEqual(calls.at(-1), [BIG.length, BIG.length], 'the last: all of it');
+      assert.ok(calls.every(([got], i) => i === 0 || got >= calls[i - 1][0]), 'never backwards');
+    }
+    assert.strictEqual(cp.pinning(home, { pins }), false, 'not downloading any more');
+    // (no size from the server: total 0)
+    const home2 = fresh('home');
+    const c = [];
+    const p = cp.ensurePinned(home2, { pins: pinsFor(reg.url, '/nolen.tgz', sri(BIG)), onProgress: (got, total) => c.push([got, total]) });
+    assert.strictEqual(cp.pinning(home2, { pins: pinsFor(reg.url, '/nolen.tgz', sri(BIG)) }), true, 'downloading');
+    await p;
+    assert.deepStrictEqual(c.at(-1), [BIG.length, 0]);
+  } finally { await reg.close(); }
 });
 
 test('installs the pinned binary: checksum first, only the binary and licence kept, a record, once', async () => {

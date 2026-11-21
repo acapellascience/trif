@@ -74,7 +74,7 @@ function runSettings({ workspace = '', readOnly = [], lockedDirs = [], denied = 
   const inWorkspace = (p) => !!workspace && within(p, workspace, { ci: ignoresCase(workspace) });
   return {
     sandbox: {
-      // SPIKE (wholebox.js, TRIF_WHOLE_BOX=1): the whole process is in TRIF's own Seatbelt box, and a
+      // TRIF's full sandbox (wholebox.js, Settings): the whole process is in TRIF's own Seatbelt box, and a
       // sandboxed process can't apply another (sandbox_apply: Operation not permitted), so Claude Code's
       // command sandbox is off: TRIF's box fences its commands and its file tools alike.
       enabled: !wholeBox,

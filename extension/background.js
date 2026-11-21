@@ -58,6 +58,7 @@ const state = {
   helperError: null,     // last disconnect reason (shown on the onboarding page)
   update: null,          // the helper's update summary (helper/lib/update.js), for the panel's notice
   downloads: null,       // mod files in the user's downloads (helper/lib/downloads.js): the watch's state and its offer, for the panel
+  wholeBox: null,        // Settings' "Run chats in TRIF's full sandbox" (helper/lib/wholeboxsetting.js): on, and TRIF's copy of Claude Code
   backoff: 0,
   retryTimer: null,
   userScripts: null,     // null until first checked
@@ -1042,6 +1043,10 @@ async function onOtherHelperMessage(msg) {
     state.downloads = msg.downloads && typeof msg.downloads === 'object' ? msg.downloads : null;
     notifyPanels();
     try { await chrome.action?.setBadgeText?.({ text: state.downloads?.offer ? '1' : '' }); if (state.downloads?.offer) await chrome.action?.setBadgeBackgroundColor?.({ color: '#1a73e8' }); } catch { /* no badge here */ }
+  } else if (msg.type === 'wholeBox') {
+    // TRIF's full sandbox (helper/lib/wholeboxsetting.js): the Settings switch, and its download's progress
+    state.wholeBox = msg.wholeBox && typeof msg.wholeBox === 'object' ? msg.wholeBox : null;
+    notifyPanels();
   } else if (msg.type === 'browser') {
     // The helper's name for this browser, from what started it (Arc, Vivaldi): better than this one's guess.
     if (setBrowser(msg.name) === msg.name) { helperBrowser = msg.name; notifyPanels(); }
@@ -2137,7 +2142,7 @@ async function uiStatus() {
     helper: { connected: state.connected, error: state.connected ? null : state.helperError },
     userScripts: s.userScripts, settingsUrl: SETTINGS_URL, version: VERSION, chrome: CHROME, browser: BROWSER, browserVersion,
     recording: s.recording, sitesOn: state.sitesOn, accessNote: state.accessNote, disconnected: s.disconnected, blockedSites: s.blockedSites, sensitiveBlocked: s.sensitiveBlocked, access: s.access, siteAccess: SITE_ACCESS, paused: state.paused,
-    starter: state.connected ? state.starter : null, update: state.connected ? state.update : null, downloads: state.connected ? state.downloads : null,
+    starter: state.connected ? state.starter : null, update: state.connected ? state.update : null, downloads: state.connected ? state.downloads : null, wholeBox: state.connected ? state.wholeBox : null,
     mods: state.mods.map((m) => ({
       id: m.id, name: m.name || m.id, description: m.description || '', site: m.site, file: m.file || '',
       matches: m.matches || [], excludes: m.excludes || [], registered: !!live.get(m.id)?.registered, enabled: live.get(m.id)?.enabled ?? isEnabled(m.id),
@@ -2520,6 +2525,15 @@ async function onPanelMessage(msg, { fromPanel = false } = {}) {
         await updateChat(normalizeSite(msg.chatSite), (chat) => { chat.messages.push({ role: 'mod', text: `Imported ${String(msg.name || 'a mod')} as ${r.id}${r.replaced ? ' (the one before is in its history)' : ''}. Like any mod from outside, it waits for your OK if its code can do more than change the page.`, time: Date.now() }); });
       }
       return r;
+    }
+    // TRIF's full sandbox (helper/lib/wholeboxsetting.js): the Settings switch and its Try again. The panel's alone.
+    case 'wholeBox.set': {
+      if (!fromPanel) throw new Error('only the side panel can change this');
+      return helperRequest('wholeBox.set', { on: !!msg.on }, 15000);
+    }
+    case 'wholeBox.retry': {
+      if (!fromPanel) throw new Error('only the side panel can change this');
+      return helperRequest('wholeBox.retry', {}, 15000);
     }
     // Mod files in the user's downloads (helper/lib/downloads.js): the Settings switch, and the card's buttons.
     // The panel's alone: each is a click there.

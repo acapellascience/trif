@@ -9,7 +9,8 @@
 //     only this run's reports, whichever process in the box made them. `log stream` needs an
 //     administrator account (most Macs' own user is one); without it the watcher says why and the run goes
 //     on, its errors as before.
-//   - The allowlist proxy's refusals (wholebox.js startProxy `seen`: a CONNECT to a host not on its list).
+//   - TRIF's network relay's refusals (relay.js `seen`: a CONNECT to a host not on its list, a request it
+//     couldn't read, an Anthropic host resolving to this computer).
 //
 // Reports are best effort: the kernel doesn't report every refusal (CI, round 5: a Write tool's refused
 // write had none, the refusals around it did), and the same operation on the same file is kept once.
@@ -91,7 +92,10 @@ const tilde = (p, home) => (home && (p === home || p.startsWith(home + '/')) ? `
 
 /** One refusal in words (drafts: docs/WHOLE-BOX-STRINGS.md). */
 function describe(r, { home = os.homedir() } = {}) {
-  if (r.kind === 'proxy') return `a connection to ${r.target}`;
+  if (r.kind === 'proxy') {
+    if (r.reason === 'unreadable') return 'a request its network relay couldn\'t read';
+    return `a connection to ${r.target}${r.reason === 'local address' ? ' (an address on this computer)' : ''}`;
+  }
   const t = tilde(r.target || '', home);
   const op = r.op || '';
   let what;
@@ -181,9 +185,12 @@ function watch(tag, { spawnLog = (args) => spawn('/usr/bin/log', args, { stdio: 
   };
 }
 
-/** The proxy's refusals (startProxy `seen`) as refusals. */
+/** The relay's refusals (relay.js / wholebox.js startProxy `seen`) as refusals. */
 function fromProxy(seen) {
-  return (seen || []).filter((x) => !x.allowed).map((x) => ({ kind: 'proxy', target: String(x.target).slice(0, 200) }));
+  return (seen || []).filter((x) => !x.allowed).map((x) => ({
+    kind: 'proxy', target: String(x.target).slice(0, 200),
+    ...(x.reason === 'local address' ? { reason: x.reason } : /^\(/.test(String(x.target)) ? { reason: 'unreadable' } : {}),
+  }));
 }
 
 module.exports = { tagFor, parseReport, describe, summary, watch, fromProxy, routine, routineContext, ROUTINE, NOISE, MAX };

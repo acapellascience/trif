@@ -1,6 +1,7 @@
 # SPIKE (docs/WHOLE-BOX.md), branch whole-box only: the whole agent process in TRIF's own OS sandbox.
 # Nothing is published, uploaded or signed; no secrets. Claude Code talks to a stand-in for Anthropic's API
-# (no account, no paid call).
+# (no account, no paid call), except one step (step 8, the relay) that reaches the real api.anthropic.com with
+# a made-up token, which Anthropic refuses (401).
 name: whole-box
 
 on:
@@ -47,7 +48,7 @@ jobs:
           echo "== log show (Sandbox)"; log show --last 1m --style compact --predicate 'sender == "Sandbox"' | head -20
           sw_vers; id
       - name: TRIF's pinned Claude Code, unit tests (a stand-in registry), and the Settings switch
-        run: TRIF_TEST_BOX_REPORTS=1 node --test tests/claudepin.test.js tests/wholebox-setting.test.js tests/claudetoken.test.js tests/wholebox-noshell.test.js tests/wholebox-refusals.test.js
+        run: TRIF_TEST_BOX_REPORTS=1 node --test tests/claudepin.test.js tests/wholebox-setting.test.js tests/claudetoken.test.js tests/wholebox-noshell.test.js tests/wholebox-refusals.test.js tests/relay.test.js
       # TRIF's pinned Claude Code (helper/claude-code.json), installed as the helper does: from the npm
       # registry, its sha512 checked against the pin, Anthropic's signature checked.
       - uses: actions/cache@v4
@@ -68,6 +69,11 @@ jobs:
         run: node tests/whole-box/setup-token-probe.js "$RUNNER_TEMP/claude-pin"
       - name: The box, and the loosest Claude Code in it
         run: node --test --test-timeout=300000 tests/whole-box.test.js
+      # (step 8: the real network through TRIF's relay, a made-up token; and a longer fuzz of the relay)
+      - name: The pinned Claude Code in the box, through TRIF's relay to the real Anthropic
+        run: TRIF_TEST_REAL_RELAY=1 node --test --test-timeout=300000 --test-name-pattern="real network" tests/whole-box.test.js
+      - name: The relay, fuzzed longer
+        run: TRIF_RELAY_FUZZ_N=200000 node --test --test-timeout=300000 --test-name-pattern=fuzz tests/relay.test.js
       - name: A side-panel run, every trif command (today's sandbox)
         run: TRIF_TEST_NO_REAL_CODEX=1 node --test --test-timeout=300000 --test-name-pattern="Claude Code" tests/run-sandbox.test.js
       # (TRIF_WHOLE_BOX=1: the test switches Settings' "Run chats in TRIF's full sandbox" on, config.json "wholeBox")

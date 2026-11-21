@@ -60,7 +60,9 @@ nothing: no "Use Claude Code anyway" card, no "no TRIF sandbox" chip.
   its own line in the chat, after the run's usual error): **TRIF's full sandbox refused {what}; {what}…
   [; and {n} more (in the run's log)].** Latest first, at most five. Each {what} (`describe`):
   **reading {path}** · **writing {path}** · **a connection to {host:port}** (or **a connection to port {n}**:
-  Seatbelt often reports no address) · **listening on {where}** ·
+  Seatbelt often reports no address; from TRIF's network relay, round 7: **a connection to {host:port} (an
+  address on this computer)** when an Anthropic host's name led to this computer, and **a request its
+  network relay couldn't read**) · **listening on {where}** ·
   **the system service {name}** · **starting {path}** · **another program ({operation})** · otherwise
   Seatbelt's own operation name and target; then the program's name in brackets, e.g. **reading
   ~/.netrc (claude)**. Paths in the home folder start with ~.

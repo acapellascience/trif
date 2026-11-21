@@ -133,7 +133,7 @@ function ptyCommand(file, args = [], { platform = process.platform } = {}) {
  * A boxed run's sign-in (runs.js, TRIF's full sandbox): {env, unsetEnv, secrets, cleanup, state} as an
  * adapter's prepare gives (runs.js _withAgent). A saved API key: the key proxy, as now (`keyPrep`, the
  * claude adapter's own prepare). Else the setup-token token from the keyring, as CLAUDE_CODE_OAUTH_TOKEN
- * (the variables that outrank it unset), Anthropic reached through the allowlist proxy (wholebox.js
+ * (the variables that outrank it unset), Anthropic reached through TRIF's network relay (relay.js via wholebox.js
  * startProxy, the box's one way out; TRIF_ANTHROPIC_URL, tests: a stand-in on this computer instead).
  * No token: throws an Error with .signIn = 'token' (the run says so; the panel offers the sign-in).
  */

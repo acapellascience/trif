@@ -13,7 +13,7 @@
 //     on a path. Listing a folder is a read, so not allowed.)
 //   - write: the copy's sites/ (other sites' folders in it, and instruction files, denied after), the box,
 //     the screenshots folder, the temporary folders, the config folder (its settings files denied).
-//   - network: only TCP to the given ports on this computer (TRIF's key proxy, or the allowlist proxy
+//   - network: only TCP to the given ports on this computer (TRIF's key proxy, or TRIF's network relay, relay.js
 //     below). Seatbelt can't name remote hosts (only "*" or "localhost", and a port), so "only
 //     Anthropic" is the proxy's job, and the box makes the proxy the only way out. No DNS (the
 //     mDNSResponder socket is closed): names are looked up by the proxy, outside.
@@ -27,7 +27,6 @@
 
 const fs = require('fs');
 const os = require('os');
-const net = require('net');
 const path = require('path');
 
 
@@ -153,46 +152,27 @@ function wrap({ file, args, env = {} }, { limits, configDir, profileFile, keycha
   return { file: '/usr/bin/sandbox-exec', args: ['-f', profileFile, file, ...args], env: { ...env, ...extraEnv }, profile };
 }
 
-// ------------------------------------------------------------------ the allowlist proxy
+// ------------------------------------------------------------------ the network relay
 //
-// Without a key proxy (a Claude Code login rather than an API key), Claude Code talks to Anthropic itself.
-// The box lets it reach one port on this computer: this proxy (HTTPS_PROXY, which Claude Code and Codex
-// honor), which tunnels (CONNECT) only to the hosts listed, port 443, and refuses everything else.
-const ANTHROPIC_HOSTS = ['api.anthropic.com', 'claude.ai', 'console.anthropic.com', 'platform.claude.com'];
+// Without a key proxy (a token sign-in rather than an API key), Claude Code talks to Anthropic itself.
+// The box lets it reach one port on this computer: TRIF's relay (relay.js; HTTPS_PROXY, which Claude Code
+// and Codex honor), which tunnels (CONNECT, no TLS termination) only to the hosts listed, port 443, and
+// refuses everything else.
+const relay = require('./relay');
+const ANTHROPIC_HOSTS = relay.ANTHROPIC_HOSTS;
 
 function hostAllowed(hostPort, hosts = ANTHROPIC_HOSTS) {
-  const m = /^([a-z0-9.-]+):(\d+)$/i.exec(String(hostPort || ''));
-  return !!m && m[2] === '443' && hosts.includes(m[1].toLowerCase());
+  const t = relay.parseTarget(hostPort);
+  return !!t && t.port === 443 && hosts.includes(t.host);
 }
 
-/** start({hosts, connect}) -> Promise<{port, close, seen}>. `connect` (tests): instead of the internet. */
-function startProxy({ hosts = ANTHROPIC_HOSTS, connect = (port, host) => net.connect(port, host) } = {}) {
-  const seen = [];
-  const server = net.createServer((client) => {
-    let head = '';
-    client.on('error', () => {});
-    const onData = (d) => {
-      head += d.toString('latin1');
-      const end = head.indexOf('\r\n\r\n');
-      if (end === -1) { if (head.length > 8192) client.destroy(); return; }
-      client.removeListener('data', onData);
-      const m = /^CONNECT (\S+) HTTP\/1\.[01]\r\n/.exec(head);
-      const target = m ? m[1] : null;
-      seen.push({ target: target || head.split('\r\n')[0], allowed: !!target && hostAllowed(target, hosts) });
-      if (!target || !hostAllowed(target, hosts)) { client.end('HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n'); return; }
-      const [host, port] = target.split(':');
-      const up = connect(Number(port), host);
-      up.on('error', () => client.destroy());
-      up.on('connect', () => {
-        client.write('HTTP/1.1 200 Connection established\r\n\r\n');
-        const rest = head.slice(end + 4);
-        if (rest) up.write(Buffer.from(rest, 'latin1'));
-        client.pipe(up); up.pipe(client);
-      });
-    };
-    client.on('data', onData);
-  });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ port: server.address().port, seen, close: () => new Promise((r) => server.close(r)) })));
+/**
+ * startProxy({hosts, allow, connect, lookup}) -> Promise<{port, close, seen}>: relay.start with Anthropic's
+ * hosts on 443 (`hosts`: other names on 443; `allow`: [{host, port, local?}], step 5's organization hosts
+ * added to them). `connect`/`lookup` (tests): instead of the internet and DNS.
+ */
+function startProxy({ hosts = ANTHROPIC_HOSTS, allow = [], connect, lookup } = {}) {
+  return relay.start({ allow: [...hosts.map((host) => ({ host, port: 443 })), ...allow], ...(connect ? { connect } : {}), ...(lookup ? { lookup } : {}) });
 }
 
 module.exports = { macProfile, localPorts, limitsToBox, wrap, startProxy, hostAllowed, ANTHROPIC_HOSTS };

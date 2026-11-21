@@ -945,7 +945,7 @@ class Runs {
     });
   }
 
-  // What the box refused during the run: Seatbelt's reports and the allowlist proxy's.
+  // What the box refused during the run: Seatbelt's reports and TRIF's network relay's (relay.js).
   _boxRefusals(run) {
     const br = require('./boxrefusals');
     return [...(run.boxWatch ? run.boxWatch.refusals() : []), ...br.fromProxy(run.proxySeen)];

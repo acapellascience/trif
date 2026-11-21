@@ -43,13 +43,13 @@ test('localPorts: only proxies on this computer', () => {
   assert.deepEqual(wb.localPorts({}), []);
 });
 
-test('allowlist proxy: tunnels to Anthropic on 443 only', async () => {
+test('the relay (allowlist proxy): tunnels to Anthropic on 443 only', async () => {
   assert.ok(wb.hostAllowed('api.anthropic.com:443'));
   for (const h of ['api.anthropic.com:80', 'evil.com:443', 'api.anthropic.com.evil.com:443', 'api.anthropic.com', '127.0.0.1:443']) assert.ok(!wb.hostAllowed(h), h);
   // a stand-in upstream for api.anthropic.com (never the internet)
   const up = net.createServer((s) => s.end('UPSTREAM-HELLO')).listen(0, '127.0.0.1');
   await new Promise((r) => up.once('listening', r));
-  const proxy = await wb.startProxy({ connect: () => net.connect(up.address().port, '127.0.0.1') });
+  const proxy = await wb.startProxy({ connect: () => net.connect(up.address().port, '127.0.0.1'), lookup: async () => [{ address: '203.0.113.7', family: 4 }] });
   const ask = (target) => new Promise((resolve) => {
     const s = net.connect(proxy.port, '127.0.0.1', () => s.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`));
     let out = '';
@@ -246,6 +246,48 @@ test('macOS, real Claude Code with its loosest settings: outside the copy, the s
   assert.doesNotMatch(boxed.results[10], /^\s*200\s*$/, info);
   console.log(`# without the box: ${open.ms} ms; in the box: ${boxed.ms} ms (the whole run, stand-in model)`);
   console.log(info.split('\n').map((x) => `# ${x}`).join('\n'));
+});
+
+// Step 8, CI only (TRIF_TEST_REAL_RELAY=1, the pinned Claude Code): the real network. The pinned Claude Code in
+// the box, signed in with a stand-in setup-token token (made up: no account), reaches Anthropic only
+// through TRIF's relay (HTTPS_PROXY), real DNS, real TLS (the relay doesn't terminate it: Claude Code checks
+// Anthropic's certificate itself), and Anthropic refuses the made-up token (401). So: the tunnel carried a
+// real TLS session both ways, Claude Code honours the relay, and nothing else got out.
+test('CI, the real network: the pinned Claude Code in the box reaches Anthropic only through TRIF\'s relay (a made-up token, refused)', { skip: (!process.env.TRIF_TEST_REAL_RELAY || !pinned) && 'TRIF_TEST_REAL_RELAY=1 with TRIF\'s pinned Claude Code (CI)' }, async () => {
+  const L = layout();
+  const r = await wb.startProxy({});
+  try {
+    const agentDir = path.join(L.root, 'agent-relay');
+    fs.mkdirSync(agentDir);
+    const c = claude.command({ bin: claudeBin, prompt: 'Say hi.', agentDir, model: 'claude-haiku-4-5', ...L.limits, wholeBox: true });
+    for (const f of c.files) fs.writeFileSync(f.path, f.content);
+    const env = { HOME: L.home, USER: os.userInfo().username, PATH: '/usr/bin:/bin', TERM: 'dumb', CLAUDE_CONFIG_DIR: L.cfg, ...c.env,
+      CLAUDE_CODE_OAUTH_TOKEN: `sk-ant-oat01-${'MadeUpForCI'.repeat(8)}AA`, HTTPS_PROXY: `http://127.0.0.1:${r.port}`, CLAUDE_CODE_MAX_RETRIES: '0' };
+    for (const k of ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']) delete env[k];
+    const cmd = wb.wrap({ file: c.file, args: c.args, env }, { limits: L.limits, configDir: L.cfg, profileFile: path.join(agentDir, 'box.sb') });
+    assert.match(cmd.profile, new RegExp(`\\(allow network-outbound \\(remote tcp "localhost:${r.port}"\\)\\)`));
+    const t0 = Date.now();
+    const res = await new Promise((resolve) => {
+      const child = spawn(cmd.file, cmd.args, { cwd: L.stage, env: cmd.env, stdio: ['pipe', 'pipe', 'pipe'] });
+      let out = '';
+      let err = '';
+      child.stdout.on('data', (d) => { out += d; });
+      child.stderr.on('data', (d) => { err += d; });
+      const timer = setTimeout(() => child.kill('SIGKILL'), 90000);
+      child.on('close', (code) => { clearTimeout(timer); resolve({ code, out, err }); });
+      child.stdin.end('Say hi.');
+    });
+    const info = `exit ${res.code} in ${Date.now() - t0} ms\nrelay saw: ${JSON.stringify(r.seen)}\nstdout: ${res.out.slice(-2500)}\nstderr: ${res.err.slice(-1500)}`;
+    console.log(info.split('\n').map((x) => `# ${x}`).join('\n'));
+    const api = r.seen.filter((x) => x.target === 'api.anthropic.com:443' && x.allowed);
+    assert.ok(api.length, `Claude Code went to Anthropic through the relay:\n${info}`);
+    assert.ok(api.some((x) => x.up > 500 && x.down > 2000), `a TLS session both ways (a hello, a certificate chain back):\n${info}`);
+    assert.ok(!r.seen.some((x) => x.failed), `every tunnel reached its host:\n${info}`);
+    const result = res.out.split('\n').map((x) => { try { return JSON.parse(x); } catch { return null; } }).find((m) => m && m.type === 'result');
+    assert.ok(res.code !== 0 || (result && result.is_error), `the made-up token can't have worked:\n${info}`);
+    assert.match(`${res.out}\n${res.err}`, /401|OAuth|authenticat|invalid|log ?in/i, `Anthropic's answer, the token refused:\n${info}`);
+    assert.doesNotMatch(`${res.out}\n${res.err}`, /EPERM|ECONNREFUSED|Unable to connect/i, `nothing in the way but the token:\n${info}`);
+  } finally { await r.close(); }
 });
 
 // On CI only (.github/workflows/whole-box.yml writes the real managed-settings.json in /Library/Application

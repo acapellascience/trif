@@ -17,6 +17,7 @@ import { loadExplain, term, warningByLine, moreText } from './explain.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
 import { createPhoneLink, renderPhoneLink, TEXT as PHONE_TEXT } from './phonelink.js';
+import { mountDictation } from './dictation.js';
 
 const $ = (sel) => document.querySelector(sel);
 const chatKey = (site) => `chat:${site}`;
@@ -836,6 +837,7 @@ function render() {
   ui.newChat.disabled = !site || (chat.messages.length === 0 && !running);
   ui.input.disabled = !site;
   ui.input.placeholder = site ? `What should I fix on ${site}?` : 'Open a website to fix it';
+  dictationUI?.render(); // (the mic follows the box: dictation.js)
   // While the agent works the box stays usable: Send (and Enter) queue the message (renderQueue), Stop beside it.
   ui.composer.classList.toggle('busy', running);
   if (running && !waitsForLogin) ui.send.title = QUEUE_WORDS.sendTitle;
@@ -4525,6 +4527,23 @@ function openSetup() {
   });
 }
 
+// The message box's microphone (dictation.js): Chrome, Edge and Safari, not Firefox (no speech recognition there).
+// Chrome's and Edge's side panel can't ask for the microphone: the first time, mic.html asks in a tab beside the
+// page (a panel in a window, Safari's or the fallback, asks the browser's own way).
+var dictationUI = null; // (var: render() may run before this line)
+try {
+  dictationUI = mountDictation({
+    composer: ui.composer, input: ui.input, browser: () => BROWSER, canPrompt: !!OPENED_FOR || SAFARI,
+    storage: chrome.storage?.local,
+    openNear: async (url) => {
+      const at = view.tab?.id !== undefined ? await chrome.tabs.get(view.tab.id).catch(() => null) : null;
+      const props = { url, active: true, ...(at ? { windowId: at.windowId, index: at.index + 1 } : FALLBACK ? { windowId: OPENED_FOR } : {}) };
+      // (closing it goes back to the page: its opener)
+      if (at) return chrome.tabs.create({ ...props, openerTabId: at.id }).catch(() => chrome.tabs.create(props));
+      return chrome.tabs.create(props);
+    },
+  });
+} catch (e) { console.warn('[TRIF] dictation', e); }
 ui.composer.addEventListener('submit', (e) => { e.preventDefault(); send(); });
 ui.input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {

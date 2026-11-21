@@ -678,6 +678,31 @@ body:is(.site-off, .no-site) .robotless-line { display: none; }
 .composer.busy .send:not(.stop) { right: 36px; }
 .composer.busy textarea { padding-right: 72px; }
 .stop svg { fill: currentColor; stroke: none; }
+/* The microphone (dictation.js), left of Send: quiet like the bar's icon buttons; pressed, it's on; red with a ring
+   only while it really listens (.listening, from the recogniser's own start); on but not yet listening (starting,
+   asking for the microphone, reconnecting): pressed, no red. */
+.send.mic { right: 36px; background: transparent; color: var(--muted); }
+.send.mic:hover:not(:disabled) { background: var(--raised); color: var(--text); }
+.send.mic:disabled { background: transparent; color: var(--faint); opacity: 0.6; }
+.send.mic svg { width: 15px; height: 15px; stroke-width: 1.7; }
+.send.mic.on { background: var(--raised); color: var(--text); }
+.send.mic.listening { background: var(--blocked); color: #fff; animation: mic-ring 1.6s ease-out infinite; }
+.send.mic.listening:hover { background: color-mix(in srgb, var(--blocked) 85%, #000); color: #fff; }
+@keyframes mic-ring { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--blocked) 45%, transparent); } 100% { box-shadow: 0 0 0 7px transparent; } }
+@media (prefers-reduced-motion: reduce) { .send.mic.listening { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--blocked) 35%, transparent); } }
+.composer.has-mic textarea { padding-right: 72px; }
+.composer.has-mic.busy .send.mic { right: 66px; }
+.composer.has-mic.busy textarea { padding-right: 102px; }
+/* The words being heard, not in the box yet (only finished ones go in): over the text, muted */
+.dictation-live { margin: 0; padding: 7px 12px 0; color: var(--muted); font-style: italic; font-size: 12.5px; line-height: 1.4;
+  overflow-wrap: anywhere; max-block-size: 4lh; overflow-y: auto; }
+.dictation-live::before { content: "…"; margin-right: 2px; }
+/* Above the box: a quiet line (where the audio goes, the first time; reconnecting; allow it in the tab), or red with
+   the fix (blocked, no microphone) */
+.dictation-note { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0 12px 2px;
+  color: var(--muted); font-size: 12px; line-height: 1.4; }
+.dictation-note.bad { color: var(--bad); }
+.dictation-note .btn { padding: 1px 9px; font-size: 11.5px; }
 
 /* Settings: automatic updates. */
 .check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
@@ -1164,3 +1189,5 @@ body.resizing-mods, body.resizing-mods * { cursor: ns-resize !important; user-se
 .download-offer .offer-can { margin: 4px 0 6px 18px; padding: 0; font-size: 12px; }
 .download-offer .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .paste-mod .paste-tried { margin: 0 0 8px; }
+/* (no box, no microphone line: robotless, or no site / the robot off) */
+body.robotless .dictation-note, body:is(.site-off, .no-site) .dictation-note { display: none; }

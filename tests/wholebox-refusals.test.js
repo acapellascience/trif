@@ -108,7 +108,7 @@ test('Seatbelt for real: the run\'s tag in its reports, read back as this run\'s
   for (let i = 0; i < 40 && w.refusals().length < 2; i++) await new Promise((res) => setTimeout(res, 100));
   w.close();
   const got = w.refusals();
-  const info = JSON.stringify(got);
+  const info = `${JSON.stringify(got)} (log stream: ${w.unavailable() || 'running'}; the shell: ${r.status} ${r.stderr.trim()})`;
   assert.ok(got.some((x) => /^file-read/.test(x.op) && x.target === path.join(outside, 'secret.txt') && x.process === 'cat'), info);
   assert.ok(got.some((x) => /^file-write/.test(x.op) && x.target === path.join(box, 'ro', 'y')), `the read-only folder's own deny carries the tag too: ${info}`);
   assert.match(br.summary(got), /^TRIF's full sandbox refused .*reading .*secret\.txt \(cat\)/);

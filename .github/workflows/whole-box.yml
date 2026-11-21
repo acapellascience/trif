@@ -29,7 +29,23 @@ jobs:
       # (the user's own Claude Code: npm's newest, for today's sandbox; boxed runs use TRIF's pin, below)
       - run: npm install -g @anthropic-ai/claude-code
       - run: claude --version; ls -la "$(command -v claude)"; file "$(readlink -f "$(command -v claude)")" || true
-      - name: TRIF's pinned Claude Code, unit tests (a stand-in registry), and the Settings switch
+      # (step 3: do Seatbelt's reports reach `log stream` here, with and without sudo?)
+      - name: Probe Seatbelt's reports in the log
+        continue-on-error: true
+        run: |
+          T="TRIF-box-probe$$"
+          printf '(version 1)\n(deny default (with message "%s"))\n(allow process-exec process-fork sysctl-read mach-lookup)\n(allow file-read* (subpath "/usr") (subpath "/System") (subpath "/bin") (subpath "/private/var/db/dyld") (subpath "/dev") (literal "/"))\n' "$T" > "$RUNNER_TEMP/p.sb"
+          log stream --style ndjson --predicate "eventMessage CONTAINS \"$T\"" > "$RUNNER_TEMP/s1.txt" 2>&1 &
+          sudo log stream --style ndjson --predicate "eventMessage CONTAINS \"$T\"" > "$RUNNER_TEMP/s2.txt" 2>&1 &
+          log stream --style compact --predicate 'sender == "Sandbox"' > "$RUNNER_TEMP/s3.txt" 2>&1 &
+          sleep 3
+          sandbox-exec -f "$RUNNER_TEMP/p.sb" /bin/cat /etc/hosts || true
+          sleep 5
+          pkill -f "log stream" || true; sudo pkill -f "log stream" || true
+          for f in s1 s2 s3; do echo "== $f"; head -c 2000 "$RUNNER_TEMP/$f.txt"; echo; done
+          echo "== log show (tag)"; log show --last 1m --style compact --predicate "eventMessage CONTAINS \"$T\"" | head -20
+          echo "== log show (Sandbox)"; log show --last 1m --style compact --predicate 'sender == "Sandbox"' | head -20
+          sw_vers; id
         run: node --test tests/claudepin.test.js tests/wholebox-setting.test.js tests/claudetoken.test.js tests/wholebox-noshell.test.js tests/wholebox-refusals.test.js
       # TRIF's pinned Claude Code (helper/claude-code.json), installed as the helper does: from the npm
       # registry, its sha512 checked against the pin, Anthropic's signature checked.

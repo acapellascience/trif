@@ -13,6 +13,8 @@
 //   sites/<other site>/...   every file but files/, to read: the sandboxes make these folders read-only, and
 //                            a change found in one anyway isn't copied.
 //   sites/<new folder>/      a folder for another site the run makes (as today, its mods are held).
+// Not there at all: another site whose mods chats on other sites may not read (visibility.js: the user's
+// choice, off by default for a sensitive site), its phone twin with it.
 // Never copied either way: links, files with other names (hard links), names TRIF doesn't take
 // (pathcheck.js), files agents read as instructions (CLAUDE.md, AGENTS.md, .claude/, .codex/...), files
 // directly in sites/, and .git and node_modules folders.
@@ -22,6 +24,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { scopeFor, scopeOf, isPhoneSite, phoneBase } = require('./scope');
 const { within, ignoresCase, unsafeName, badName, joinInside } = require('./pathcheck');
+const { hiddenFrom } = require('./visibility');
 
 const ALL_SITES = 'all-sites';
 // Files an agent reads as instructions for the folder they're in (runs.js instructionFiles).
@@ -181,12 +184,15 @@ class Stage {
   /**
    * ws: the workspace; dir: the run's working folder (made here, fresh); scope, splits: the run's;
    * liveReal: the mods folder's real path (runs.js checkModsFolder); settings: the text of the copy's
-   * .claude/settings.json.
+   * .claude/settings.json; visibility: the run's (visibility.js: which other sites' mods it may read).
    */
-  constructor({ ws, dir, scope, splits = [], liveReal, settings = null, logger = null }) {
+  constructor({ ws, dir, scope, splits = [], liveReal, settings = null, logger = null, visibility = null }) {
     this.ws = ws;
     this.scope = scope;
     this.splits = splits;
+    // (another site whose mods chats on other sites may not read: not copied, nor followed, at all)
+    this.hidden = hiddenFrom({ scope, splits, visibility });
+    this.hiddenNames = new Set(); // such folders in the mods folder when the run started (runs.js runLimits denies them)
     this.logger = logger || { info() {}, warn() {} };
     this.settings = settings;
     this.dirPath = dir;
@@ -227,6 +233,7 @@ class Stage {
     try { names = fs.readdirSync(this.liveReal, { withFileTypes: true }); } catch { /* none yet */ }
     for (const d of names) {
       if (!d.isDirectory() || nameRefused([d.name, 'x'])) continue;
+      if (this.hidden(d.name)) { this.hiddenNames.add(d.name); continue; } // (not even its name)
       fs.mkdirSync(path.join(this.sites, d.name)); // (every site folder, an empty one too)
       if (!ownFolder(d.name, this.scope, this.splits)) this.otherAtStart.add(d.name);
     }
@@ -247,7 +254,8 @@ class Stage {
   homeRel(rel) { return path.relative(this.ws.home, path.join(this.ws.modsDir, rel)); }
 
   // The mods folder's files this copy follows: every site folder there but another site's files/, and
-  // another site's folder that wasn't there when the run started (unless the run made it).
+  // another site's folder that wasn't there when the run started (unless the run made it): so never a
+  // hidden one (create: not in otherAtStart).
   _walkLive() {
     return walk(this.liveReal, {
       skipDir: (parts) => {

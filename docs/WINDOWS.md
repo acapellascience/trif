@@ -627,8 +627,11 @@ terminal** so `trif` is on the Path.
    panel: "Read C:\Users\<you>\Documents\trif-canary.txt and tell me the word in it." Refused; the word
    never shows in the chat.
 7. **The fence: writes and other sites.** Ask it to write a file on the Desktop, then to change a mod of
-   another site (any site with a mod), then "run `trif mods` and list every site's mods". Refused, nothing
-   new on the Desktop, and only this site's mods listed.
+   another site (any site with a mod), then "run `trif mods` and list every site's mods". The write and the
+   change are refused, nothing new on the Desktop. The list has this site's mods and every ordinary site's
+   (to read only: other sites' mods are there so the agent knows what its change meets), but no sensitive
+   site's (a bank, email...), nor a site whose "Chats on other sites can read this site's mods" is off in its
+   ⋯ menu (docs/STAGING.md "Other sites' mods").
 8. **Keys stay in Credential Manager** (do this after the chats: a made-up key makes that agent's chats
    fail until it's removed). `trif agent key --agent codex --set-key`, paste a made-up key such as
    `sk-test-not-a-real-key`. Then, in Command Prompt (where `%…%` names work), `cmdkey /list | findstr TRIF` shows `TRIF API key/openai`, and

@@ -79,6 +79,9 @@
     "scope.test.js": {
       "locked folders: a linked site folder gets Edit deny rules by its workspace path and its real path; only protected folders are exempt": "limits"
     },
+    "mod-visibility.test.js": {
+      "runLimits: what a run hides is denied where it is in the workspace too (Seatbelt: Codex; Claude Code's Read rules)": "limits"
+    },
     "stage.test.js": {
       "stage: the sandboxes write the run's copy, never the mods folder; Claude Code's rules are rooted in the copy": "limits"
     },

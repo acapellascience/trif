@@ -44,6 +44,7 @@ const { loadOrigins, recordOrigins, renameOrigins, activeRuns } = require('./lib
 const { deleteMod, emptyTrash, siteInScope } = require('./lib/trash');
 const { ownFolder } = require('./lib/stage');
 const { runScope, isPhoneSite } = require('./lib/scope');
+const { hiddenFrom } = require('./lib/visibility');
 const update = require('./lib/update');
 const modsFeed = require('./lib/modsfeed');
 const { buildReport, reportEmail, reportUrl } = require('./lib/report');
@@ -275,7 +276,8 @@ function onExtensionMessage(msg) {
         const off = boxed.filter((id) => !on.has(id) && !(state.held && state.held[id]));
         const who = `${state.hello ? browserKey(state.hello) : 'browser'}:${state.hello?.installId || process.pid}`;
         // (and the sensitive sites of their own it knows of: mail.google.com's mods are its own site's, not google.com's)
-        const sw = require('./lib/sitecombos').saveSwitches(ws.home, who, boxed, off, Array.isArray(msg.splits) ? msg.splits : null);
+        const sw = require('./lib/sitecombos').saveSwitches(ws.home, who, boxed, off, Array.isArray(msg.splits) ? msg.splits : null,
+          msg.visibility && typeof msg.visibility === 'object' ? msg.visibility : undefined); // (visibility.js: for runs that come without it)
         if (sw.changed) { logger.info(`boxed mods off in ${state.hello?.browser || 'this browser'}: ${off.join(', ') || 'none'}${sw.switchedOn.length ? `; switched on: ${sw.switchedOn.join(', ')}` : ''}`); scheduleSync('switches'); }
       } catch (e) { logger.warn(`switches: ${e.message}`); }
       // (the phone twins' switches, for the phone sync (docs/PHONE-SYNC.md section 4b): an extension that doesn't say
@@ -1674,6 +1676,32 @@ function runsOwn(run, id) {
   return !!h && (h.runId === run.id || (!!h.scope && h.scope === run.scope));
 }
 
+/** name -> whether a run may not see that site (or folder) at all: visibility.js, as its copy (stage.js). */
+function runHides(run) {
+  return (run.stage && typeof run.stage.hidden === 'function') ? run.stage.hidden : hiddenFrom({ scope: run.scope, splits: run.splits || [], visibility: run.visibility });
+}
+
+/**
+ * The extension's `status` as a run is told it: without the sites whose mods it may not read (visibility.js):
+ * their mods (ids, switches, holds), and their names in the site lists, a mod's sites it's off on, the
+ * groups off, the origins TRIF may reach, and the mods on the run's page. So `trif status` says nothing of
+ * what isn't in the run's copy either.
+ */
+function statusForRun(st, hide) {
+  if (!st || typeof st !== 'object' || Array.isArray(st)) return st;
+  const keep = (site) => typeof site !== 'string' || !hide(site);
+  const sites = (l) => (Array.isArray(l) ? l.filter(keep) : l);
+  const mods = (l) => (Array.isArray(l) ? l.filter((m) => !m || typeof m.id !== 'string' || keep(siteOfId(m.id))) : l);
+  const out = { ...st };
+  if (Array.isArray(st.mods)) out.mods = mods(st.mods).map((m) => (m && Array.isArray(m.offSites) ? { ...m, offSites: sites(m.offSites) } : m));
+  for (const k of ['sitesOn', 'disconnected', 'blockedSites', 'sensitiveBlocked', 'recording']) if (Array.isArray(st[k])) out[k] = sites(st[k]);
+  if (st.groupsOff && typeof st.groupsOff === 'object') out.groupsOff = Object.fromEntries(Object.entries(st.groupsOff).filter(([site]) => keep(site)));
+  const originSite = (o) => { const m = /^[^:]+:\/\/(?:\*\.)?([^/:]+)/.exec(String(o)); return m ? m[1] : String(o); };
+  if (st.access && typeof st.access === 'object' && Array.isArray(st.access.origins)) out.access = { ...st.access, origins: st.access.origins.filter((o) => keep(originSite(o))) };
+  if (st.page && typeof st.page === 'object' && Array.isArray(st.page.mods)) out.page = { ...st.page, mods: mods(st.page.mods) };
+  return out;
+}
+
 function allHelperInfo() {
   return {
     helper: VERSION,
@@ -1814,7 +1842,8 @@ function onClientLine(sock, line) {
     reply(sock, { id, ok: false, error: `timed out after ${ms}ms waiting for the extension to answer "${cmd}"` });
   }, ms);
   const timer = expire(timeoutMs);
-  pending.set(extId, { sock, clientId: id, timer, cmd, runId: run ? run.id : null, expire, timeoutMs });
+  // (a run's `status`: without the other sites it may not read the mods of, statusForRun)
+  pending.set(extId, { sock, clientId: id, timer, cmd, runId: run ? run.id : null, expire, timeoutMs, ...(run && cmd === 'status' ? { hide: runHides(run) } : {}) });
 }
 
 // The extension is waiting for the user (the panel asking whether an agent may run code on a site:
@@ -1834,7 +1863,7 @@ function onExtensionResponse(msg) {
   clearTimeout(p.timer);
   if (p.cmd === 'record' && msg.ok) noteRecording(p.runId, msg.result);
   if (p.cmd === 'open' && msg.ok) noteOpened(p.runId, msg.result);
-  if (msg.ok) reply(p.sock, { id: p.clientId, ok: true, result: msg.result === undefined ? null : msg.result });
+  if (msg.ok) reply(p.sock, { id: p.clientId, ok: true, result: msg.result === undefined ? null : p.hide ? statusForRun(msg.result, p.hide) : msg.result });
   else {
     let error = String(msg.error ?? 'unknown error from extension');
     // A command an older extension doesn't know yet (sweep, say): say how to get the newer one.

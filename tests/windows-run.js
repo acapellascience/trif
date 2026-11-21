@@ -139,6 +139,9 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
   const ownShot = put(path.join(priv, 'screenshots', 'example.com', 'seen.txt'), 'SHOT-OK from the run\'s own screenshots folder\n');
   const otherShot = put(path.join(priv, 'screenshots', 'other.net', 'seen.txt'), `${SECRET} another site's screenshots\n`);
   put(path.join(ws, 'sites', 'other.net', 'keep.js'), '// ==WebMod==\n// @name Keep\n// @match https://other.net/*\n// ==/WebMod==\n');
+  // A sensitive site's mods (chase.com, on TRIF's list): chats on other sites can't read them (helper/lib/visibility.js),
+  // so they aren't in the run's copy at all, and the fence gives it nothing else of the workspace.
+  put(path.join(ws, 'sites', 'chase.com', 'balance.js'), `// ==WebMod==\n// @match https://chase.com/*\n// ==/WebMod==\n// ${SECRET} a sensitive site's mod\n`);
   // The made-up API key, in the real Credential Manager, saved as `trif agent key` saves one.
   let savedKey = false;
   try {
@@ -188,6 +191,10 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
       inside.secret = read(secretFile);
       inside.settings = read(cfgFile);
       inside.liveState = read(path.join(ws, 'AGENTS.md'));
+      // (another site's mods: an ordinary one's in its copy, to read; a sensitive one's nowhere it can open)
+      inside.ordinary = read(path.join(inside.spec.cwd, 'sites', 'other.net', 'keep.js'));
+      inside.sensitiveCopy = read(path.join(inside.spec.cwd, 'sites', 'chase.com', 'balance.js'));
+      inside.sensitiveLive = read(path.join(ws, 'sites', 'chase.com', 'balance.js'));
       inside.liveMods = js(`require('fs').writeFileSync(${JSON.stringify(path.join(ws, 'sites', 'example.com-planted.js'))}, 'x'); return 'written'`);
       inside.otherSite = js(`require('fs').writeFileSync(${JSON.stringify(path.join(inside.spec.cwd, 'sites', 'other.net', 'planted.js'))}, 'x'); return 'written'`);
       inside.guide = js(`require('fs').appendFileSync(${JSON.stringify(path.join(inside.spec.cwd, 'AGENTS.md'))}, 'x'); return 'written'`);
@@ -234,6 +241,7 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     trif: /^trif: |usage: trif|not available inside a side-panel agent run|inside a side-panel agent run|limited to|isn't one of this run's|unknown|no such|\(exit status [1-9]/im,
     claude: /was blocked|haven't granted|requested permissions|not allowed|denied by your permission settings|outside/i,
     notool: /No such tool available|not available|denied|permission/i,
+    absent: /does not exist|no such file|not found|nothing there/i,
     any: /\w/,
   };
   let steps = [];
@@ -260,13 +268,15 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
       : ['write a mod', { tool: 'Write', input: { file_path: copy('sites', 'example.com', 'hello.js'), content: MOD } }, /created successfully|updated/i],
     ['check the mod', trif('check', 'example.com/hello'), /^ok: /m],
     // (Claude Code's rule for it is in the run's settings file, not in what it's started with)
-    ...(CX ? [] : [['Read a file in the run\'s screenshots folder', { tool: 'Read', input: { file_path: ownShot } }, /SHOT-OK/]]),
+    ...(CX ? [] : [['Read a file in the run\'s screenshots folder', { tool: 'Read', input: { file_path: ownShot } }, /SHOT-OK/],
+      ['Read an ordinary site\'s mod, read-only in its copy', { tool: 'Read', input: { file_path: copy('sites', 'other.net', 'keep.js') } }, /@name Keep/]]),
     ['mods again', trif('mods'), /example\.com\/hello/],
     ...(CX ? [
       ['read_file', tool('read_file', { path: 'sites/example.com/hello.js' }), /@name Hello/],
       ['read_file: the guide', tool('read_file', { path: 'AGENTS.md', limit: 20 }), /\w/],
       ['edit_file', tool('edit_file', { path: 'sites/example.com/hello.js', old: '"hello";', new: '"hello";' }), /^changed sites\/example\.com\/hello\.js/m],
-      ['list_files', tool('list_files', { path: 'sites', depth: 2 }), /sites\/example\.com\/hello\.js[\s\S]*sites\/other\.net\/keep\.js/],
+      ['list_files', tool('list_files', { path: 'sites', depth: 2 }), /^(?![\s\S]*chase\.com)[\s\S]*sites\/example\.com\/hello\.js[\s\S]*sites\/other\.net\/keep\.js/],
+      ['read_file: an ordinary site\'s mod, read-only in its copy', tool('read_file', { path: 'sites/other.net/keep.js' }), /@name Keep/],
       ['search_files', tool('search_files', { pattern: '@name', path: 'sites/example.com' }), /sites\/example\.com\/hello\.js:2: /],
     ] : []),
     ['run code with standard input', CX ? tool('trif', { args: ['check', '-'], stdin: 'let a = 1;\n' }) : { tool: 'mcp__trif__trif', input: { args: ['check', '-'], stdin: 'let a = 1;\n' } }, null],
@@ -284,6 +294,9 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     ['read_file: a file elsewhere in the home folder', tool('read_file', { path: secretFile }), 'files'],
     ['read_file: TRIF\'s settings', tool('read_file', { path: cfgFile }), 'files'],
     ['read_file: the live workspace', tool('read_file', { path: path.join(ws, 'AGENTS.md') }), 'files'],
+    ['read_file: a sensitive site\'s mod, in its copy (not there)', tool('read_file', { path: 'sites/chase.com/balance.js' }), 'files'],
+    ['read_file: a sensitive site\'s mod, in the workspace', tool('read_file', { path: path.join(ws, 'sites', 'chase.com', 'balance.js') }), 'files'],
+    ['search_files: a sensitive site\'s mods, from its copy', tool('search_files', { pattern: 'CANARY', path: 'sites' }), 'any'],
     ['read_file: out of the working folder by ..', tool('read_file', { path: path.join('..', '..', '..', 'TRIF', 'config.json') }), 'files'],
     ['search_files: the home folder', tool('search_files', { pattern: 'CANARY', path: home }), 'any'],
     ['list_files: a folder elsewhere in the home folder', tool('list_files', { path: path.join(home, 'Documents') }), 'files'],
@@ -305,6 +318,9 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     ['Read a file elsewhere in the home folder', { tool: 'Read', input: { file_path: secretFile } }, 'claude'],
     ['Read TRIF\'s settings', { tool: 'Read', input: { file_path: cfgFile } }, 'claude'],
     ['Read the live workspace', { tool: 'Read', input: { file_path: path.join(ws, 'AGENTS.md') } }, 'claude'],
+    ['Read a sensitive site\'s mod, in its copy (not there)', { tool: 'Read', input: { file_path: copy('sites', 'chase.com', 'balance.js') } }, 'absent'],
+    ['Read a sensitive site\'s mod, in the workspace', { tool: 'Read', input: { file_path: path.join(ws, 'sites', 'chase.com', 'balance.js') } }, 'claude'],
+    ['Grep its copy for a sensitive site\'s mod', { tool: 'Grep', input: { pattern: 'CANARY', path: copy('sites'), output_mode: 'content' } }, 'any'],
     ['Read another site\'s screenshots', { tool: 'Read', input: { file_path: otherShot } }, 'claude'],
     ['Grep the home folder', { tool: 'Grep', input: { pattern: 'CANARY', path: home, output_mode: 'content' } }, 'claude'],
     ['Write another site\'s folder', { tool: 'Write', input: { file_path: copy('sites', 'other.net', 'planted.js'), content: '// planted' } }, 'claude'],
@@ -330,7 +346,7 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
     const c = agents.find((a) => a.id === AGENT);
     check(!!c && c.available, `agent.list: ${NAME} is available for panel chats on Windows (${c ? `${c.path} ${c.version || ''}` : 'not listed'})`, JSON.stringify(agents));
     for (const a of agents.filter((x) => x.id !== AGENT && x.path)) console.log(`      (${a.name}: ${a.available ? 'available' : `not available: ${a.note}`})`);
-    const started = await request('agent.start', { agent: AGENT, site: 'example.com', url: 'https://example.com/page', tabId: 12, prompt: 'do the steps', model: CX ? 'standin' : 'claude-haiku-stand-in' });
+    const started = await request('agent.start', { agent: AGENT, site: 'example.com', url: 'https://example.com/page', tabId: 12, prompt: 'do the steps', model: CX ? 'standin' : 'claude-haiku-stand-in', visibility: { hidden: [], shown: [], sensitive: ['chase.com', 'mail.google.com'] } });
     if (check(started.ok === true, 'agent.start', started.error)) {
       plan(path.join(boxes, `${started.result.runId}.ws`));
       const done = await ext.next((m) => m.type === 'agentEvent' && m.runId === started.result.runId && m.event.kind === 'done', { timeout: 300000 }).catch((e) => ({ event: { ok: false, error: e.message } }));
@@ -392,9 +408,11 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
       const refused = (v) => /REFUSED|ERROR|CRED-ERROR/.test(String(v)) && !String(v).includes(SECRET) && !String(v).includes(KEY);
       check(/OUT # /.test(inside.own) || /OUT/.test(inside.own), `  reads its working folder (${String(inside.own).slice(0, 60)})`);
       check(/OUT written/.test(inside.ownSite), `  writes its own site's folder (${inside.ownSite})`);
+      check(/OUT[\s\S]*@name Keep/.test(inside.ordinary), `  reads an ordinary site's mod in its copy (${String(inside.ordinary).replace(/\s+/g, ' ').slice(0, 60)})`);
       for (const [k, what] of [['secret', 'a file elsewhere in the home folder'], ['settings', 'TRIF\'s settings in the private folder'], ['liveState', 'the live workspace'], ['liveMods', 'writing the live mods folder'],
         ['otherSite', 'writing another site\'s folder in its copy'], ['guide', 'writing the guide in its copy'], ['loopback', 'a server on this computer (127.0.0.1)'], ['proxy', 'the model\'s address (the stand-in API) on this computer'],
-        ['internet', 'the internet (1.1.1.1:443)'], ['dns', 'a name lookup (example.com)']]) {
+        ['internet', 'the internet (1.1.1.1:443)'], ['dns', 'a name lookup (example.com)'],
+        ['sensitiveCopy', 'a sensitive site\'s mod: not in its copy'], ['sensitiveLive', 'a sensitive site\'s mod in the workspace']]) {
         check(refused(inside[k]), `  refused: ${what} (${String(inside[k]).replace(/\s+/g, ' ').slice(0, 80)})`);
       }
       check(inside.credOutside.includes(`CRED[${KEY.slice(0, 10)}`) || inside.credOutside.includes(KEY), '  (outside the container the same program reads the API key in Credential Manager)', inside.credOutside.replace(KEY, '<the key>'));
@@ -454,7 +472,7 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
       return { say: 'done' };
     };
     const id = 'sub1';
-    ext.send({ type: 'request', id, cmd: 'agent.start', args: { agent: AGENT, site: 'example.com', url: 'https://example.com/page', tabId: 12, prompt: 'start a helper', model: 'standin' } });
+    ext.send({ type: 'request', id, cmd: 'agent.start', args: { agent: AGENT, site: 'example.com', url: 'https://example.com/page', tabId: 12, prompt: 'start a helper', model: 'standin', visibility: { hidden: [], shown: [], sensitive: ['chase.com', 'mail.google.com'] } } });
     const started = await ext.next((m) => m.type === 'response' && m.id === id, { timeout: 60000 });
     if (check(started.ok === true, '  a second run started', started.error)) {
       const done = await ext.next((m) => m.type === 'agentEvent' && m.runId === started.result.runId && m.event.kind === 'done', { timeout: 300000 }).catch((e) => ({ event: { ok: false, error: e.message } }));
@@ -596,7 +614,7 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
       return { say: 'done' };
     };
     const id = 'def1';
-    ext.send({ type: 'request', id, cmd: 'agent.start', args: { agent: AGENT, site: 'example.com', url: 'https://example.com/page', tabId: 12, prompt: 'do the steps' } });
+    ext.send({ type: 'request', id, cmd: 'agent.start', args: { agent: AGENT, site: 'example.com', url: 'https://example.com/page', tabId: 12, prompt: 'do the steps', visibility: { hidden: [], shown: [], sensitive: ['chase.com', 'mail.google.com'] } } });
     const started = await ext.next((m) => m.type === 'response' && m.id === id, { timeout: 60000 });
     if (check(started.ok === true, '  a third run started, with no model named', started.error)) {
       const done = await ext.next((m) => m.type === 'agentEvent' && m.runId === started.result.runId && m.event.kind === 'done', { timeout: 300000 }).catch((e) => ({ event: { ok: false, error: e.message } }));

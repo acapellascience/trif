@@ -10,7 +10,7 @@ import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOf
   ROBOTLESS, isRobotless, switchableAgents, pastedModName, pastedFileName } from './lib.js';
 import { setMarkdown, unwrapMarkdown } from './markdown.js';
 import { createLogin } from './login.js';
-import { agentLevel, agentSiteOf, sensitiveList } from './agentsites.js';
+import { agentLevel, agentSiteOf, sensitiveList, modsReadable, modsSiteOf } from './agentsites.js';
 import { modIcons, levelWords, modLevel } from './modlevel.js';
 import { iconSvg } from './icons.js';
 import { loadExplain, term, warningByLine, moreText } from './explain.js';
@@ -37,6 +37,7 @@ const QUEUE_WORDS = {
 
 const ui = {
   modsMore: document.getElementById('mods-more'), modsMenu: document.getElementById('mods-menu'), importMod: document.getElementById('import-mod'), pasteMod: document.getElementById('paste-mod'), exportSite: document.getElementById('export-site'),
+  modsReadable: document.getElementById('mods-readable'), modsReadableList: document.getElementById('mods-readable-list'),
   siteFilesBox: document.getElementById('site-files-box'), siteFilesSummary: document.getElementById('site-files-summary'),
   importFile: document.getElementById('import-file'), siteFiles: document.getElementById('site-files'), dropOverlay: document.getElementById('drop-overlay'), dropText: document.getElementById('drop-text'),
   agentLevel: document.getElementById('agent-level'), agentSiteNote: document.getElementById('agent-site-note'),
@@ -753,6 +754,7 @@ function render() {
   renderSites();
   renderAgentLevel();
   renderAgentSites();
+  renderModsReadable();
   renderSiteTools();
   // (the Ask card: this tab's site's only; another site's waits for its own tab, leaveSite)
   const askSite = agentSiteOf(view.tab?.url || '');
@@ -3691,6 +3693,7 @@ function renderSiteTools() {
   const mine = siteOwnMods();
   ui.exportSite.hidden = !mine.length;
   ui.exportSite.textContent = `Export all mods for ${siteScope()}`;
+  renderModsReadableItem();
   if (view.filesFor !== chatSite()) { view.filesFor = chatSite(); loadSiteFiles(); }
 }
 
@@ -3727,6 +3730,54 @@ async function loadSiteFiles() {
     item.append(el('span', null, f.name), x);
     return [item];
   }), ...(files.length > 12 ? [el('span', 'files-more', `and ${files.length - 12} more`)] : []), show);
+}
+
+// ---- "Chats on other sites can read this site's mods" (agentsites.js modsReadable; helper/lib/visibility.js) ----
+// In the ⋯ menu over the site's mods, ticked or not; and in Settings, the sensitive sites with mods and every
+// site chosen for. A chat that's working when it changes keeps what it started with: the panel says so.
+const readableNow = (site) => modsReadable(site, { choices: view.status?.modsReadable || {}, sensitive: sensNow().isSensitive(site) });
+function renderModsReadableItem() {
+  const site = modsSiteOf(siteScope());
+  ui.modsReadable.hidden = !site;
+  if (!site) return;
+  ui.modsReadable.setAttribute('aria-checked', String(readableNow(site).readable));
+}
+async function setModsReadable(site, readable) {
+  let r;
+  try { r = await request({ type: 'modsReadable.set', site, readable }); } catch (e) { request({ type: 'chat.note', site: chatSite(), text: `Couldn't change it: ${e?.message ?? e}` }).catch(() => {}); return; }
+  // (said only while a chat is working: it keeps the copy of the mods it started with)
+  if (r?.running) request({ type: 'chat.note', site: chatSite(), text: readable === false ? `A chat that's working now can still read ${site}'s mods until it's done. The next one can't.` : `A chat that's working now still can't read ${site}'s mods. The next one can.` }).catch(() => {});
+  refreshStatus();
+}
+ui.modsReadable?.addEventListener('click', () => {
+  ui.modsMenu.hidden = true;
+  ui.modsMore.setAttribute('aria-expanded', 'false');
+  const site = modsSiteOf(siteScope());
+  if (site) setModsReadable(site, !readableNow(site).readable);
+});
+function renderModsReadable() {
+  if (!ui.modsReadableList) return;
+  const sens = sensNow();
+  const choices = view.status?.modsReadable || {};
+  // (the sites with mods, by their site: a phone twin's are its site's)
+  const withMods = new Set((view.status?.mods || []).map((m) => String(m.id).split('/')[0].replace(/^phone~/, '')).filter((f) => f && f !== 'all-sites').map((f) => sens.scopeOf(f.replace(/^www\./, ''))));
+  const sites = [...new Set([...[...withMods].filter((x) => sens.isSensitive(x)), ...Object.keys(choices)])].filter((x) => modsSiteOf(x)).sort();
+  const rows = sites.map((site) => [site, readableNow(site).readable]);
+  const key = JSON.stringify(rows);
+  if (ui.modsReadableList.dataset.key === key) return;
+  ui.modsReadableList.dataset.key = key;
+  ui.modsReadableList.replaceChildren(...rows.map(([site, on]) => {
+    const li = el('li');
+    li.dataset.site = site;
+    const label = el('label', 'check');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = on;
+    box.addEventListener('change', () => setModsReadable(site, box.checked));
+    label.append(box, ` ${site}`);
+    li.append(label);
+    return li;
+  }));
 }
 
 // (the ⋯ on the Mods header: inside its summary, so its clicks don't open or close the box)

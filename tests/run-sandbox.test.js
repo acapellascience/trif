@@ -490,11 +490,12 @@ test('Claude Code in TRIF\'s full sandbox, managed settings sending it to anothe
   assert.equal(f.anthropic.requests.length, 0, `the stand-in model was reached:\n${info}`);
   const err = events.find((e) => e.kind === 'error' && e.reason === 'box');
   assert.ok(err, `an error naming what the box refused:\n${info}`);
-  assert.match(err.message, /^TRIF's full sandbox refused .*a connection to 192\.0\.2\.1/, info);
+  // (Seatbelt's report names the port, not always the address: "remote:*:80", CI round 6)
+  assert.match(err.message, /^TRIF's full sandbox refused .*a connection to (port 80|192\.0\.2\.1:80) \(claude\)/, info);
   assert.doesNotMatch(err.message, USUAL, `what every run is refused isn't named:\n${info}`);
-  assert.ok((done.boxRefused || []).some((w) => /192\.0\.2\.1/.test(w)), info);
+  assert.ok((done.boxRefused || []).some((w) => /a connection to (port 80|192\.0\.2\.1:80)/.test(w)), info);
   assert.ok(events.indexOf(err) < events.indexOf(done), 'before done');
-  const line = boxSaw(f, runId, [/a connection to 192\.0\.2\.1/], info);
+  const line = boxSaw(f, runId, [/a connection to (port 80|192\.0\.2\.1:80)/], info);
   assert.ok((line.routine || []).length, `what every run is refused, in the log: ${JSON.stringify(line)}`);
   assert.ok(!done.error || done.error.kind !== 'login', `not a login error:\n${info}`);
 });

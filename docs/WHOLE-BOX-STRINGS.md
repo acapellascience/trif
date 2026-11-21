@@ -59,7 +59,8 @@ nothing: no "Use Claude Code anyway" card, no "no TRIF sandbox" chip.
 - A boxed chat that failed, after the box refused something (round 5, step 3, boxrefusals.js `summary`;
   its own line in the chat, after the run's usual error): **TRIF's full sandbox refused {what}; {what}…
   [; and {n} more (in the run's log)].** Latest first, at most five. Each {what} (`describe`):
-  **reading {path}** · **writing {path}** · **a connection to {host:port}** · **listening on {where}** ·
+  **reading {path}** · **writing {path}** · **a connection to {host:port}** (or **a connection to port {n}**:
+  Seatbelt often reports no address) · **listening on {where}** ·
   **the system service {name}** · **starting {path}** · **another program ({operation})** · otherwise
   Seatbelt's own operation name and target; then the program's name in brackets, e.g. **reading
   ~/.netrc (claude)**. Paths in the home folder start with ~.

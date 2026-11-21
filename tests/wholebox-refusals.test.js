@@ -29,7 +29,9 @@ test('boxrefusals: a report read, said in words, summed up; the proxy\'s refusal
   const d = (op, target, p = 'claude') => br.describe({ process: p, op, target }, { home });
   assert.equal(d('file-read-data', '/Users/a/.ssh/id_rsa'), 'reading ~/.ssh/id_rsa (claude)');
   assert.equal(d('file-write-create', '/Users/ab/x'), 'writing /Users/ab/x (claude)', 'not someone else\'s home as ~');
-  assert.equal(d('network-outbound', '*:443'), 'a connection to 443 (claude)');
+  assert.equal(d('network-outbound', '*:443'), 'a connection to port 443 (claude)');
+  assert.equal(d('network-outbound', 'remote:*:80'), 'a connection to port 80 (claude)', 'as Seatbelt reported it on CI');
+  assert.equal(d('network-outbound', 'remote:192.0.2.1:80'), 'a connection to 192.0.2.1:80 (claude)');
   assert.equal(d('network-outbound', '1.1.1.1:443'), 'a connection to 1.1.1.1:443 (claude)');
   assert.equal(d('mach-lookup', 'com.apple.pasteboard.1', 'osascript'), 'the system service com.apple.pasteboard.1 (osascript)');
   assert.equal(d('process-exec*', '/Applications/X.app/Contents/MacOS/X'), 'starting /Applications/X.app/Contents/MacOS/X (claude)');

@@ -97,7 +97,12 @@ function describe(r, { home = os.homedir() } = {}) {
   let what;
   if (/^file-read/.test(op)) what = `reading ${t}`;
   else if (/^file-write/.test(op)) what = `writing ${t}`;
-  else if (/^network-outbound/.test(op)) what = `a connection to ${t.replace(/^\*:/, '')}`;
+  // (Seatbelt names the far end "remote:<ip>:<port>", or "remote:*:<port>" with no address, CI round 6)
+  else if (/^network-outbound/.test(op)) {
+    const to = t.replace(/^(remote|local):/, '');
+    const port = /^\*:(\d+)$/.exec(to);
+    what = port ? `a connection to port ${port[1]}` : `a connection to ${to}`;
+  }
   else if (/^network-bind/.test(op)) what = `listening on ${t}`;
   else if (op === 'mach-lookup') what = `the system service ${t}`;
   else if (/^process-exec/.test(op)) what = `starting ${t}`;

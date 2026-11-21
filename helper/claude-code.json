@@ -2,6 +2,7 @@
   "_": "TRIF's own Claude Code for runs in TRIF's full sandbox (lib/claudepin.js). From the npm registry; moved by `node helper/lib/claudepin.js pin <version>` after the box tests pass on it, never by hand.",
   "version": "2.1.330",
   "macTeam": "Q6L2SF6YDW",
+  "winSigner": "Anthropic, PBC",
   "packages": {
     "darwin-arm64": {
       "name": "@anthropic-ai/claude-code-darwin-arm64",

@@ -60,10 +60,25 @@ function registry(routes) {
 const pinsFor = (base, rel, integrity, extra = {}) => ({ version: '2.1.999', packages: { [KEY]: { name: 'x', tarball: base + rel, integrity } }, ...extra });
 const leftovers = (home) => { try { return fs.readdirSync(cp.root(home)).filter((x) => x !== 'claude-code-2.1.999-' + KEY); } catch { return []; } };
 
+// What Get-AuthenticodeSignature said for the pinned 2.1.330 on windows-latest (round 9), and what must not pass.
+test('Windows: the pinned claude.exe must be validly signed by Anthropic (Authenticode)', () => {
+  const subject = 'CN="Anthropic, PBC", O="Anthropic, PBC", L=San Francisco, S=California, C=US, SERIALNUMBER=4860621, OID.2.5.4.15=Private Organization';
+  const w = (status, subj) => cp.winSignatureProblem(`${status}\r\n${subj}\r\n`, 'Anthropic, PBC');
+  assert.strictEqual(w('Valid', subject), null);
+  assert.match(w('HashMismatch', subject), /isn't valid \(HashMismatch\)/);
+  assert.match(w('NotSigned', ''), /isn't valid \(NotSigned\)/);
+  assert.match(w('', ''), /no answer/);
+  assert.match(w('Valid', 'CN="Anthropic, PBC", O=Someone Else, C=US'), /isn't signed by Anthropic, PBC/);
+  assert.match(w('Valid', 'CN=Someone, O="Anthropic, PBC", C=US'), /isn't signed by Anthropic, PBC/);
+  assert.match(w('Valid', 'CN="Anthropic, PBC Evil", O="Anthropic, PBC Evil"'), /isn't signed/);
+  assert.match(w('Valid', ''), /no signer/);
+});
+
 test('the pin file: one version, every platform, npm sha512s, registry tarballs of that version', () => {
   const pins = cp.readPins();
   assert.match(pins.version, /^\d+\.\d+\.\d+$/);
   assert.strictEqual(pins.macTeam, 'Q6L2SF6YDW');
+  assert.strictEqual(pins.winSigner, 'Anthropic, PBC');
   for (const key of cp.PLATFORMS) {
     const p = pins.packages[key];
     assert.ok(p, key);

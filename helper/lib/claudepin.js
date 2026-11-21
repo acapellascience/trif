@@ -128,13 +128,36 @@ async function checkSignature(bin, team) {
   return null;
 }
 
+// Windows: Authenticode, read by Windows PowerShell's Get-AuthenticodeSignature (the file's path in the
+// environment, not in the script). Its two lines: the status ("Valid" only when the chain and the file's
+// hash check out) and the signer's subject, whose CN and O must both be `signer` ("Anthropic, PBC", seen on
+// windows-latest for 2.1.330: DigiCert's code-signing CA).
+const WIN_SIG_SCRIPT = '$s = Get-AuthenticodeSignature -LiteralPath $env:TRIF_SIGNED_FILE; [Console]::Out.WriteLine([string]$s.Status); [Console]::Out.WriteLine([string]$s.SignerCertificate.Subject)';
+
+/** What's wrong with Get-AuthenticodeSignature's two lines for `signer`, or null. (Pure: tests.) */
+function winSignatureProblem(out, signer) {
+  const [status = '', subject = ''] = String(out || '').split(/\r?\n/).map((l) => l.trim());
+  if (status !== 'Valid') return `its code signature isn't valid (${status || 'no answer'})`;
+  const q = signer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const has = (k) => new RegExp(`(^|, )${k}=(?:"${q}"|${q})(,|$)`).test(subject);
+  if (!has('CN') || !has('O')) return `it isn't signed by ${signer} (${subject.slice(0, 120) || 'no signer'})`;
+  return null;
+}
+
+async function checkSignatureWin(bin, signer) {
+  const ps = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const r = await run(ps, ['-NoProfile', '-NonInteractive', '-Command', WIN_SIG_SCRIPT], { env: { ...process.env, TRIF_SIGNED_FILE: bin } });
+  if (r.code) return `its code signature couldn't be read (exit ${r.code})`;
+  return winSignatureProblem(r.out, signer);
+}
+
 const inFlight = new Map(); // dest folder -> { promise, listeners }: one download at a time per pin
 
 /**
  * Make sure the pinned Claude Code is in <home>/runtime, downloading it if not. Resolves
  * { bin, dir, version, key, fetched }; throws PinError, leaving nothing behind, when this platform has no
- * pin, the download fails, its checksum isn't the pinned one, it has no binary, or (macOS) the binary
- * isn't Anthropic's. `onProgress(bytes, total)` (total 0 if unknown) as the tarball comes in: every caller's,
+ * pin, the download fails, its checksum isn't the pinned one, it has no binary, or (macOS, Windows) the
+ * binary isn't Anthropic's. `onProgress(bytes, total)` (total 0 if unknown) as the tarball comes in: every caller's,
  * the one download shared (the setting's background download and a run's check may ask at once).
  */
 function ensurePinned(home, opts = {}) {
@@ -191,6 +214,10 @@ async function ensureOnce(home, { pins, platform, arch, key, dest, tar = systemT
     if (!isFile(from)) throw new PinError(`the Claude Code ${pins.version} package has no program in it`);
     if (platform === 'darwin' && pins.macTeam) {
       const bad = await checkSignature(from, pins.macTeam);
+      if (bad) throw new PinError(`not using the downloaded Claude Code ${pins.version}: ${bad}`);
+    }
+    if (platform === 'win32' && pins.winSigner) {
+      const bad = await checkSignatureWin(from, pins.winSigner);
       if (bad) throw new PinError(`not using the downloaded Claude Code ${pins.version}: ${bad}`);
     }
     const out = path.join(tmp, 'out');
@@ -271,7 +298,7 @@ function getJson(url) {
  * integrity, checked against the main package's optionalDependencies (all the same version). Release step,
  * after the box tests pass on that version.
  */
-async function makePins(version, { registry = REGISTRY, platforms = PLATFORMS, macTeam = 'Q6L2SF6YDW', get = getJson } = {}) {
+async function makePins(version, { registry = REGISTRY, platforms = PLATFORMS, macTeam = 'Q6L2SF6YDW', winSigner = 'Anthropic, PBC', get = getJson } = {}) {
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new PinError(`${version} isn't a Claude Code version (x.y.z)`);
   const main = await get(`${registry}@anthropic-ai%2fclaude-code/${version}`);
   const deps = main.optionalDependencies || {};
@@ -287,7 +314,7 @@ async function makePins(version, { registry = REGISTRY, platforms = PLATFORMS, m
   }
   return {
     _: "TRIF's own Claude Code for runs in TRIF's full sandbox (lib/claudepin.js). From the npm registry; moved by `node helper/lib/claudepin.js pin <version>` after the box tests pass on it, never by hand.",
-    version, macTeam, packages,
+    version, macTeam, winSigner, packages,
   };
 }
 
@@ -308,5 +335,5 @@ if (require.main === module && process.argv[2] === 'ensure') {
 
 module.exports = {
   PIN_FILE, MARK, PLATFORMS, PinError, readPins, pinsInUse, platformKey, root, dirName, binName,
-  installedPinned, ensurePinned, pinning, checkPinned, prunePinned, makePins, download, checkSignature,
+  installedPinned, ensurePinned, pinning, checkPinned, prunePinned, makePins, download, checkSignature, winSignatureProblem,
 };

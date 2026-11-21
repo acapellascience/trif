@@ -127,3 +127,41 @@ export function agentCheck(cmd, hostOrUrl, settings) {
   const why = lv.by === 'sensitive' ? ` (it's ${lv.why || 'on TRIF\'s list of sensitive sites'}, so it's off unless the user raises it)` : '';
   return `"Agent on this site" is Off for ${lv.site}${why}: you can't read, screenshot or run code on its tabs. You can still write mods for it (any that can do more than change the page wait for the user's OK, as usual); the user can change the setting in TRIF's side panel`;
 }
+
+// ---- "Chats on other sites can read this site's mods" ----------------------------------------------------
+// A side-panel chat works in a copy of the mods folder that holds every site's mods, other sites' to read
+// only (docs/STAGING.md): an agent looks at the mods its change will meet. Per site, the user can keep a
+// site's mods out of other sites' chats: on by default, off by default for a sensitive site (the list above,
+// or the user's; each sensitive host a site of its own). Off, the site isn't in another site's chat at all
+// (helper/lib/visibility.js, which has the rule; the extension sends it the choices, modsVisibility).
+// The panel's ⋯ menu over a site's mods, and Settings. A chat working when it changes keeps what it has.
+
+/** A site as the choice names it: lower case, without a leading www.; '' when it isn't one. */
+export function modsSiteOf(site) {
+  const s = String(site || '').trim().toLowerCase().replace(/\.$/, '').replace(/^www\./, '');
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(s) ? s : '';
+}
+
+/** Clean what storage holds: {site: true | false}, the user's choices. */
+export function normalizeModsReadable(v) {
+  const out = {};
+  if (v && typeof v === 'object' && !Array.isArray(v)) for (const [k, b] of Object.entries(v)) { const s = modsSiteOf(k); if (s && typeof b === 'boolean') out[s] = b; }
+  return out;
+}
+
+/**
+ * Whether chats on other sites can read `site`'s mods: {readable, by: 'user' | 'sensitive' | 'default'}.
+ * `sensitive`: whether the site is a sensitive one (lib.js sensitiveSites isSensitive).
+ */
+export function modsReadable(site, { choices = {}, sensitive = false } = {}) {
+  const s = modsSiteOf(site);
+  if (s && typeof choices[s] === 'boolean') return { readable: choices[s], by: 'user' };
+  return sensitive ? { readable: false, by: 'sensitive' } : { readable: true, by: 'default' };
+}
+
+/** What a run is told (agent.start `visibility`): the user's choices, and the sensitive list's patterns. */
+export function modsVisibility({ choices = {}, sensitive = null } = {}) {
+  const c = normalizeModsReadable(choices);
+  const sites = (want) => Object.keys(c).filter((s) => c[s] === want).sort();
+  return { hidden: sites(false), shown: sites(true), sensitive: sensitiveList(sensitive).map((x) => x.pattern) };
+}

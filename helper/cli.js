@@ -205,6 +205,18 @@ function optionPath(ctx, file, { write = false } = {}) {
   return target;
 }
 
+/**
+ * Whether a mod id's site is one the CLI may tell of: anywhere but in a side-panel agent run, only a site whose
+ * folder is in the run's copy (TRIF_RUN_MODS_DIR). Another site whose mods chats on other sites may not read
+ * isn't there (helper/lib/visibility.js), and its trash and history aren't the run's to list either.
+ */
+function inRunCopy(ctx, id) {
+  if (!envVar('RUN_BOX')) return true;
+  const site = String(id || '').split('/')[0];
+  if (!site || badName(site)) return false;
+  try { return fs.lstatSync(path.join(ctx.ws.modsDir, site)).isDirectory(); } catch { return false; }
+}
+
 /** Write a file the CLI was told to (-o, screenshots): in a run, never through a link left in its place. */
 function writeOptionFile(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -448,6 +460,8 @@ const handlers = {
     let file = pos[0];
     if (!fs.existsSync(file) && /^[^/\s]+\/[^/\s]+$/.test(file.replace(/\.js$/, ''))) file = path.join(ctx.ws.modsDir, `${file.replace(/\.js$/, '')}.js`);
     file = optionPath(ctx, file);
+    // (no such file: said plainly. In a run, another site's mods the run may not read aren't in its copy at all)
+    if (!fs.existsSync(file)) throw new UsageError(`no such file: ${file}`);
     let code = fs.readFileSync(file, 'utf8');
     const header = require('./lib/mods').parseHeader(code);
     // (its style section, lib/stylesection.js: checked, then taken out, as TRIF does before it reads the code)
@@ -754,7 +768,7 @@ const handlers = {
 
   async restore(ctx, pos) {
     if (!pos[0]) {
-      const items = trash.listTrash(ctx.ws);
+      const items = trash.listTrash(ctx.ws).filter((t) => inRunCopy(ctx, t.id));
       if (ctx.json) return printJson({ trash: items });
       if (!items.length) return out('the trash is empty');
       for (const t of items) out(`${t.id}  deleted ${new Date(t.deletedAt).toLocaleString()}`);
@@ -830,7 +844,7 @@ const handlers = {
     if (!pos[0]) throw new UsageError('usage: trif history <site>/<mod>');
     const id = modId(pos[0]);
     const historyLib = require('./lib/history');
-    const r = { id, entries: historyLib.listHistory(ctx.ws, id).map((e) => ({ at: e.at, kind: e.kind })) }; // (works without the browser)
+    const r = { id, entries: inRunCopy(ctx, id) ? historyLib.listHistory(ctx.ws, id).map((e) => ({ at: e.at, kind: e.kind })) : [] }; // (works without the browser)
     if (ctx.json) return printJson(r);
     if (!r.entries.length) return out(`(no changes kept for ${r.id}: only side-panel runs' changes are, for 30 days)`);
     out(`${r.id}: what side-panel runs changed, newest first (trif undo ${r.id} puts back the newest)`);
@@ -1039,7 +1053,9 @@ const handlers = {
     const plan = planMods(mods);
     const errors = [...problems, ...plan.errors];
     const { enabled, offSites, newOff, broken } = await knownSwitches(ctx);
-    const held = loadHeld(ctx.ws.home);
+    // (in a side-panel run, from the helper, which tells it of its own site's alone: the workspace's
+    // held.json names every site's, and a run that hides another site's mods can't read it, runs.js hiddenPaths)
+    const held = envVar('RUN_TOKEN') ? await runHeld(ctx) : loadHeld(ctx.ws.home);
     const isHeld = (m) => held[m.id] && held[m.id].hash === m.hash;
     const updates = shipped.pendingUpdates(ctx.ws.home, mods);
     const shipsOff = shipped.startOffIds(ctx.ws.home); // off because TRIF ships them off, not the user's doing
@@ -1233,6 +1249,11 @@ function brokenText(list) {
   if (errs.length) parts.push(`NEW ERROR${errs.length > 1 ? `S (${errs.length})` : ''}${errs[0].line ? ` at line ${errs[0].line}` : ''}: ${String(errs[0].message).slice(0, 160)}`);
   if (quiet.length) parts.push('MAY BE BROKEN: nothing it looks for is on the page any more');
   return `${parts.join('; ')} (trif errors --tab <id> for the details; the user can ignore it in the side panel)`;
+}
+
+/** A side-panel run's holds, as the helper tells it (`ping`: its own site's), or none. */
+async function runHeld(ctx) {
+  try { const info = await ctx.call('ping', {}, 3000); return (info && info.held && typeof info.held === 'object') ? info.held : {}; } catch { return {}; }
 }
 
 async function knownSwitches(ctx) {

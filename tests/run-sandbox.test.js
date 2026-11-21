@@ -114,6 +114,12 @@ async function setup() {
   // Another site's mods: read-only to runs (the sandbox's doing, runs.js runLimits readOnly).
   fs.mkdirSync(path.join(ws, 'sites', 'other.net'), { recursive: true });
   fs.writeFileSync(path.join(ws, 'sites', 'other.net', 'keep.js'), '// ==WebMod==\n// @name Keep\n// @match https://other.net/*\n// ==/WebMod==\n');
+  // A sensitive site's mods (chase.com: TRIF's list), which chats on other sites can't read (helper/lib/visibility.js):
+  // not in a run's copy at all, and denied in the workspace, its trash too.
+  fs.mkdirSync(path.join(ws, 'sites', 'chase.com'), { recursive: true });
+  fs.writeFileSync(path.join(ws, 'sites', 'chase.com', 'balance.js'), `// ==WebMod==\n// @match https://chase.com/*\n// ==/WebMod==\n// ${SECRET}\n`);
+  fs.mkdirSync(path.join(ws, 'trash', 'chase.com'), { recursive: true });
+  fs.writeFileSync(path.join(ws, 'trash', 'chase.com', 'gone@20261101T000000000Z.js'), `// ${SECRET}\n`);
   await keys.setAgentKey('claude', KEY, { env: kc.env });
   await keys.setAgentKey('codex', OAI_KEY, { env: kc.env });
   // Stand-in models: each POST takes the next step of its script (filled in by each test).
@@ -155,7 +161,8 @@ async function extRequest(ext, cmd, args = {}) {
   return ext.next((m) => m.type === 'response' && m.id === id);
 }
 async function runAgent(f, { agent, site, tabId, model }) {
-  const r = await extRequest(f.ext, 'agent.start', { agent, site, url: `https://${site}/page`, tabId, prompt: 'probe the sandbox', ...(model ? { model } : {}) });
+  // (with what the extension sends of which sites' mods it may read: chase.com is a sensitive one)
+  const r = await extRequest(f.ext, 'agent.start', { agent, site, url: `https://${site}/page`, tabId, prompt: 'probe the sandbox', visibility: { hidden: [], shown: [], sensitive: ['chase.com', 'mail.google.com'] }, ...(model ? { model } : {}) });
   assert.equal(r.ok, true, r.error);
   const done = await f.ext.next((m) => m.type === 'agentEvent' && m.runId === r.result.runId && m.event.kind === 'done', { timeout: 100000 });
   const events = f.ext.messages.filter((m) => m.type === 'agentEvent' && m.runId === r.result.runId).map((m) => m.event);
@@ -202,10 +209,20 @@ function checkTrif(results, info) {
 // Who refuses what, by what each says: the sandbox (Seatbelt: EPERM), the agent's own rules, `trif`'s.
 const BY = {
   sandbox: /operation not permitted|\bEPERM\b/i,
-  claude: /was blocked|haven't granted|requested permissions|not allowed/i,
+  claude: /was blocked|haven't granted|requested permissions|not allowed|denied by your permission settings|has been denied/i,
   trif: /not available inside a side-panel agent run|inside a side-panel agent run, files are read only in/,
   curl: /curl: \(7\)/, // (couldn't connect)
+  absent: /no such file/i, // (not there at all: a hidden site's mods in the run's copy)
 };
+
+function checkReads(named, reads, info) {
+  for (const [i, x] of reads.entries()) {
+    const got = named[i];
+    assert.equal(got.code, 0, `\`${got.cmd}\` should have worked:\n${info}`);
+    assert.match(got.out, x.has, `\`${got.cmd}\`:\n${info}`);
+    if (x.hasNot) assert.doesNotMatch(got.out, x.hasNot, `\`${got.cmd}\` shows what the run may not read:\n${info}`);
+  }
+}
 
 function checkRefused(named, refused, info) {
   for (const [i, x] of refused.entries()) {
@@ -233,18 +250,26 @@ test('Claude Code: real `trif` commands work in a side-panel run\'s sandbox; the
     { cmd: `trif check ${q(path.join(f.code, '.git', 'config'))}`, by: 'trif' },
     { cmd: 'trif agent key --agent claude', by: 'trif' },
     { cmd: 'trif new other.net probe --style', by: 'sandbox' },
+    // A sensitive site's mods: by their place in the workspace (Claude Code's rules), and in the run's copy (not there).
+    { tool: 'Read', input: { file_path: path.join(f.ws, 'sites', 'chase.com', 'balance.js') }, by: 'claude' },
+    { cmd: `ls ${q(path.join(f.ws, 'trash', 'chase.com'))}`, by: 'claude' },
+    { cmd: 'ls sites/chase.com', by: 'absent' },
+    { cmd: `trif check ${q(path.join(f.ws, 'sites', 'chase.com', 'balance.js'))}`, by: 'absent' },
   ];
-  const steps = [...commands.map((c) => ({ bash: c })), ...refused.map((x) => (x.tool ? { tool: x.tool, input: x.input } : { bash: x.cmd })), { say: 'Done: probed.' }];
+  // (and what it may read: another, ordinary site's mods, in its copy)
+  const reads = [{ cmd: 'ls sites', has: /other\.net/, hasNot: /chase\.com/ }, { cmd: `trif check ${q(path.join(f.ws, 'sites', 'other.net', 'keep.js'))}`, has: /^ok: /m }];
+  const steps = [...commands.map((c) => ({ bash: c })), ...refused.map((x) => (x.tool ? { tool: x.tool, input: x.input } : { bash: x.cmd })), ...reads.map((x) => ({ bash: x.cmd })), { say: 'Done: probed.' }];
   setScript(f.anthropicScript, steps);
   const { done, events } = await runAgent(f, { agent: 'claude', site, tabId: 12 });
   const results = claudeResults(f.anthropic);
-  const labels = [...commands, ...refused.map((x) => x.cmd || `${x.tool} ${x.input.file_path}`)];
+  const labels = [...commands, ...refused.map((x) => x.cmd || `${x.tool} ${x.input.file_path}`), ...reads.map((x) => x.cmd)];
   const named = results.map((x, i) => ({ ...x, cmd: labels[i] || '?' }));
   const info = report(named, `events: ${JSON.stringify(events).slice(0, 2000)}\nhelper.log:\n${helperLog(f)}`);
   assert.equal(done.ok, true, info);
   assert.equal(results.length, labels.length, `every step ran:\n${info}`);
   checkTrif(named.slice(0, commands.length), info);
-  checkRefused(named.slice(commands.length), refused, info);
+  checkRefused(named.slice(commands.length, commands.length + refused.length), refused, info);
+  checkReads(named.slice(commands.length + refused.length), reads, info);
   assert.ok(!fs.existsSync(path.join(f.ws, 'sites', 'other.net', 'probe.js')));
   assert.ok(!JSON.stringify(f.anthropic.requests.map((x) => x.body)).includes(SECRET), `something secret reached the model:\n${info}`);
 });
@@ -264,17 +289,25 @@ test('Codex: real `trif` commands work in a side-panel run\'s sandbox; the priva
     { cmd: `cat ${q(path.join(f.code, 'extension', 'manifest.json'))}`, by: 'sandbox' },
     { cmd: 'trif agent key --agent codex', by: 'trif' },
     { cmd: 'trif new other.net probe --style', by: 'sandbox' },
+    // A sensitive site's mods: denied in the workspace (its folder, the mods folder's list, its trash), and
+    // not in the run's copy at all.
+    { cmd: `cat ${q(path.join(f.ws, 'sites', 'chase.com', 'balance.js'))}`, by: 'sandbox' },
+    { cmd: `ls ${q(path.join(f.ws, 'sites'))}`, by: 'sandbox' },
+    { cmd: `cat ${q(path.join(f.ws, 'trash', 'chase.com', 'gone@20261101T000000000Z.js'))}`, by: 'sandbox' },
+    { cmd: 'cat sites/chase.com/balance.js', by: 'absent' },
     // The network: not even the model's stand-in on 127.0.0.1, nor the helper's socket.
     { cmd: `curl -sS -m 5 ${f.openai.url}/api/version`, by: 'curl' },
     { cmd: `${q(node)} -e ${q("require('net').connect(process.argv[1]).on('connect',()=>{console.log('CONNECTED');process.exit(0)}).on('error',(e)=>{console.log('socket: '+e.message);process.exit(1)})")} ${q(path.join(f.ws, 'helper.sock'))}`, by: 'sandbox' },
   ];
   // (each command's output and exit status in one stream: 2>&1, then the status on a line of its own)
   const wrap = (c) => `${c} 2>&1; echo "[exit=$?]"`;
-  setScript(f.openaiScript, [...commands.map((c) => ({ run: wrap(c) })), ...refused.map((x) => ({ run: wrap(x.cmd) })), { say: 'Done: probed.' }]);
+  // (and what it may read: another, ordinary site's mods, in its copy)
+  const reads = [{ cmd: 'ls sites', has: /other\.net/, hasNot: /chase\.com/ }, { cmd: 'cat sites/other.net/keep.js', has: /@name Keep/ }];
+  setScript(f.openaiScript, [...commands.map((c) => ({ run: wrap(c) })), ...refused.map((x) => ({ run: wrap(x.cmd) })), ...reads.map((x) => ({ run: wrap(x.cmd) })), { say: 'Done: probed.' }]);
   // (a model of its own name: Codex offers its shell tool to a model it has no catalog entry for)
   const { done, events } = await runAgent(f, { agent: 'codex', site, tabId: 13, model: 'stand-in' });
   const outs = f.openai.toolOutputs();
-  const labels = [...commands, ...refused.map((x) => x.cmd)];
+  const labels = [...commands, ...refused.map((x) => x.cmd), ...reads.map((x) => x.cmd)];
   const named = outs.map((o, i) => {
     const m = /\[exit=(\d+)\]\s*$/.exec(o);
     return { cmd: labels[i] || '?', code: m ? Number(m[1]) : -1, out: o };
@@ -285,7 +318,8 @@ test('Codex: real `trif` commands work in a side-panel run\'s sandbox; the priva
   assert.equal(done.ok, true, info);
   assert.equal(outs.length, labels.length, `every step ran:\n${info}`);
   checkTrif(named.slice(0, commands.length), info);
-  checkRefused(named.slice(commands.length), refused, info);
+  checkRefused(named.slice(commands.length, commands.length + refused.length), refused, info);
+  checkReads(named.slice(commands.length + refused.length), reads, info);
   assert.ok(!fs.existsSync(path.join(f.ws, 'sites', 'other.net', 'probe.js')));
   assert.ok(!JSON.stringify(f.openai.requests.map((x) => x.body)).includes(SECRET), `something secret reached the model:\n${info}`);
 });

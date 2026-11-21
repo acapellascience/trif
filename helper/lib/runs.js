@@ -1281,13 +1281,19 @@ class Runs {
     }
     if (run.shuttingDown) this._emit(run, { kind: 'error', message: 'the helper shut down (Chrome closed?) before the agent finished' });
     // TRIF's full sandbox (docs/WHOLE-BOX.md step 3): what the box refused, in the run's log; a run that
-    // failed names it (an error of its own, reason "box"), so it isn't a mystery.
+    // failed names it (an error of its own, reason "box"), so it isn't a mystery. What every boxed run is
+    // refused (boxrefusals.js ROUTINE) is only in the log (`routine`): it's never why a run failed.
     if (run.boxWatch || run.proxySeen) {
       const br = require('./boxrefusals');
       try { run.boxWatch && run.boxWatch.close(); } catch { /* gone */ }
-      const refused = this._boxRefusals(run);
+      const all = this._boxRefusals(run);
+      let ctx = null;
+      try { ctx = br.routineContext({ privateDir: run.ws.private, workspace: run.ws.home, agentTmp: run.agentTmp }); } catch { /* none routine */ }
+      const refused = all.filter((r) => !br.routine(r, ctx));
+      const routine = all.filter((r) => br.routine(r, ctx)).map((r) => br.describe(r));
       const words = refused.map((r) => br.describe(r));
-      if (refused.length || (run.boxWatch && run.boxWatch.unavailable())) this._log(run, { webmods: 'boxRefused', refused: words, ...(run.boxWatch && run.boxWatch.unavailable() ? { unwatched: run.boxWatch.unavailable() } : {}), time: Date.now() });
+      const unwatched = run.boxWatch && run.boxWatch.unavailable();
+      if (all.length || unwatched) this._log(run, { webmods: 'boxRefused', refused: words, ...(routine.length ? { routine } : {}), ...(unwatched ? { unwatched } : {}), time: Date.now() });
       if (refused.length && !done.ok && !run.stopped && !run.loginFailed) {
         this._emit(run, { kind: 'error', reason: 'box', refused: words.slice(-br.MAX), message: br.summary(refused) });
         done.boxRefused = words.slice(-br.MAX);

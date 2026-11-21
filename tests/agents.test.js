@@ -421,7 +421,7 @@ test('claude adapter: the run\'s own temporary folder, and no reading or writing
   const limits = { workspace: '/h', home: '/Users/u', readable: ['/h'], privateDir: '/p', box: '/c/boxes/r1', screenshots: '/p/screenshots/x.com',
     agentTmp: '/tmp/trif-r1', systemTemp: ['/private/tmp/claude-501', '/private/var/folders/xx/T'] };
   const c = claude.command({ bin: '/x/claude', prompt: 'hi', agentDir: '/c/boxes/r1.agent', ...limits });
-  assert.deepEqual(c.env, { CLAUDE_CODE_TMPDIR: '/tmp/trif-r1', TMPDIR: '/tmp/trif-r1' });
+  assert.deepEqual(c.env, { CLAUDE_CODE_TMPDIR: '/tmp/trif-r1', TMPDIR: '/tmp/trif-r1', TMPPREFIX: '/tmp/trif-r1/zsh' });
   const fsb = JSON.parse(c.files[0].content).sandbox.filesystem;
   for (const t of limits.systemTemp) {
     assert.ok(fsb.denyRead.includes(t), `denyRead ${t}`);

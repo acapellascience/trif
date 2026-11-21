@@ -14,6 +14,10 @@
 // Reports are best effort: the kernel doesn't report every refusal (CI, round 5: a Write tool's refused
 // write had none, the refusals around it did), and the same operation on the same file is kept once.
 //
+// What every boxed run is refused along the way (`routine`: CI, round 5, real pinned Claude Code runs that
+// worked) is kept in the run's log but left out of a failed run's error, which names only the rest: what
+// a run that worked wasn't refused is what may have made this one fail.
+//
 // Nothing here is secret (paths and host names the box refused), but paths in the home folder are shown
 // with ~ and the list is capped.
 
@@ -24,6 +28,50 @@ const MAX = 50; // refusals kept per run
 const SHOWN = 5; // named in the run's error
 // (made by every program, refused or not, and never why a run failed)
 const NOISE = [/(^|:)\/dev\/dtracehelper\b/];
+
+const unPrivate = (p) => String(p || '').replace(/^\/private(?=\/(tmp|var|etc)(\/|$))/, '');
+const under = (p, dir) => !!dir && (p === dir || p.startsWith(dir + '/'));
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Refusals every boxed run has (round 5's CI: the real pinned Claude Code, runs that worked), none of them
+ * why a run fails. Each: the operation, who (any program when absent) and what, given the run's folders
+ * (ctx: homes, the private folder, the workspace, Claude Code's temporary folder). Kept narrow: anything
+ * else the box refuses is named in a failed run's error.
+ */
+const ROUTINE = [
+  // (every program using macOS's notification and preference machinery)
+  { op: /^ipc-posix-shm-read/, target: () => /^apple\.shm\.notification_center$/ },
+  { op: /^file-read/, target: (c) => new RegExp(`^(${c.homes.map(esc).join('|')})/(\\.CFUserTextEncoding|Library/Preferences/\\.GlobalPreferences(_m)?\\.plist|Library/Preferences/ByHost/\\.GlobalPreferences\\.[\\w-]+\\.plist)$`) },
+  // (Claude Code and `security`, looking for a keychain login a boxed run doesn't use; analytics; file events)
+  { op: /^mach-lookup$/, target: () => /^com\.apple\.(analyticsd|SecurityServer|securityd\.xpc|FSEvents)$/ },
+  // (Xcode's `git` shim finding its tools: Claude Code asks git about the folder)
+  { op: /^file-read/, target: () => /^(\/Applications\/Xcode[^/]*\.app\/Contents\/Developer|\/Library\/Developer\/CommandLineTools)\/usr\/lib(\/libxcrun\.dylib)?$/ },
+  // (Claude Code: sockets in its temporary folder; its plugins and cache folders; ~/.claude, ~/.config)
+  { op: /^network-bind/, who: /^claude$/, target: (c) => c.agentTmp && new RegExp(`^${esc(c.agentTmp)}/(cc-socks/\\d+|srt-mux-\\d+-\\d+)\\.sock$`) },
+  { op: /^file-write/, who: /^claude$/, target: (c) => c.privateDir && new RegExp(`^${esc(c.privateDir)}/agent-config/claude/plugins$`) },
+  { op: /^file-write/, who: /^claude$/, target: (c) => new RegExp(`^(${c.homes.map(esc).join('|')})/(Library/Caches/claude-cli-nodejs|\\.claude|\\.config)$`) },
+  // (TRIF's own CLI, `trif`, looking for files it can do without in the box)
+  { op: /^file-read/, who: /^node$/, target: (c) => c.privateDir && new RegExp(`^${esc(c.privateDir)}/(config\\.json|helper\\.log)$`) },
+  { op: /^file-read/, who: /^node$/, target: (c) => c.workspace && new RegExp(`^${esc(c.workspace)}/preinstalled\\.json$`) },
+];
+
+/**
+ * The run's folders for `routine` (runs.js): {homes, privateDir, workspace, agentTmp}, /private/… as /….
+ * homes: $HOME's and the account's own (macOS's `security` reads the account's, whatever $HOME says).
+ */
+function accountHome() { try { return os.userInfo().homedir; } catch { return null; } }
+function routineContext({ homes = [os.homedir(), accountHome()], privateDir, workspace, agentTmp } = {}) {
+  const clean = (p) => (p ? unPrivate(String(p).replace(/\/+$/, '')) : null);
+  return { homes: [...new Set(homes.filter(Boolean).map(clean))], privateDir: clean(privateDir), workspace: clean(workspace), agentTmp: clean(agentTmp) };
+}
+
+/** Whether a refusal is one every boxed run has (ROUTINE), given routineContext(...). The proxy's never are. */
+function routine(r, ctx) {
+  if (!r || r.kind === 'proxy' || !ctx) return false;
+  const t = unPrivate(r.target);
+  return ROUTINE.some((x) => x.op.test(r.op || '') && (!x.who || x.who.test(r.process || '')) && (() => { const re = x.target(ctx); return !!re && re.test(t); })());
+}
 
 /** The run's tag in its profile and the reports: letters, digits and dashes only (it goes into SBPL). */
 function tagFor(runId) {
@@ -84,7 +132,7 @@ function watch(tag, { spawnLog = (args) => spawn('/usr/bin/log', args, { stdio: 
   const ready = new Promise((r) => { setReady = r; });
   const add = (r) => {
     if (!r || NOISE.some((re) => re.test(r.target))) return;
-    const k = `${r.op} ${r.target}`;
+    const k = `${r.process || ''} ${r.op} ${r.target}`; // (the same file refused to two programs: both)
     if (keys.has(k) || found.length >= MAX) return;
     keys.add(k);
     found.push(r);
@@ -133,4 +181,4 @@ function fromProxy(seen) {
   return (seen || []).filter((x) => !x.allowed).map((x) => ({ kind: 'proxy', target: String(x.target).slice(0, 200) }));
 }
 
-module.exports = { tagFor, parseReport, describe, summary, watch, fromProxy, NOISE, MAX };
+module.exports = { tagFor, parseReport, describe, summary, watch, fromProxy, routine, routineContext, ROUTINE, NOISE, MAX };

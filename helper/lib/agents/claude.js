@@ -240,7 +240,9 @@ const adapter = {
     // Claude Code's own temporary folder (its commands' sandbox may always write there): the run's own
     // (runs.js runLimits agentTmp), not /tmp/claude-<uid>, which every Claude Code session on the computer
     // shares (their scratch files and task output: a run's commands could write into them, 2.1.316).
-    const env = limits.agentTmp ? { CLAUDE_CODE_TMPDIR: limits.agentTmp, TMPDIR: limits.agentTmp } : {};
+    // (and zsh's here-documents, which ignore TMPDIR and go to /tmp/zsh… otherwise: refused in TRIF's full
+    // sandbox, round 5's CI; codex.js does the same)
+    const env = limits.agentTmp ? { CLAUDE_CODE_TMPDIR: limits.agentTmp, TMPDIR: limits.agentTmp, TMPPREFIX: `${limits.agentTmp}/zsh` } : {};
     return { file: bin || adapter.binary, args, stdin: prompt, files, env, locked: (limits.lockedDirs || []).filter((d) => !d.link).map((d) => d.rel) };
   },
 

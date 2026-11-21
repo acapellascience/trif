@@ -53,7 +53,7 @@ const CLAUDE = MAC ? realClaude() : null;
 const CODEX = MAC ? realCodex() : null;
 const skipWhy = (bin, name) => (!MAC ? 'macOS only (the run sandboxes are Seatbelt there; Linux runs are untested here)' : !bin ? `needs ${name} installed (not on CI)` : false);
 
-const MANAGED_TEST = process.env.TRIF_TEST_MANAGED || ''; // (CI only: sandbox-on, sandbox-on-no-mcp, loosen, loosen-shell)
+const MANAGED_TEST = process.env.TRIF_TEST_MANAGED || ''; // (CI only: sandbox-on, sandbox-on-no-mcp, loosen, loosen-shell, gateway)
 const SECRET = `secret-${crypto.randomBytes(8).toString('hex')}`; // in every file runs must not read
 const KEY = `sk-ant-fake-${crypto.randomBytes(12).toString('hex')}`;
 const OAI_KEY = `sk-fake-${crypto.randomBytes(12).toString('hex')}`;
@@ -385,11 +385,16 @@ function notAsked(f, runId, events, info) {
 }
 // Step 3: what the box refused, read from Seatbelt's reports (boxrefusals.js), is in the run's log; printed
 // too, so CI shows what a run that worked was refused along the way (what a failed run's error would name).
+// (3b: what every boxed run is refused, boxrefusals.js ROUTINE, is kept apart, `routine`: never in `refused`)
+const USUAL = /notification_center|CFUserTextEncoding|GlobalPreferences|libxcrun|cc-socks|com\.apple\.(analyticsd|SecurityServer|securityd\.xpc|FSEvents)|claude-cli-nodejs/;
 function boxSaw(f, runId, expected, info) {
   const line = runLog(f, runId).find((x) => x.webmods === 'boxRefused');
   console.log(`# the box refused (run ${runId}): ${JSON.stringify(line || null)}`);
   assert.ok(line && !line.unwatched, `the box's refusals watched:\n${JSON.stringify(line)}\n${info}`);
-  for (const re of expected) assert.ok(line.refused.some((w) => re.test(w)), `${re} among the box's refusals: ${JSON.stringify(line.refused)}`);
+  const seen = [...line.refused, ...(line.routine || [])];
+  for (const re of expected) assert.ok(seen.some((w) => re.test(w)), `${re} among the box's refusals: ${JSON.stringify(line)}`);
+  assert.deepStrictEqual(line.refused.filter((w) => USUAL.test(w)), [], `what every run is refused, apart (routine): ${JSON.stringify(line)}`);
+  return line;
 }
 test('Claude Code in TRIF\'s full sandbox, no shell: managed settings force its own sandbox on (or let it run any command), so the run has no Bash and every `trif` command works through the trif tool, still boxed', { skip: NO_SHELL_SKIP || (!['sandbox-on', 'loosen'].includes(MANAGED_TEST) && 'TRIF_TEST_MANAGED=sandbox-on or loosen only') }, async () => {
   const f = await setup();
@@ -468,6 +473,30 @@ test('Claude Code in TRIF\'s full sandbox, managed settings that only loosen its
   // (not every refusal is reported: round 5's CI had none for the Write; boxrefusals.js)
   boxSaw(f, runId, [/^reading .*config\.json/, /^reading .*login\.keychain-db/, /^writing .*other\.net/], info);
   assert.ok(!JSON.stringify(f.anthropic.requests.map((x) => x.body)).includes(SECRET), `something secret reached the model:\n${info}`);
+});
+
+// Step 3b: a run the box makes fail, for real. An organization's settings send Claude Code to a host of
+// their own (an LLM gateway: here an address nobody answers on, 192.0.2.1, TEST-NET), which the box doesn't
+// let it reach (step 5 will, through the relay, for hosts those settings name). The run fails, and its
+// error names that connection and nothing every run is refused.
+test('Claude Code in TRIF\'s full sandbox, managed settings sending it to another host (an LLM gateway): the box makes the run fail, and the error says what it refused', { skip: !process.env.TRIF_WHOLE_BOX || MANAGED_TEST !== 'gateway' ? 'TRIF_WHOLE_BOX=1 with TRIF_TEST_MANAGED=gateway only (CI)' : skipWhy(CLAUDE, 'Claude Code') }, async () => {
+  const f = await setup();
+  setScript(f.anthropicScript, [{ say: 'Done: the model was reached (it should not have been).' }]);
+  const started = Date.now();
+  const { runId, done, events } = await runAgent(f, { agent: 'claude', site: 'example.com', tabId: 12 });
+  const info = `events: ${JSON.stringify(events).slice(0, 4000)}\nhelper.log:\n${helperLog(f)}`;
+  console.log(`# the failed run (${Date.now() - started} ms): ${JSON.stringify(events.filter((e) => e.kind === 'error' || e.kind === 'done')).slice(0, 3000)}`);
+  assert.equal(done.ok, false, info);
+  assert.equal(f.anthropic.requests.length, 0, `the stand-in model was reached:\n${info}`);
+  const err = events.find((e) => e.kind === 'error' && e.reason === 'box');
+  assert.ok(err, `an error naming what the box refused:\n${info}`);
+  assert.match(err.message, /^TRIF's full sandbox refused .*a connection to 192\.0\.2\.1/, info);
+  assert.doesNotMatch(err.message, USUAL, `what every run is refused isn't named:\n${info}`);
+  assert.ok((done.boxRefused || []).some((w) => /192\.0\.2\.1/.test(w)), info);
+  assert.ok(events.indexOf(err) < events.indexOf(done), 'before done');
+  const line = boxSaw(f, runId, [/a connection to 192\.0\.2\.1/], info);
+  assert.ok((line.routine || []).length, `what every run is refused, in the log: ${JSON.stringify(line)}`);
+  assert.ok(!done.error || done.error.kind !== 'login', `not a login error:\n${info}`);
 });
 
 test('Claude Code in TRIF\'s full sandbox, no shell, and managed settings that take the trif tool away: the run stops before Claude Code starts, saying why', { skip: NO_SHELL_SKIP || (MANAGED_TEST !== 'sandbox-on-no-mcp' && 'TRIF_TEST_MANAGED=sandbox-on-no-mcp only') }, async () => {

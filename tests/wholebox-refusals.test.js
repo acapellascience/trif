@@ -42,6 +42,60 @@ test('boxrefusals: a report read, said in words, summed up; the proxy\'s refusal
   assert.equal(br.summary([{ kind: 'proxy', target: 'evil.example:443' }]), 'TRIF\'s full sandbox refused a connection to evil.example:443.');
 });
 
+// Step 3b: what every boxed run is refused (round 5's CI, real pinned Claude Code runs that worked) is left
+// out of a failed run's error; anything else, the same files to other programs included, isn't.
+test('boxrefusals.routine: what every boxed run is refused, and nothing else', () => {
+  const c = br.routineContext({ homes: ['/Users/runner', '/Users/runner/fake'], privateDir: '/Users/runner/fake/Library/Application Support/TRIF', workspace: '/Users/runner/fake/.trif', agentTmp: '/tmp/trif-834c4fef' });
+  const r = (process, op, target) => br.routine({ process, op, target }, c);
+  // (round 5's CI list, as it came)
+  for (const [p, o, t] of [
+    ['claude', 'ipc-posix-shm-read-data', 'apple.shm.notification_center'],
+    ['security', 'file-read-data', '/Users/runner/.CFUserTextEncoding'],
+    ['security', 'mach-lookup', 'com.apple.analyticsd'],
+    ['security', 'mach-lookup', 'com.apple.SecurityServer'],
+    ['claude', 'mach-lookup', 'com.apple.securityd.xpc'],
+    ['claude', 'mach-lookup', 'com.apple.FSEvents'],
+    ['security', 'file-read-data', '/Users/runner/Library/Preferences/ByHost/.GlobalPreferences.3408CF31-A8F1-57DE-9DE9-4926DA8F94A4.plist'],
+    ['security', 'file-read-data', '/Users/runner/Library/Preferences/.GlobalPreferences.plist'],
+    ['security', 'file-read-data', '/Users/runner/Library/Preferences/.GlobalPreferences_m.plist'],
+    ['git', 'file-read-data', '/Applications/Xcode_26.6.app/Contents/Developer/usr/lib/libxcrun.dylib'],
+    ['git', 'file-read-metadata', '/Applications/Xcode_26.6.app/Contents/Developer/usr/lib'],
+    ['git', 'file-read-data', '/Library/Developer/CommandLineTools/usr/lib/libxcrun.dylib'],
+    ['claude', 'network-bind', '/private/tmp/trif-834c4fef/cc-socks/4961.sock'],
+    ['claude', 'network-bind', '/private/tmp/trif-834c4fef/srt-mux-5433-0.sock'],
+    ['claude', 'file-write-create', '/Users/runner/fake/Library/Application Support/TRIF/agent-config/claude/plugins'],
+    ['claude', 'file-write-create', '/Users/runner/fake/Library/Caches/claude-cli-nodejs'],
+    ['claude', 'file-write-create', '/Users/runner/fake/.claude'],
+    ['claude', 'file-write-create', '/Users/runner/fake/.config'],
+    ['node', 'file-read-data', '/Users/runner/fake/Library/Application Support/TRIF/config.json'],
+    ['node', 'file-read-data', '/Users/runner/fake/Library/Application Support/TRIF/helper.log'],
+    ['node', 'file-read-data', '/Users/runner/fake/.trif/preinstalled.json'],
+  ]) assert.equal(r(p, o, t), true, `${p} ${o} ${t}`);
+  for (const [p, o, t] of [
+    ['claude', 'file-read-data', '/Users/runner/fake/Library/Application Support/TRIF/config.json'], // (the Read tool: not trif's)
+    ['claude', 'file-read-data', '/Users/runner/fake/Library/Keychains/login.keychain-db'],
+    ['node', 'file-write-create', '/Users/runner/fake/.trif/sites/other.net/probe.js'],
+    ['claude', 'file-write-create', '/Users/runner/fake/.claude/settings.json'], // (inside ~/.claude: not the folder itself)
+    ['claude', 'file-read-data', '/Users/runner/.ssh/id_rsa'],
+    ['claude', 'network-outbound', '192.0.2.1:80'],
+    ['claude', 'network-bind', '/private/tmp/trif-other/cc-socks/1.sock'], // (another run's folder)
+    ['claude', 'network-bind', '/private/tmp/trif-834c4fef/other.sock'],
+    ['zsh', 'file-write-create', '/private/tmp/zshNFhFaM'],
+    ['claude', 'mach-lookup', 'com.apple.pasteboard.1'],
+    ['security', 'file-read-data', '/Users/someoneelse/.CFUserTextEncoding'],
+    ['git', 'file-read-data', '/Applications/Xcode.app/Contents/Developer/usr/lib/other.dylib'],
+    ['claude', 'file-write-create', '/Users/runner/fake/Library/Application Support/TRIF/agent-config/claude/plugins/x'],
+  ]) assert.equal(r(p, o, t), false, `${p} ${o} ${t}`);
+  assert.equal(br.routine({ kind: 'proxy', target: 'api.anthropic.com:443' }, c), false, 'the proxy\'s refusals never are');
+  assert.equal(br.routine({ process: 'claude', op: 'ipc-posix-shm-read-data', target: 'apple.shm.notification_center' }, null), false, 'no context: none');
+  // (a path with characters a pattern would read as its own, and $HOME's and the account's by default)
+  const odd = br.routineContext({ privateDir: '/Users/a (b)/T+R.I$F', agentTmp: '/private/tmp/trif-x/' });
+  assert.equal(br.routine({ process: 'node', op: 'file-read-data', target: '/Users/a (b)/T+R.I$F/config.json' }, odd), true);
+  assert.equal(br.routine({ process: 'node', op: 'file-read-data', target: '/Users/a (b)/TTR.I$F/config.json' }, odd), false);
+  assert.equal(br.routine({ process: 'claude', op: 'network-bind', target: '/tmp/trif-x/cc-socks/9.sock' }, odd), true);
+  assert.ok(odd.homes.includes(os.homedir()) && odd.homes.includes(os.userInfo().homedir));
+});
+
 function fakeLog({ exitCode = null, header = true } = {}) {
   const child = new EventEmitter();
   child.stdout = new PassThrough();
@@ -148,6 +202,16 @@ test('runs.js, the end of a boxed run: a failed run names what the box refused (
   assert.ok(worked.log.some((x) => x.webmods === 'boxRefused'), 'in the run\'s log all the same');
   const stopped = finish(null, { refusals, stopped: true });
   assert.ok(!stopped.events.some((e) => e.reason === 'box'), JSON.stringify(stopped.events));
+  // (3b: what every boxed run is refused is in the log, `routine`, never in the error; only that: no error)
+  const usual = [{ process: 'claude', op: 'ipc-posix-shm-read-data', target: 'apple.shm.notification_center' }];
+  const mixed = finish({ ok: false, result: 'API Error: Connection error.' }, { refusals: [...usual, ...refusals] });
+  assert.equal(mixed.events.find((e) => e.reason === 'box').message, 'TRIF\'s full sandbox refused reading ~/.netrc (claude).');
+  assert.deepStrictEqual(mixed.events.at(-1).boxRefused, ['reading ~/.netrc (claude)']);
+  const mixedLog = mixed.log.find((x) => x.webmods === 'boxRefused');
+  assert.deepStrictEqual([mixedLog.refused, mixedLog.routine], [['reading ~/.netrc (claude)'], ['ipc-posix-shm-read-data apple.shm.notification_center (claude)']]);
+  const onlyUsual = finish({ ok: false, result: 'no' }, { refusals: usual });
+  assert.ok(!onlyUsual.events.some((e) => e.reason === 'box') && !onlyUsual.events.at(-1).boxRefused, JSON.stringify(onlyUsual.events));
+  assert.deepStrictEqual(onlyUsual.log.find((x) => x.webmods === 'boxRefused').routine, ['ipc-posix-shm-read-data apple.shm.notification_center (claude)']);
   const none = finish({ ok: false, result: 'no' });
   assert.ok(!none.events.some((e) => e.reason === 'box') && !none.log.some((x) => x.webmods === 'boxRefused'));
 });

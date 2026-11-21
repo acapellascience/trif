@@ -10,7 +10,9 @@
     "legacy": "about the move from ~/.webmods (before 0.2.0), which Windows never had",
     "safari": "Safari and launchd are macOS only",
     "release": "the build and release scripts are for the Mac (zip, the Keychain)",
-    "permissions": "about a folder made unreadable with chmod, which takes no reading away from its owner on Windows (no POSIX permission bits)"
+    "permissions": "about a folder made unreadable with chmod, which takes no reading away from its owner on Windows (no POSIX permission bits)",
+    "phone-link": "the phone link and phone sync are off on Windows (no Bonjour announcer there for the phone to find the computer by: helper/lib/phonelink/link.js, docs/WINDOWS-PROGRESS.md \"Merge of phone-link\"); these tests also use keyring stand-ins that are scripts. What Windows has of it: tests/phone-link-store.test.js \"Windows: the link is off…\"",
+    "modes": "about file modes (600, 700), which do nothing on Windows: the profile folder's access list keeps other users out (docs/WINDOWS.md)"
   },
   "files": {
     "agent-keys.test.js": {
@@ -94,6 +96,95 @@
     },
     "downloads.test.js": {
       "downloads: a folder macOS won't let it read is reported, not fatal; off stops it": "permissions"
+    },
+    "phone-link-bonjour.test.js": {
+      "no child while nothing listens; the exact arguments once it does": "phone-link",
+      "stop() ends the child, and nothing starts after it": "phone-link",
+      "the link turned off ends the child; on again, a new record for the new port": "phone-link",
+      "the last phone removed ends the child": "phone-link",
+      "a child that dies is started again, after pauses that grow": "phone-link",
+      "no dns-sd: said once, nothing started, not tried again": "phone-link",
+      "the name is one argument, whatever is in it": "phone-link",
+      "not a Mac: nothing started, \"unsupported\"": "phone-link",
+      "the child never outlives the process that started it": "phone-link"
+    },
+    "phone-link-e2e.test.js": {
+      "the phone link end to end: pair, a run with a try on the phone, its result, a drop and a resume, remove": "phone-link"
+    },
+    "phone-link-host.test.js": {
+      "the phone link in the real helper: off until the panel turns it on, the owner of helper.sock alone listens": "sockets",
+      "an owner that can't relay (a helper from before the relay): the panel names its browser, the file's part still works here": "sockets"
+    },
+    "phone-link-remote.test.js": {
+      "a run over the link: numbered events, then the phone twin's files and nothing else; kept until the phone has it": "phone-link",
+      "what a phone can't ask for: a page with no site, things too big, a second run on a site, more runs than three": "phone-link",
+      "the phone goes away: the computer goes on, keeps the run, and plays it from where the phone stopped": "phone-link",
+      "a phone reaches only its own runs": "phone-link",
+      "a conversation goes on only if a run of the same phone, in the same phone twin, ended with it": "phone-link",
+      "a removed phone: its session closes, its run stops, what was kept for it is deleted; the other phone is as it was": "phone-link",
+      "kept across helpers: read again by the next one, 7 days at most, a run cut short is ended": "phone-link",
+      "the result is the run's own phone twin's mods: no other folder, no link, nothing over the size": "phone-link"
+    },
+    "phone-link-run.test.js": {
+      "a remote run: the phone's page and screenshot are its files; only the phone twin reaches the mods folder": "phone-link",
+      "a site with no desktop folder yet: a remote run can't make one": "phone-link",
+      "the mark is the helper's: a start message that says \"remote\" is an ordinary run": "phone-link",
+      "a remote run has no tab here: only the helper's own commands, and only its own phone mods to delete": "phone-link"
+    },
+    "phone-link-server.test.js": {
+      "no listener at all: a new install, the link on with nobody paired, and after the window closes": "phone-link",
+      "garbage, a late first message, and silence each get zero bytes and a closed socket": "phone-link",
+      "an unpaired key, a wrong secret and a bad first payload get zero bytes; five wrong secrets close the window and the listener": "phone-link",
+      "pairing through the listener: the answer, hello, ping, last seen; then again without the secret": "phone-link",
+      "what a session may ask: a registered handler, an unknown type, a handler that throws, a big message in pieces": "phone-link",
+      "removing a phone closes its open session, and it gets nothing the next time; the other phone stays": "phone-link",
+      "turning the link off closes sessions and the listener; on again, the same phone connects": "phone-link",
+      "a copied first message played again: answered once more, never a session, the real phone untouched": "phone-link",
+      "one session per phone: the phone's new connection closes its old one once it has proven itself": "phone-link",
+      "a transport message that doesn't check closes the session; a quiet session is closed after the idle time": "phone-link",
+      "at most 8 connections: the next one is closed with nothing": "phone-link",
+      "the kept port is asked for again; when it is taken, any port": "phone-link",
+      "stop() ends it: no listener, sessions closed, and the store's changes are no longer followed": "phone-link"
+    },
+    "phone-link-store.test.js": {
+      "syncing phone mods (D11): on by default, turned off by the panel, the switch kept through the link off and on": "phone-link",
+      "turning on makes the key pair: private key in the keyring (security) alone, public key in the file, mode 600": "phone-link",
+      "turning on makes the key pair: private key in the keyring (secret-tool) alone, public key in the file, mode 600": "phone-link",
+      "off and on again keeps the key and the phones; off: no keys, nobody paired, the window closed": "phone-link",
+      "a key gone from the keyring (or not the file's): turning on makes a new one and drops the phones paired to the old": "phone-link",
+      "a keyring that can't be read just now is not a lost key: turning on fails, the key and the phones stay": "phone-link",
+      "two turn-ons at once make one key": "phone-link",
+      "the pairing window: the QR text, and one phone pairs with its secret": "phone-link",
+      "wrong secrets: refused, and the fifth closes the window even for the right one": "phone-link",
+      "the window's time: good just before 5 minutes, gone at 5 minutes": "phone-link",
+      "a new QR replaces the open window's secret; pairStop closes it": "phone-link",
+      "pairing again with the same phone replaces its row (the new name), no second row": "phone-link",
+      "remove: the phone is no longer paired; the others stay; removing the last one stops the listening": "phone-link",
+      "seen and setPort are kept; a second store on the same workspace reads the same phones": "phone-link",
+      "a long computer name is cut in the code's text, never the code refused: whole characters, then \"…\", in what the panel's code holds": "phone-link",
+      "with the noise handshake: the store's keys answer a phone that pairs, and the phone's key is the one paired": "phone-link"
+    },
+    "phone-link-tool.test.js": {
+      "trif phone try, page and screenshot: one tool.request each, the phone's answer printed, its screenshot a file of the run's": "phone-link",
+      "try sends only a draft of the run's own phone twin; what the phone couldn't do is the command's failure": "phone-link",
+      "readDraft: the run's own twin in its working copy, never through a link, never too big": "phone-link",
+      "only the session that was asked can answer: another phone's answer and a second one are dropped": "phone-link",
+      "a phone that doesn't answer: the command fails after its time, and the run goes on": "phone-link",
+      "a phone that goes away: the waiting command fails at once, the next one isn't sent, the run finishes and is kept": "phone-link",
+      "a run whose phone came back is asked on the session that resumed it": "phone-link",
+      "outside a phone run, and in a helper without the link, the commands are refused; a run's screenshots are capped": "phone-link",
+      "the real helper refuses the commands from anything but a phone run, and the extension never sees them": "phone-link"
+    },
+    "phone-sync-e2e.test.js": {
+      "phone sync end to end: join, edits both ways, a conflict, deletes both ways, held, later, refusals, off": "phone-link",
+      "phone sync end to end, beside the text: switches both ways (the later change wins, new mods take the other side's), the extension told and nudging; the approval hint on the hold": "phone-link",
+      "phone sync end to end, switched like the phone does: a burst of switches is one sync, nothing refused, at the computer within a few seconds": "phone-link"
+    },
+    "phone-sync-session.test.js": {
+      "adds and edits both ways; deletes go to the trash; then in sync, nothing to do": "modes"
+    },
+    "phone-sync.test.js": {
+      "the base: per phone, private, and nothing in it taken on trust": "modes"
     }
   }
 }

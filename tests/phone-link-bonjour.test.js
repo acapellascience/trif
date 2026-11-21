@@ -4,7 +4,7 @@
 // Wi-Fi): every announcer gets TRIF_DNS_SD, a stand-in that writes its pid and arguments to calls.log and
 // waits. The listener binds 127.0.0.1 on a port the system picks; everything is stopped at the end.
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

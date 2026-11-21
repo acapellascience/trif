@@ -10,7 +10,7 @@
 //   - a phone reaches only its own runs; a removed phone's kept runs are deleted and its run stopped;
 //   - none of it is shown in the desktop side panel.
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

@@ -10,7 +10,7 @@
 //   - a remote run's requests that would reach a tab are refused, and it never goes on without TRIF's sandbox;
 //   - the private folder (phone-link.json, phone-link/) is denied to the run by both agents' settings.
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

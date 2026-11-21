@@ -4,7 +4,7 @@
 // Everything here binds 127.0.0.1 on a port the system picks, in a temp workspace with a fake keychain, and is
 // stopped at the end.
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');

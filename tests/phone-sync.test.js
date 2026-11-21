@@ -3,7 +3,7 @@
 // revisions, the phone's list, the three-way rule (every row, the first sync with no base), a conflict's sibling,
 // and the base file. No network, no mods touched.
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

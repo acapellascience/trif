@@ -7,7 +7,7 @@
 // refusals (bad ids, not a mod, too big, changed since the plan, a link for a twin, a stale or second sync, off);
 // a removed phone's base goes; the nudge carries nothing and comes at most every 2 s.
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

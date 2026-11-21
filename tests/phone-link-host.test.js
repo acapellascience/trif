@@ -19,7 +19,7 @@
 //   - with an owner that can't relay (a helper from before it), the panel names the owner's browser;
 //   - turned off: nothing listens, nothing is announced, the phone is closed.
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');

@@ -17,7 +17,7 @@
 // What must hold throughout: nothing outside sites/phone~*/ in the mods folder changes, and nothing is written
 // outside the workspace's own folders.
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

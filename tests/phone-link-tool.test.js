@@ -16,7 +16,7 @@
 //     and by the real helper (host.js in a temp HOME, a fake extension), where nothing of them reaches the
 //     extension.
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const net = require('net');

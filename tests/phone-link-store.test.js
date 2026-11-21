@@ -3,7 +3,7 @@
 // key in the keyring (a fake one here, never the real Keychain), phone-link.json in a temp workspace's private
 // folder, the pairing window and the paired phones. No network.
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

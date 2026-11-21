@@ -16,7 +16,6 @@ One file per customization: a header, then the mod.
 // @name        Hide reposts
 // @description Removes reposts from the X home timeline
 // @match       https://x.com/*
-// @match       https://twitter.com/*
 // @run-at      document-start
 // @risk        1 hides promoted posts, so their ad impressions never report
 // ==/WebMod==
@@ -31,8 +30,9 @@ One file per customization: a header, then the mod.
   mods can be switched off separately (see "Switching mods off and on"); that is the point.
 - The header is optional. Defaults: `@match` = `*://<site>/*` and `*://*.<site>/*` (the folder name and
   its subdomains); `@exclude` none; `@run-at document-start`; `@name` = file name; `@description` empty.
-  `@match`/`@exclude` repeat and take Chrome match patterns. Add `@match` lines when a site has several
-  domains (x.com and twitter.com).
+  `@match`/`@exclude` repeat and take Chrome match patterns. Add `@match` lines when a site really serves pages
+  on several domains (amazon.com and amazon.ca). Not for a domain that only redirects: twitter.com sends
+  every page to x.com, so a twitter.com line never runs.
 - `@id <id>` is the mod's stable id: TRIF adds it when it writes a mod (an edit or a rename in the panel, an
   import, the phone). Keep that line exactly as it is when you edit a mod; never write one yourself, and never copy
   it into a new mod (a copy with the same id is taken for the same mod). To rename a mod, change its `@name` and
@@ -63,7 +63,7 @@ One file per customization: a header, then the mod.
 A mod runs wherever its `@match` lines say, whatever its folder; the folder is its home (its id, and
 where the user finds it on the TRIF setup page).
 
-- **One site with several domains** (x.com and twitter.com, a site's country domains): the site's
+- **One site with several domains** (a site's country domains: amazon.com, amazon.ca): the site's
   folder, with a `@match` per domain. The setup page lists it under that site, with a switch per domain.
 - **Every site, or several unrelated sites** (dark mode everywhere, hide cookie banners on a few news
   sites): `sites/all-sites/` (`trif new all-sites <mod>`). Its default `@match` is `*://*/*`;

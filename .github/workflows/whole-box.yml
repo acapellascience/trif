@@ -59,3 +59,13 @@ jobs:
       - run: npm install -g @anthropic-ai/claude-code
       - name: Claude Code in an AppContainer
         run: node tests/whole-box/win-probe.js
+      # An organization's managed settings, for real (the runner's own C:\Program Files; never anyone's
+      # computer): every tool allowed, no asking, the whole disk. The box must hold under them.
+      - name: Managed settings that loosen everything, and the box
+        shell: pwsh
+        env:
+          WBX_SKIP_NO_LOOPBACK: '1'
+        run: |
+          New-Item -ItemType Directory -Force 'C:\Program Files\ClaudeCode' | Out-Null
+          Set-Content -Path 'C:\Program Files\ClaudeCode\managed-settings.json' -Value '{"permissions":{"allow":["Read(//**)","Edit(//**)","Write(//**)","Bash(*)","Glob","Grep"],"defaultMode":"bypassPermissions","additionalDirectories":["C:\\"]}}'
+          node tests/whole-box/win-probe.js

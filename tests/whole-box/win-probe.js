@@ -85,9 +85,18 @@ function spec(L, claude, { name, lpac, extraEnv = {} }) {
       { path: path.join(L.stage, 'sites'), rights: 'r+mkdir', inherit: false },
       { path: path.join(L.stage, 'sites'), rights: 'rw', inherit: 'only' },
       { path: L.cfg, rights: 'rw' }, { path: L.tmp, rights: 'rw' }, { path: L.box, rights: 'rw' },
+      // (an organization's managed settings, readable so its policies apply: C:\Program Files is readable to
+      // a plain AppContainer already, not to a less-privileged one)
+      { path: 'C:\\Program Files\\ClaudeCode', rights: 'r', to: 'capability', optional: true },
     ],
     readonly: [path.join(L.stage, 'sites', 'other.com')],
   };
+}
+
+function specFiltered(...a) {
+  const s = spec(...a);
+  s.grant = s.grant.filter((g) => fs.existsSync(g.path));
+  return s;
 }
 
 function fenceRun(fence, specFile, argv, { stdin = '', timeout = 120000 } = {}) {
@@ -166,14 +175,14 @@ async function netProbe(fence, specFile, L) {
   for (const flavor of [{ name: 'trif.wbx.plain', lpac: false }, { name: 'trif.wbx.lpac', lpac: true }]) {
     console.log(`\n================ ${flavor.name} (${flavor.lpac ? 'less-privileged + registryRead' : 'plain AppContainer'} + internetClient)`);
     const specFile = path.join(L.base, `${flavor.name}.json`);
-    fs.writeFileSync(specFile, JSON.stringify(spec(L, claude, flavor)));
+    fs.writeFileSync(specFile, JSON.stringify(specFiltered(L, claude, flavor)));
     const prep = spawnSync(fence, ['prepare', specFile], { encoding: 'utf8' });
     if (prep.status !== 0) { show('prepare failed', prep.stdout + prep.stderr); continue; }
     const sid = spawnSync(fence, ['sid', flavor.name], { encoding: 'utf8' }).stdout.trim();
     const v = await fenceRun(fence, specFile, [...claude.argv, '--version'], { timeout: 60000 });
     show(`claude --version in the box (${v.ms} ms, exit ${v.code})`, v.stdout + v.stderr);
     await netProbe(fence, specFile, L);
-    await headless(fence, specFile, L, claude, `${flavor.name}, no loopback exemption`);
+    if (!process.env.WBX_SKIP_NO_LOOPBACK) await headless(fence, specFile, L, claude, `${flavor.name}, no loopback exemption`);
     const ex = spawnSync(sys('CheckNetIsolation.exe'), ['LoopbackExempt', '-a', `-p=${sid}`], { encoding: 'utf8' });
     show('CheckNetIsolation LoopbackExempt -a (needs an administrator)', `${ex.status} ${ex.stdout}${ex.stderr}`);
     await headless(fence, specFile, L, claude, `${flavor.name}, loopback exempt`);

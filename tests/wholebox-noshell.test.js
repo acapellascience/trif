@@ -151,9 +151,9 @@ test('managed settings: which ones let a run use any command (no shell in TRIF\'
   assert.match(claude.noShellBrokenMessage({ ...pre, mcpBlocks: ['deny TRIF’s `trif` tool'] }), /^Your organization's Claude Code settings let Claude Code run any command, so in TRIF's full sandbox this chat gets TRIF's `trif` tool in place of a shell, but they also deny TRIF’s `trif` tool, so this chat can't run in TRIF's full sandbox\. Turning off/);
 });
 
-test('runs.js in TRIF\'s full sandbox: loosening settings are logged, not asked about, and the chat isn\'t marked; any command → no shell; the trif tool taken away → stopped; outside the box, asked as before', () => {
+test('runs.js in TRIF\'s full sandbox: loosening settings are logged, not asked about, and the chat isn\'t marked; any command → no shell; the trif tool taken away → stopped; outside the box, asked as before', async () => {
   const { Runs } = require('../helper/lib/runs');
-  const go = (settings, { wholeBox = true } = {}) => {
+  const go = async (settings, { wholeBox = true } = {}) => {
     const dir = temp();
     fs.writeFileSync(path.join(dir, 'managed-settings.json'), JSON.stringify(settings));
     let asked = 0;
@@ -163,33 +163,35 @@ test('runs.js in TRIF\'s full sandbox: loosening settings are logged, not asked 
     runs._finish = () => { out.finished = true; };
     runs._kill = () => {};
     runs._spawn = () => { out.spawned = true; };
+    runs._watchBox = () => Promise.resolve(); // (boxrefusals.js: tests/wholebox-refusals.test.js)
     const adapter = { ...claude, prepare: undefined, preflight: () => managed.check({ dir, platform: 'darwin' }) };
     const run = { id: 'r1', agent: 'claude', adapter, ws: dir, wholeBox, logFile: path.join(dir, 'run.jsonl'), state: {} };
     runs._withAgent(run, { available: true, path: '/p/claude' }, {});
+    await new Promise((r) => setImmediate(r));
     const log = fs.existsSync(run.logFile) ? fs.readFileSync(run.logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
     return { ...out, asked, run, log };
   };
   // Only loosening (sandbox off, more folders, acceptEdits): a shell, no question, not marked, logged.
-  const loose = go({ sandbox: { enabled: false }, permissions: { additionalDirectories: ['/'], defaultMode: 'acceptEdits', allow: ['Read(//**)'] } });
+  const loose = await go({ sandbox: { enabled: false }, permissions: { additionalDirectories: ['/'], defaultMode: 'acceptEdits', allow: ['Read(//**)'] } });
   assert.deepStrictEqual([loose.spawned, loose.asked, !!loose.run.noShell, !!loose.run.withoutSandbox], [true, 0, false, false]);
   assert.ok(!loose.events.some((x) => x.kind === 'sandbox' || x.kind === 'error'), JSON.stringify(loose.events));
   const note = loose.log.find((x) => x.webmods === 'orgSettings');
   assert.ok(note && note.loosens.length === 4 && /managed-settings\.json/.test(note.from), JSON.stringify(loose.log));
   // Any command (the loosest settings CI writes): no shell, still no question.
-  const any = go({ permissions: { allow: ['Read(//**)', 'Bash(*)'], defaultMode: 'bypassPermissions', additionalDirectories: ['/'] }, sandbox: { enabled: false } });
+  const any = await go({ permissions: { allow: ['Read(//**)', 'Bash(*)'], defaultMode: 'bypassPermissions', additionalDirectories: ['/'] }, sandbox: { enabled: false } });
   assert.deepStrictEqual([any.spawned, any.asked, any.run.noShell, !!any.run.withoutSandbox], [true, 0, true, false]);
   assert.match(any.log.find((x) => x.webmods === 'noShell').why, /^managed settings allow `Bash\(\*\)` without asking; approve Claude Code’s actions by themselves \(bypassPermissions mode\)$/);
   assert.ok(any.log.some((x) => x.webmods === 'orgSettings'));
   // Any command and the trif tool taken away: stopped, saying why.
-  const blocked = go({ permissions: { allow: ['Bash'] }, deniedMcpServers: [{ serverName: 'trif' }] });
+  const blocked = await go({ permissions: { allow: ['Bash'] }, deniedMcpServers: [{ serverName: 'trif' }] });
   assert.deepStrictEqual([blocked.spawned, blocked.finished, blocked.asked], [false, true, 0]);
   assert.match(blocked.events.find((x) => x.kind === 'error').message, /let Claude Code run any command.*deny TRIF’s `trif` tool/);
   // Settings that break runs still stop them, in the box too.
-  const plan = go({ permissions: { defaultMode: 'plan' } });
+  const plan = await go({ permissions: { defaultMode: 'plan' } });
   assert.deepStrictEqual([plan.spawned, plan.finished], [false, true]);
   assert.match(plan.events.find((x) => x.kind === 'error').message, /plan mode/);
   // Outside the box: the consent is asked for (here given), the chat marked, a shell as before.
-  const today = go({ permissions: { allow: ['Bash(*)'] } }, { wholeBox: false });
+  const today = await go({ permissions: { allow: ['Bash(*)'] } }, { wholeBox: false });
   assert.deepStrictEqual([today.spawned, today.asked, !!today.run.noShell, today.run.withoutSandbox], [true, 1, false, true]);
   assert.ok(today.events.some((x) => x.kind === 'sandbox' && x.trif === false));
 });

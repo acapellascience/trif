@@ -30,7 +30,7 @@ jobs:
       - run: npm install -g @anthropic-ai/claude-code
       - run: claude --version; ls -la "$(command -v claude)"; file "$(readlink -f "$(command -v claude)")" || true
       - name: TRIF's pinned Claude Code, unit tests (a stand-in registry), and the Settings switch
-        run: node --test tests/claudepin.test.js tests/wholebox-setting.test.js tests/claudetoken.test.js tests/wholebox-noshell.test.js
+        run: node --test tests/claudepin.test.js tests/wholebox-setting.test.js tests/claudetoken.test.js tests/wholebox-noshell.test.js tests/wholebox-refusals.test.js
       # TRIF's pinned Claude Code (helper/claude-code.json), installed as the helper does: from the npm
       # registry, its sha512 checked against the pin, Anthropic's signature checked.
       - uses: actions/cache@v4

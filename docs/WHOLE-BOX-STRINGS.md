@@ -52,6 +52,14 @@ In code now (helper/lib/runs.js):
 Not shown (round 5, Tim 11-21): in TRIF's full sandbox, settings that only loosen Claude Code's rules show
 nothing: no "Use Claude Code anyway" card, no "no TRIF sandbox" chip.
 
+- A boxed chat that failed, after the box refused something (round 5, step 3, boxrefusals.js `summary`;
+  its own line in the chat, after the run's usual error): **TRIF's full sandbox refused {what}; {what}…
+  [; and {n} more (in the run's log)].** Latest first, at most five. Each {what} (`describe`):
+  **reading {path}** · **writing {path}** · **a connection to {host:port}** · **listening on {where}** ·
+  **the system service {name}** · **starting {path}** · **another program ({operation})** · otherwise
+  Seatbelt's own operation name and target; then the program's name in brackets, e.g. **reading
+  ~/.netrc (claude)**. Paths in the home folder start with ~.
+
 The offer that follows these (step 4, "Run this chat with the older protection"): not written yet.
 
 Not shown to people (round 4): a chat that runs with no shell says nothing in the panel; its steps read

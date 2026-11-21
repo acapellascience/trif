@@ -875,8 +875,10 @@ class Runs {
     const prepare = run.wholeBox && adapter.id === 'claude' && adapter.prepare
       ? (o) => require('./claudetoken').prepareBoxed({ keyPrep: () => adapter.prepare(o) })
       : adapter.prepare;
+    // (TRIF's full sandbox: what the box refuses is watched from before the agent starts, boxrefusals.js)
+    const watching = run.wholeBox ? this._watchBox(run) : Promise.resolve();
     if (prepare) {
-      prepare({ ws, model: run.model, openModel: run.openModel, logger: this.logger }).then((prep) => {
+      Promise.all([prepare({ ws, model: run.model, openModel: run.openModel, logger: this.logger }), watching]).then(([prep]) => {
         // (cleanup: what prepare started for the run, the key proxy; _finish calls it.)
         if (prep && typeof prep.cleanup === 'function') run.cleanup = prep.cleanup;
         if (run.stopped || run.finished) return this._finish(run, { code: null, signal: null });
@@ -887,6 +889,7 @@ class Runs {
         const ak = run.state.apiKey;
         if (ak) this._log(run, { webmods: 'apiKey', account: ak.account, source: ak.source, keyProxy: !!run.cleanup });
         if (run.state.signIn) this._log(run, { webmods: 'signIn', kind: run.state.signIn, source: 'keyring' }); // (never the token)
+        if (prep && prep.proxySeen) run.proxySeen = prep.proxySeen;
         const runEnv = { ...env, ...((prep && prep.env) || {}) };
         for (const k of (prep && prep.unsetEnv) || []) delete runEnv[k];
         this._spawn(run, found, runEnv, (prep && prep.options) || {});
@@ -897,7 +900,24 @@ class Runs {
       });
       return;
     }
-    this._spawn(run, found, env, {});
+    watching.then(() => { if (!run.stopped && !run.finished) this._spawn(run, found, env, {}); });
+  }
+
+  // TRIF's full sandbox: start watching for the box's refusals of this run (boxrefusals.js; its tag is in
+  // the run's profile). Resolves once the watcher reads, or can't (the run's errors are then as before).
+  _watchBox(run) {
+    const br = require('./boxrefusals');
+    run.boxTag = br.tagFor(run.id);
+    try { run.boxWatch = br.watch(run.boxTag); } catch (e) { this.logger.warn(`agent run ${run.id}: can't watch what TRIF's box refuses: ${e.message}`); return Promise.resolve(); }
+    return run.boxWatch.ready.then((ok) => {
+      if (!ok) this.logger.warn(`agent run ${run.id}: can't watch what TRIF's box refuses (${run.boxWatch.unavailable() || 'log stream'}): its errors won't name them`);
+    });
+  }
+
+  // What the box refused during the run: Seatbelt's reports and the allowlist proxy's.
+  _boxRefusals(run) {
+    const br = require('./boxrefusals');
+    return [...(run.boxWatch ? run.boxWatch.refusals() : []), ...br.fromProxy(run.proxySeen)];
   }
 
   _spawn(run, found, env, options) {
@@ -941,7 +961,7 @@ class Runs {
       try {
         const configDir = path.join(limits.privateDir, 'agent-config', run.agent);
         fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
-        ({ file, args, env } = require('./wholebox').wrap({ file, args, env }, { limits, configDir, profileFile: path.join(run.agentDir, 'box.sb'), extraRead: [run.agentDir] }));
+        ({ file, args, env } = require('./wholebox').wrap({ file, args, env }, { limits, configDir, profileFile: path.join(run.agentDir, 'box.sb'), extraRead: [run.agentDir], tag: run.boxTag || '' }));
       } catch (e) {
         this._emit(run, { kind: 'error', message: `couldn't put ${adapter.name} in TRIF's box: ${e.message}` });
         return this._finish(run, { code: null, signal: null });
@@ -997,7 +1017,11 @@ class Runs {
       // Normally 'close' follows at once; if a grandchild keeps the pipes open, don't wait for it.
       run.timers.push(setTimeout(() => this._finish(run, exitInfo), 1000));
     });
-    child.on('close', (code, signal) => this._finish(run, exitInfo || { code, signal }));
+    // (TRIF's full sandbox, a run that didn't finish well: a moment for the box's last reports to arrive)
+    child.on('close', (code, signal) => {
+      if (run.boxWatch && !(run.agentDone && run.agentDone.ok)) setTimeout(() => this._finish(run, exitInfo || { code, signal }), 500);
+      else this._finish(run, exitInfo || { code, signal });
+    });
 
     run.timers.push(setTimeout(() => {
       run.timedOut = true;
@@ -1256,6 +1280,19 @@ class Runs {
       agents.noteLoginWorked(run.agent);
     }
     if (run.shuttingDown) this._emit(run, { kind: 'error', message: 'the helper shut down (Chrome closed?) before the agent finished' });
+    // TRIF's full sandbox (docs/WHOLE-BOX.md step 3): what the box refused, in the run's log; a run that
+    // failed names it (an error of its own, reason "box"), so it isn't a mystery.
+    if (run.boxWatch || run.proxySeen) {
+      const br = require('./boxrefusals');
+      try { run.boxWatch && run.boxWatch.close(); } catch { /* gone */ }
+      const refused = this._boxRefusals(run);
+      const words = refused.map((r) => br.describe(r));
+      if (refused.length || (run.boxWatch && run.boxWatch.unavailable())) this._log(run, { webmods: 'boxRefused', refused: words, ...(run.boxWatch && run.boxWatch.unavailable() ? { unwatched: run.boxWatch.unavailable() } : {}), time: Date.now() });
+      if (refused.length && !done.ok && !run.stopped && !run.loginFailed) {
+        this._emit(run, { kind: 'error', reason: 'box', refused: words.slice(-br.MAX), message: br.summary(refused) });
+        done.boxRefused = words.slice(-br.MAX);
+      }
+    }
     this._emit(run, done);
     this._log(run, { webmods: 'done', ...done, exitCode: code, signal, stderrTail: run.stderr.slice(-4000), time: Date.now() });
     this.logger.info(`agent run ${run.id} done: ok=${done.ok} code=${code} signal=${signal} changed=${changedFiles.length}`);

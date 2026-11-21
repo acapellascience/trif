@@ -45,6 +45,13 @@ managed policy; a normal run works; the fallback happens only on the person's ch
     Settings that let a run use any command → no shell, the `trif` tool. Breaks still stop the chat.
 - [ ] **3. Clear refusal errors.** When the box refuses something, the run's error names it (Seatbelt
   violation reports from the log / the relay's refusal), not a mystery failure.
+  - [x] **3a.** *(round 5)* Every deny in the run's profile carries the run's tag; `log stream` on the tag
+    (started before the agent) collects Seatbelt's reports; with the allowlist proxy's refusals, a failed
+    boxed run gets an error line naming them (reason "box"; `done.boxRefused`), and every boxed run logs
+    them (`boxRefused`). Draft words in WHOLE-BOX-STRINGS.md.
+  - [ ] **3b.** A real failed run on CI (a run the box makes fail, e.g. a host an organization's settings
+    name, step 5), and the noise a normal run is refused along the way (round 5's CI prints it) left out
+    of the error if it misleads. The relay's refusals (step 8) the same way.
 - [ ] **4. Informed fallback, never silent.** If the box can't start, the panel offers "Run this chat with
   the older protection" as the person's own choice. Draft the words.
 - [ ] **8. The network relay.** CONNECT-only to Anthropic's hosts on 443 (plus org-named hosts, step 5), no
@@ -254,11 +261,40 @@ question with nothing to decide.
   wholebox-noshell, claude-managed, agents, agent-tools, helper, extension, sandboxlint, claudetoken,
   wholebox-setting, claudepin, explain, agent-keys, run-folders, hardening, shipped (345 pass).
 
+### Round 5 (11-21): step 7a (Tim's answer), step 3a (the box's refusals named)
+
+- **7a, decided by Tim 11-21 ("yes, the recommendation"; recorded in WHOLE-BOX.md, Enterprise):**
+  claude-managed.js `anyCommand` (a `Bash` allow rule for anything but `trif`/`webmods`/`cd`/`ls`, or with
+  shell operators; `bypassPermissions` or `auto` mode; not `acceptEdits`: it approves file commands
+  only). runs.js `_withAgent`, in the box: `loosens` → the run's log (`orgSettings`) and the helper's log,
+  no `_withoutSandbox` (no card, no "no TRIF sandbox"); `forcesSandbox` or `anyCommand` → no shell (the
+  trif tool), `mcpBlocks` with either → stopped (claude.js `noShellBrokenMessage`, a second draft for
+  any-command); `breaks` still stop. Outside the box unchanged.
+- **3a:** helper/lib/boxrefusals.js (`tagFor`, `parseReport`, `describe`, `summary`, `watch`, `fromProxy`);
+  wholebox.js `macProfile({tag})`: `(deny default (with message "<tag>"))` and the explicit denies too;
+  runs.js `_watchBox` (before prepare; the agent starts once `log stream` reads, ≤1.5 s), `_boxRefusals`,
+  `_finish` (the error line, `done.boxRefused`, the log line, `unwatched` when `log stream` can't run);
+  a failed boxed run waits 500 ms after exit for the last reports. claudetoken.prepareBoxed hands over
+  the proxy's `seen`.
+- Tests: wholebox-noshell.test.js +2 (anyCommand; runs.js's box decisions with stubs: loosening logged and
+  not asked, any command → no shell, + the tool taken away → stopped, plan mode stops, outside the box
+  asked); tests/wholebox-refusals.test.js (4: the words; the watcher with a stand-in `log`; **real
+  Seatbelt locally: a shell in a tagged box refused a scratch file's read and a read-only folder's write,
+  both read back from `log stream`**; runs.js's end of a run). run-sandbox.test.js, CI only: the loosest
+  settings (`loosen`) → a boxed side-panel run not asked, no shell, the trif tool; `loosen-shell`
+  (sandbox off, every folder, acceptEdits, no other commands) → not asked, a shell, the box still refusing
+  config.json, the keychain file, a write to the private folder; both now also check the box's refusals
+  in the run's log and print them. Locally 366 tests across the suites (one skip), no regressions.
+- Finding: `log stream` works for an administrator account without sudo (Tim's Mac, here); its first
+  line "Filtering the log data using …" says it's reading. A report reads "Sandbox: cat(16354)
+  deny(1) file-read-data /Users/…/.zshrc" followed by the profile's message on its own line. Noise in
+  every program: `/dev/dtracehelper` (ioctl/write), filtered out.
+
 ## Next
 
-Round 5: if Tim has answered For Tim (7a), do that (in the box: no consent for loosening-only settings,
-and no shell when they loosen commands); then step 3 (clear refusal errors: Seatbelt violation reports
-from the log / the relay's refusal named in the run's error).
+Round 6: step 3b (look at round 5's CI print of what a normal boxed run is refused; a real failed run named
+on CI; noise out of the error if needed), then step 4 (the informed fallback: "Run this chat with the older
+protection", draft words).
 
 ## CI
 

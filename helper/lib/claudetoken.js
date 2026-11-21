@@ -157,6 +157,7 @@ async function prepareBoxed({ keyPrep = async () => ({}), env = process.env, key
     unsetEnv: [...OUTRANKS, ...(stand ? [] : ['ANTHROPIC_BASE_URL'])],
     secrets: [r.value],
     cleanup: proxy ? () => proxy.close() : null,
+    ...(proxy ? { proxySeen: proxy.seen } : {}), // (what it refused: boxrefusals.js)
     state: { signIn: 'token' },
   };
 }

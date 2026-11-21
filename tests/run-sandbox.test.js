@@ -383,6 +383,14 @@ function notAsked(f, runId, events, info) {
   const note = runLog(f, runId).find((x) => x.webmods === 'orgSettings');
   assert.ok(note && note.loosens.length && /managed-settings\.json/.test(note.from), `the organization's settings in the run's log:\n${JSON.stringify(runLog(f, runId)).slice(0, 2000)}`);
 }
+// Step 3: what the box refused, read from Seatbelt's reports (boxrefusals.js), is in the run's log; printed
+// too, so CI shows what a run that worked was refused along the way (what a failed run's error would name).
+function boxSaw(f, runId, expected, info) {
+  const line = runLog(f, runId).find((x) => x.webmods === 'boxRefused');
+  console.log(`# the box refused (run ${runId}): ${JSON.stringify(line || null)}`);
+  assert.ok(line && !line.unwatched, `the box's refusals watched:\n${JSON.stringify(line)}\n${info}`);
+  for (const re of expected) assert.ok(line.refused.some((w) => re.test(w)), `${re} among the box's refusals: ${JSON.stringify(line.refused)}`);
+}
 test('Claude Code in TRIF\'s full sandbox, no shell: managed settings force its own sandbox on (or let it run any command), so the run has no Bash and every `trif` command works through the trif tool, still boxed', { skip: NO_SHELL_SKIP || (!['sandbox-on', 'loosen'].includes(MANAGED_TEST) && 'TRIF_TEST_MANAGED=sandbox-on or loosen only') }, async () => {
   const f = await setup();
   const site = 'example.com';
@@ -421,6 +429,7 @@ test('Claude Code in TRIF\'s full sandbox, no shell: managed settings force its 
   const noShell = runLog(f, runId).find((x) => x.webmods === 'noShell');
   assert.match((noShell || {}).why || '', MANAGED_TEST === 'loosen' ? /allow `Bash\(\*\)` without asking/ : /force Claude Code's sandbox on/, info);
   if (MANAGED_TEST === 'loosen') notAsked(f, runId, events, info);
+  boxSaw(f, runId, [/^writing .*other\.net/], info);
 });
 
 test('Claude Code in TRIF\'s full sandbox, managed settings that only loosen its rules (Claude Code\'s sandbox off, every folder, acceptEdits, no other commands): not asked, a shell, still boxed', { skip: !process.env.TRIF_WHOLE_BOX || MANAGED_TEST !== 'loosen-shell' ? 'TRIF_WHOLE_BOX=1 with TRIF_TEST_MANAGED=loosen-shell only (CI)' : skipWhy(CLAUDE, 'Claude Code') }, async () => {
@@ -456,6 +465,7 @@ test('Claude Code in TRIF\'s full sandbox, managed settings that only loosen its
   assert.ok(offered.includes('Bash') && !offered.includes('mcp__trif__trif'), `a shell: ${[...new Set(offered)].join(', ')}`);
   assert.ok(!runLog(f, runId).some((x) => x.webmods === 'noShell'), info);
   notAsked(f, runId, events, info);
+  boxSaw(f, runId, [/^reading .*config\.json/, /^writing .*probe\.txt/, /^reading .*login\.keychain-db/], info);
   assert.ok(!JSON.stringify(f.anthropic.requests.map((x) => x.body)).includes(SECRET), `something secret reached the model:\n${info}`);
 });
 

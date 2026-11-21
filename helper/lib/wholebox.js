@@ -67,9 +67,11 @@ const INSTRUCTION_RE = '(CLAUDE(\\.local)?\\.md|AGENTS(\\.override)?\\.md|GEMINI
  *   ports            TCP ports on this computer the process may connect to
  *   keychain         true: the keychain services and files (Claude Code's own login on macOS)
  *   home             the home folder (for the keychain's files)
+ *   tag              put in every refusal's report (boxrefusals.js: the run's error names what was refused)
  */
-function macProfile({ read = [], write = [], readOnly = [], sites = '', configDir = '', ports = [], keychain = false, home = os.homedir() } = {}) {
-  const L = ['(version 1)', '(deny default)',
+function macProfile({ read = [], write = [], readOnly = [], sites = '', configDir = '', ports = [], keychain = false, home = os.homedir(), tag = '' } = {}) {
+  const msg = tag ? ` (with message ${q(tag)})` : '';
+  const L = ['(version 1)', `(deny default${msg})`,
     '(allow process-fork)',
     // A program can be started only where it can be read (exec needs read too).
     '(allow process-exec)',
@@ -91,11 +93,11 @@ function macProfile({ read = [], write = [], readOnly = [], sites = '', configDi
   const writes = [...write, ...(configDir ? [configDir] : [])].filter(Boolean);
   if (writes.length) L.push(`(allow file-write* ${writes.map(sub).join(' ')})`);
   // (later rules win in SBPL: these come after the allows)
-  if (readOnly.length) L.push(`(deny file-write* ${readOnly.map(sub).join(' ')})`);
-  if (sites) L.push(`(deny file-write* (regex #"^${reEscape(real(sites))}/(.*/)?${INSTRUCTION_RE}(/.*)?$"))`);
+  if (readOnly.length) L.push(`(deny file-write* ${readOnly.map(sub).join(' ')}${msg})`);
+  if (sites) L.push(`(deny file-write* (regex #"^${reEscape(real(sites))}/(.*/)?${INSTRUCTION_RE}(/.*)?$")${msg})`);
   if (configDir) {
     const c = real(configDir);
-    L.push(`(deny file-write* ${['settings.json', 'settings.local.json', 'CLAUDE.md', 'hooks', 'plugins', 'skills', 'agents', 'commands'].map((f) => lit(path.join(c, f)) + ' ' + sub(path.join(c, f))).join(' ')})`);
+    L.push(`(deny file-write* ${['settings.json', 'settings.local.json', 'CLAUDE.md', 'hooks', 'plugins', 'skills', 'agents', 'commands'].map((f) => lit(path.join(c, f)) + ' ' + sub(path.join(c, f))).join(' ')}${msg})`);
   }
   for (const port of ports) L.push(`(allow network-outbound (remote tcp ${q(`localhost:${Number(port)}`)}))`);
   if (keychain) {
@@ -137,10 +139,10 @@ function limitsToBox(limits, { agentBin, configDir, extraRead = [] } = {}) {
  * The command (runs.js: {file, args, env}) wrapped in the box: {file, args, env, profile}. The profile is
  * written to `profileFile` (it names the run's site: not on the command line, which other programs read).
  */
-function wrap({ file, args, env = {} }, { limits, configDir, profileFile, keychain = false, platform = process.platform, extraRead = [] }) {
+function wrap({ file, args, env = {} }, { limits, configDir, profileFile, keychain = false, platform = process.platform, extraRead = [], tag = '' }) {
   if (platform !== 'darwin') throw new Error('TRIF\'s full sandbox is macOS only for now (Windows: tests/whole-box/win-probe.js)');
   const box = limitsToBox(limits, { agentBin: file, configDir, extraRead });
-  const profile = macProfile({ ...box, ports: localPorts(env), keychain });
+  const profile = macProfile({ ...box, ports: localPorts(env), keychain, tag });
   fs.writeFileSync(profileFile, profile, { mode: 0o600 });
   const extraEnv = {
     // Claude Code: no updates from inside a run (the box can't write its versions folder anyway, and the

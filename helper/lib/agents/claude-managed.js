@@ -4,10 +4,16 @@
 // Managed settings outrank everything TRIF passes (--settings, --allowedTools): "no user, project, local,
 // or `--settings` value overrides them" (code.claude.com/docs/en/settings). They come from, highest first:
 //   - server-managed settings, cached at ~/.claude/remote-settings.json
-//   - an MDM profile (macOS: the com.anthropic.claudecode managed preferences domain)
+//   - an MDM profile (macOS: the com.anthropic.claudecode managed preferences domain; Windows: the JSON in
+//     the REG_SZ / REG_EXPAND_SZ value `Settings` under HKLM\SOFTWARE\Policies\ClaudeCode)
 //   - managed-settings.json, then every *.json in managed-settings.d/ beside it (not hidden), in
 //     alphabetical order: single values, later file wins; lists combine; objects merge key by key
 //       macOS  /Library/Application Support/ClaudeCode/      Linux  /etc/claude-code/
+//       Windows  C:\Program Files\ClaudeCode\  (not the old C:\ProgramData\ClaudeCode, which Claude Code no
+//       longer reads)
+//   - Windows: the same `Settings` value under HKCU\SOFTWARE\Policies\ClaudeCode, which the person can write
+//     (Claude Code uses it only when no admin source is present; here it's checked like the rest)
+// (code.claude.com/docs/en/managed-settings, read 11-21, whole-box step 9b(5).)
 // By default Claude Code uses the highest source that has any policy key, but some keys (the sandbox
 // locks among them) are read from every source. So each source is checked on its own, and anything one
 // of them does counts: that may ask about a setting another source overrides, never miss one.
@@ -41,6 +47,9 @@ const FILE = 'managed-settings.json';
 const DROP_INS = 'managed-settings.d';
 const PLIST = 'com.anthropic.claudecode.plist';
 const REMOTE = 'remote-settings.json';
+// (Windows' registry policies; in a test folder, files of these names hold the `Settings` value's JSON)
+const REG_KEY = 'SOFTWARE\\Policies\\ClaudeCode';
+const REG_TEST = { HKLM: 'registry-hklm.json', HKCU: 'registry-hkcu.json' };
 
 // The tools a run has (claude.js TOOLS) and the ones that edit: an allow rule for one of them (or for an
 // MCP tool) lets the run do more than TRIF's own rules.
@@ -52,7 +61,30 @@ const LOOSE_MODES = ['acceptEdits', 'bypassPermissions', 'auto'];
 function systemDir(platform = process.platform) {
   if (platform === 'darwin') return '/Library/Application Support/ClaudeCode';
   if (platform === 'linux') return '/etc/claude-code';
+  if (platform === 'win32') return `${process.env.ProgramW6432 || process.env.ProgramFiles || 'C:\\Program Files'}\\ClaudeCode`;
   return null;
+}
+
+/**
+ * `reg query <hive>\SOFTWARE\Policies\ClaudeCode /v Settings` -> {value} (a JSON object), {error}, or null
+ * when there's none. (REG_EXPAND_SZ is read as written: Claude Code's policy is JSON, variables in it rare.)
+ */
+function parseReg(stdout, hive) {
+  const m = /^\s+Settings\s+(REG_\w+)\s+(.*?)\s*$/m.exec(String(stdout || ''));
+  if (!m) return null;
+  const where = `${hive}\\${REG_KEY} Settings`;
+  if (m[1] !== 'REG_SZ' && m[1] !== 'REG_EXPAND_SZ') return { error: `${where}: not a string (${m[1]})` };
+  try {
+    const v = JSON.parse(m[2]);
+    return isObject(v) ? { value: v } : { error: `${where}: not a JSON object` };
+  } catch (e) { return { error: `${where}: ${e.message}` }; }
+}
+
+function readReg(hive) {
+  const reg = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'reg.exe');
+  try {
+    return parseReg(execFileSync(reg, ['query', `${hive}\\${REG_KEY}`, '/v', 'Settings'], { encoding: 'utf8', windowsHide: true, timeout: 10000, stdio: ['ignore', 'pipe', 'ignore'] }), hive);
+  } catch { return null; } // (reg exits 1 when the key or value isn't there)
 }
 
 function isObject(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
@@ -91,7 +123,7 @@ function readPlist(file) {
  * The managed settings sources on this computer: [{name, file, settings}] (only those that exist), and
  * `errors` for ones that couldn't be read.
  */
-function sources({ dir = envVar('CLAUDE_MANAGED_DIR'), platform = process.platform, homedir = os.homedir(), user = safeUser() } = {}) {
+function sources({ dir = envVar('CLAUDE_MANAGED_DIR'), platform = process.platform, homedir = os.homedir(), user = safeUser(), registry = readReg } = {}) {
   const test = !!dir;
   const base = test ? path.resolve(dir) : systemDir(platform);
   const out = [];
@@ -111,6 +143,12 @@ function sources({ dir = envVar('CLAUDE_MANAGED_DIR'), platform = process.platfo
   if (test) take('MDM profile', path.join(base, PLIST), readPlist(path.join(base, PLIST)));
   else if (platform === 'darwin') {
     for (const f of [path.join('/Library/Managed Preferences', user || '-', PLIST), path.join('/Library/Managed Preferences', PLIST)]) take('MDM profile', f, readPlist(f));
+  }
+  // Windows' registry policies (HKCU: the person's own, checked as well: anything one source does counts).
+  for (const hive of ['HKLM', 'HKCU']) {
+    const name = hive === 'HKLM' ? 'registry policy (HKLM)' : 'registry policy (HKCU)';
+    if (test) take(name, path.join(base, REG_TEST[hive]), readJson(path.join(base, REG_TEST[hive])));
+    else if (platform === 'win32') take(name, `${hive}\\${REG_KEY}`, registry(hive));
   }
   // The files, merged.
   if (base) {
@@ -281,7 +319,7 @@ function orgNetwork(s) {
 // (absolute paths in a command, as words or quoted: the scripts it runs; existing files only)
 function commandFiles(command) {
   const out = [];
-  for (const m of String(command).matchAll(/"(\/[^"]+)"|'(\/[^']+)'|(?:^|\s)(\/[^\s;|&<>()'"]+)/g)) {
+  for (const m of String(command).matchAll(/"(\/[^"]+|[A-Za-z]:\\[^"]+)"|'(\/[^']+|[A-Za-z]:\\[^']+)'|(?:^|\s)(\/[^\s;|&<>()'"]+|[A-Za-z]:\\[^\s;|&<>()'"]+)/g)) {
     const f = m[1] || m[2] || m[3];
     try { if (fs.statSync(f).isFile()) out.push(f); } catch { /* not there */ }
   }
@@ -372,4 +410,4 @@ function check(opts = {}) {
   return { loosens: [...loosens], breaks: [...breaks], forcesSandbox, anyCommand: [...anyCommand], mcpBlocks: [...mcpBlocks], network, sources: found.map((x) => x.file), errors };
 }
 
-module.exports = { check, effects, orgNetwork, sources, merge, systemDir, RUN_COMMANDS };
+module.exports = { check, effects, orgNetwork, sources, merge, systemDir, parseReg, RUN_COMMANDS };

@@ -205,3 +205,26 @@ test('helper: Claude Code under managed settings that only break runs: stopped w
   assert.match(errs[0].message, /^Your organization's Claude Code settings ignore every permission rule but theirs/);
   assert.equal(calls(), 0);
 });
+
+test('claude-managed on Windows (9b(5)): C:\\Program Files\\ClaudeCode, the HKLM and HKCU registry policies', () => {
+  assert.match(managed.systemDir('win32'), /\\ClaudeCode$/);
+  assert.ok(!/ProgramData/i.test(managed.systemDir('win32')), 'not the old path');
+  const reg = (json, type = 'REG_SZ') => `\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Policies\\ClaudeCode\r\n    Settings    ${type}    ${json}\r\n\r\n`;
+  assert.deepStrictEqual(managed.parseReg(reg('{"permissions": {"defaultMode": "bypassPermissions"}}'), 'HKLM'), { value: { permissions: { defaultMode: 'bypassPermissions' } } });
+  assert.deepStrictEqual(managed.parseReg(reg('{"a":1}', 'REG_EXPAND_SZ'), 'HKLM'), { value: { a: 1 } });
+  assert.match(managed.parseReg(reg('0x1', 'REG_DWORD'), 'HKLM').error, /not a string/);
+  assert.match(managed.parseReg(reg('[1]'), 'HKCU').error, /^HKCU\\SOFTWARE\\Policies\\ClaudeCode Settings: not a JSON object/);
+  assert.match(managed.parseReg(reg('{oops'), 'HKLM').error, /HKLM/);
+  assert.equal(managed.parseReg('ERROR: The system was unable to find the specified registry key or value.', 'HKLM'), null);
+  // the registry read on Windows only (a stand-in for reg.exe), each hive its own source
+  const seen = [];
+  const r = managed.check({ dir: null, platform: 'win32', homedir: tempDir('cm-home-'), registry: (hive) => { seen.push(hive); return hive === 'HKLM' ? { value: { permissions: { defaultMode: 'bypassPermissions' } } } : { value: { env: { HTTPS_PROXY: 'http://192.0.2.1:3128' } } }; } });
+  assert.deepStrictEqual(seen, ['HKLM', 'HKCU']);
+  assert.deepStrictEqual(r.sources, ['HKLM\\SOFTWARE\\Policies\\ClaudeCode', 'HKCU\\SOFTWARE\\Policies\\ClaudeCode']);
+  assert.ok(r.loosens.length && r.anyCommand.length, 'HKLM\'s bypass mode counts');
+  assert.ok(r.network.stops.some((x) => x.kind === 'proxy' && x.source === 'registry policy (HKCU)'), 'HKCU\'s proxy counts');
+  // the test folder: registry-hklm.json / registry-hkcu.json stand for the values
+  const t = check({ 'registry-hklm.json': { permissions: { defaultMode: 'bypassPermissions' } }, 'registry-hkcu.json': '[1]' });
+  assert.ok(t.loosens.length);
+  assert.ok(t.errors.some((e) => /registry-hkcu\.json/.test(e)));
+});

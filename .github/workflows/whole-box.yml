@@ -217,6 +217,12 @@ jobs:
         run: |
           node --test tests/winbox.test.js tests/relay.test.js
           node tests/whole-box/win-w3-probe.js
+      # Step 9b(3) and (5), round 12: the Windows refusal words and managed-settings sources (unit tests), and
+      # where Claude Code reads an organization's policy on Windows (the file, HKLM, HKCU) against TRIF's check.
+      - name: Refusal words and an organization's policy on Windows (9b(3), 9b(5))
+        run: |
+          node --test --test-name-pattern="on Windows" tests/wholebox-refusals.test.js tests/claude-managed.test.js
+          node tests/whole-box/win-managed-probe.js
       - name: The network without the loopback exemption (named pipe), the pinned claude.exe
         env:
           WBX_REAL_RELAY: '1'

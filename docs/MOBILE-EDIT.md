@@ -7,6 +7,10 @@ mobile site on the Mac, and then sent to the phone. The phone side is TRIF's iPh
 
 Short version:
 
+- **Since 11-22 the phone is an iPhone 17's size: a 402 px page (402 × 874 screen, page area 402 × 780).** TRIF
+  doesn't know the person's phone, and 402 is today's most common width (Tim: "it'll be fine for nearly everything").
+  The 390 figures below are from when it was an iPhone 12–14's; the measurements hold the same way.
+
 - **Since 11-18 (branch phone-view2): an ordinary window.** The tab moves into an ordinary browser window sized
   so its page is 390 px wide beside TRIF's side panel (Chrome) or sidebar (Firefox): the browser's own address
   bar, back and forward, TRIF's toolbar button, and TRIF's real panel. Browsers without a side panel (Arc) keep

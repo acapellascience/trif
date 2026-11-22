@@ -3213,7 +3213,7 @@ async function startAgent(msg, { fromQueue = null, inView = null } = {}) {
   // (the run's scope: the site this host is in, a sensitive one of its own too; and the sites of their own
   // TRIF knows of, so the helper gives the run the right folder: helper/lib/scope.js scopeOf)
   // (a chat in the phone view: the agent is told the tab is one, phone.js)
-  // (width: the page's as measured, which an ordinary window can keep a little over the phone's 390: phone.js)
+  // (width: the page's as measured, which an ordinary window can keep a little over the phone's 402: phone.js)
   const phone = phoneChat ? { device: PHONE.name, width: (tabId !== undefined && Number.isFinite(phones.get(tabId)?.width) ? phones.get(tabId).width : PHONE.viewport.width), ...(tabId !== undefined && phones.isPhone(tabId) ? {} : { away: true }) } : undefined;
   const args = { site, scope: phoneChat ? PHONE_PREFIX + siteOfHost(site) : siteOfHost(site), splits: sens().splits, url: String(msg.url ?? ''), tabId, ...(phone ? { phone } : {}), prompt: withInView(withAttached(prompt, chatSite), notes), agent, agentLevel: agentLevelOf(String(msg.url ?? '') || site),
     // (which other sites' mods the chat may read: the user's choices and the sensitive list; the helper has the rule)

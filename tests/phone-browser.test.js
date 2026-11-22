@@ -54,12 +54,12 @@ test('the phone view: the site sees an iPhone in that tab only, and Back to desk
     // Chrome 156: a 792 px window, a 406 px page)
     const winW = () => E((id) => chrome.windows.get(id).then((w) => w.width), opened.window);
     const pageW = () => page(phoneTab, 'innerWidth');
-    if (W !== 390) {
+    if (W !== 402) {
       const before = await winW();
       await E(([id, width]) => chrome.windows.update(id, { width }), [opened.window, before - 20]);
       await sleep(800);
       assert.equal(await winW(), before, `a ${W} px page: the window can't go narrower`);
-      assert.ok(W > 390 && W < 500, `${W}: a phone's width, near enough`);
+      assert.ok(W > 402 && W < 500, `${W}: a phone's width, near enough`);
     }
     console.log(`# the phone view's page: ${W} x ${opened.viewport.h} in a ${await winW()} px window with the side panel`);
     // The person widens the window: its width corrected back (the page's resize listener, phone.js watchSize)
@@ -95,8 +95,8 @@ test('the phone view: the site sees an iPhone in that tab only, and Back to desk
     assert.equal(seen.coarse, true); assert.equal(seen.fine, false);
     assert.equal(seen.hoverNone, true); assert.equal(seen.anyHover, false); assert.equal(seen.both, false);
     assert.equal(seen.orientation, true);
-    assert.deepEqual(seen.screen, [390, 844]);
-    assert.deepEqual(seen.viewport, [W, 750]);
+    assert.deepEqual(seen.screen, [402, 874]);
+    assert.deepEqual(seen.viewport, [W, 780]);
     assert.equal(await page(phoneTab, 'document.getElementById("server").textContent'), 'phone', 'the server saw an iPhone, without client hints');
     assert.equal(await page(phoneTab, 'getComputedStyle(document.getElementById("layout"), "::after").content'), '"phone"', 'the CSS width query matches');
     const fh = await page(phoneTab, 'window.__fetchHeaders');
@@ -632,7 +632,7 @@ test('the phone view\'s panel: its navigation bar, the phone line and the phone 
     await phone.ev('document.getElementById("phone-nav-reload").click()');
     await waitFor('reload', async () => loads() > before && (await at()) === pages.url('/second'));
     await waitFor('the phone page again', () => h.page(phoneTab, 'document.readyState === "complete" && window.__seen && window.__seen.uaPhone'));
-    assert.equal(await h.page(phoneTab, 'innerWidth'), 390, 'the page keeps the phone\'s width: the bar is in the panel');
+    assert.equal(await h.page(phoneTab, 'innerWidth'), 402, 'the page keeps the phone\'s width: the bar is in the panel');
     // (a search, typed: Google's results page for it, Safari's default on an iPhone; never reached here)
     const anyUrl = () => h.E((id) => chrome.tabs.get(id).then((t) => t.pendingUrl || t.url), phoneTab);
     await phone.type('#phone-nav-url', 'cat videos');

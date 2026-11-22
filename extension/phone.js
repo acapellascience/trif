@@ -5,7 +5,7 @@
 // the tab back where it was, as a desktop tab again.
 //
 // The window (2026-11-18, after Tim tried it): an ORDINARY browser window, sized so its page area is the
-// phone's 390 px with TRIF's side panel (Chrome) or sidebar (Firefox) open beside the page. So the phone view
+// phone's 402 px with TRIF's side panel (Chrome) or sidebar (Firefox) open beside the page. So the phone view
 // has the browser's own address bar, back, forward and reload, TRIF's toolbar button, and TRIF's real panel.
 // The width is measured, not guessed: the window's parts (its frame and the panel) are the window's width less
 // the page's, as the page itself sees it, and the window is corrected by the difference (fitPhoneWindow). When
@@ -48,10 +48,11 @@ export const PHONE = Object.freeze({
   name: 'iPhone',
   ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
   platform: 'iPhone',
-  screen: Object.freeze({ width: 390, height: 844 }),
+  // (an iPhone 17's: TRIF doesn't know the person's phone, and 402 is today's most common width; Tim, 11-22)
+  screen: Object.freeze({ width: 402, height: 874 }),
   // (the page's part of the screen in Safari, its bars shown: what the window's page area is made, when the
   // screen has room)
-  viewport: Object.freeze({ width: 390, height: 750 }),
+  viewport: Object.freeze({ width: 402, height: 780 }),
   minHeight: 480,
 });
 

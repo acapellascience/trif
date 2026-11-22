@@ -104,9 +104,11 @@ window** whose page area is the phone's, with TRIF's side panel or sidebar besid
   Chrome 156, 500 px without the side panel, and 792 px with it, which leaves a **406 px page** beside its 386 px
   side panel (the window is clamped there: asked for 776, it stays 792). Firefox 161: 500 px without its sidebar;
   with it, the window went to 735 px with the page at exactly **390**. So in Chrome the page may be 16 px wider than
-  an iPhone 15's 390 (an iPhone 15 Pro Max is 430): the phone view's banner then says "This page is 406 px wide,
-  wider than an iPhone's 390: the browser won't make this window narrower." (draft). Tim's real Chrome may differ:
-  one look needed. Not done: zooming the tab to make 406 CSS px look like 390 (a per-tab zoom resets at every
+  an iPhone 12–14's 390 (other iPhones run from 375 to 440): the phone view's banner then says "This page is 406 px wide,
+  wider than an iPhone's 390. Make this panel wider (drag its edge) and the page narrows to fit." (approved
+  11-22; Tim's Chrome does the same). Dragging the panel wider works: the page shrinks, and the refit grows the window
+  on the page's side (the panel's outer edge stays put: `panelSide`, Chrome's sidePanel.getLayout or Firefox's
+  mozInnerScreenX), so the panel doesn't jump the other way. Not done: zooming the tab to make 406 CSS px look like 390 (a per-tab zoom resets at every
   navigation, section 2's "Zoom"). With the side panel closed the page is as wide as the window can go (500 in
   headless): nothing says so, since the banner is in the panel that's closed.
 - **The address bar is the browser's**, so the panel's stand-in navigation bar is gone here (it stays in the popup

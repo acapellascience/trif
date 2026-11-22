@@ -168,10 +168,33 @@ const WINDOW_FRAME_GUESS = { width: 360, height: 90 };
 
 const BOUNDS = ['left', 'top', 'width', 'height'];
 
-/** A tab's page size, as the page itself sees it (the isolated world: the page script doesn't reach it). */
+/**
+ * Which side of the page TRIF's panel is on, 'left' or 'right' (null: unknown). Firefox: from where the page
+ * starts in its window (`x`, pageSize). Chrome: sidePanel.getLayout where there is one (Chrome 140+; the
+ * person can move the side panel to the left in Chrome's settings), else its default, the right.
+ */
+async function panelSide(chrome, m) {
+  if (finite(m.size.x)) return m.size.x > m.win.width - m.size.w - m.size.x ? 'left' : 'right';
+  if (!chrome.sidePanel) return null;
+  try {
+    const layout = await chrome.sidePanel.getLayout?.();
+    if (layout?.side === 'left' || layout?.side === 'right') return layout.side;
+  } catch { /* no layout: the default */ }
+  return 'right';
+}
+
+/**
+ * A tab's page size, as the page itself sees it (the isolated world: the page script doesn't reach it). In
+ * Firefox also `x`, the page's left edge from the window's (mozInnerScreenX), which says which side its sidebar is on.
+ */
 async function pageSize(chrome, tabId) {
   try {
-    const [r] = await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, world: 'ISOLATED', func: () => ({ w: innerWidth, h: innerHeight }), injectImmediately: true });
+    const func = () => {
+      const r = { w: innerWidth, h: innerHeight };
+      if (typeof mozInnerScreenX === 'number' && typeof screenX === 'number') r.x = Math.round(mozInnerScreenX - screenX); // eslint-disable-line no-undef
+      return r;
+    };
+    const [r] = await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, world: 'ISOLATED', func, injectImmediately: true });
     return r?.result && r.result.w > 0 ? r.result : null;
   } catch { return null; }
 }
@@ -205,6 +228,14 @@ async function settled(chrome, tabId, windowId, pause) {
  */
 export async function fitPhoneWindow({ chrome, tabId, windowId, screen = null, home = null, log = () => {}, pause = 100, widthOnly = false, live = () => true }) {
   let before = null;
+  // (widthOnly with the panel on the page's right: the window's right edge, the panel's outer one, stays where it
+  // is, so the window grows or shrinks on the page's side, the way the person dragged the panel's edge, and the
+  // panel doesn't jump out the other way. Tim, 11-22)
+  let anchor = null;
+  const keepAnchor = async (m) => {
+    if (anchor == null || !finite(m.win.left) || Math.abs(m.win.left + m.win.width - anchor) <= 1) return;
+    await chrome.windows.update(windowId, { left: anchor - m.win.width }).catch((e) => log(`phone window: ${e?.message ?? e}`));
+  };
   for (let round = 0; round < 4; round++) {
     const m = await settled(chrome, tabId, windowId, pause);
     if (!m) return null;
@@ -212,12 +243,15 @@ export async function fitPhoneWindow({ chrome, tabId, windowId, screen = null, h
     if (!live()) return m.size;
     // (a maximized, full-screen or minimized window is the person's choice: left as it is)
     if (m.win.state && m.win.state !== 'normal') return m.size;
+    if (widthOnly && round === 0 && finite(m.win.left) && (await panelSide(chrome, m)) === 'right') anchor = m.win.left + m.win.width;
     const frame = { width: m.win.width - m.size.w, height: m.win.height - m.size.h };
     // (widthOnly: correcting a window the person has moved or made taller: only its width, where it is)
     const want = widthOnly ? { width: phoneBounds({ frame }).width } : phoneBounds({ frame, screen, home });
+    if (anchor != null) want.left = anchor - want.width;
     if (!BOUNDS.some((k) => finite(want[k]) && Math.abs(want[k] - m.win[k]) > 1)) return m.size;
-    // (the browser kept the window as it was though asked last round: it won't go there, so this is as close as it gets)
-    if (before && BOUNDS.every((k) => before[k] === m.win[k])) return m.size;
+    // (the browser kept the window as it was though asked last round: it won't go there, so this is as close as it gets;
+    // a width it wouldn't take, as Chrome's minimum with its side panel, mustn't move the window either)
+    if (before && BOUNDS.every((k) => before[k] === m.win[k])) { await keepAnchor(m); return m.size; }
     before = m.win;
     await chrome.windows.update(windowId, want).catch((e) => log(`phone window: ${e?.message ?? e}`));
     // (the page takes the new size a moment later: until its size changes, or 15 looks)

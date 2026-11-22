@@ -3552,7 +3552,7 @@ function renderPhone() {
 // The phone view's words beyond the menu's (drafts for Tim: docs/PHONE-LINK-STRINGS.md "The phone view's window").
 const PHONE_VIEW_TEXT = {
   hint: 'The phone view is in a window of its own. Click TRIF’s button there to open TRIF beside the phone.',
-  wider: 'This page is {w} px wide, wider than an iPhone’s 390: the browser won’t make this window narrower.',
+  wider: 'This page is {w} px wide, wider than an iPhone’s 390. Make this panel wider (drag its edge) and the page narrows to fit.',
   navFailed: 'Couldn’t go there: {error}',
 };
 const PHONE_WIDTH = 390;

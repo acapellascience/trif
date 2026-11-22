@@ -84,7 +84,7 @@ test('the phone view\'s window from the side panel\'s menu: the side panel besid
     const b = await waitFor('the banner, with the page\'s width when it isn\'t the phone\'s', async () => { const x = await phone.ev(BANNER); return x.banner && (st.width <= 392 || x.width) && x; });
     assert.equal(b.nav, false, 'no stand-in navigation bar: the window has the browser\'s address bar');
     assert.match(b.text, /^Phone view: 127\.0\.0\.1 sees an iPhone\./);
-    if (st.width > 392) assert.equal(b.width, `This page is ${st.width} px wide, wider than an iPhone’s 390: the browser won’t make this window narrower.`);
+    if (st.width > 392) assert.equal(b.width, `This page is ${st.width} px wide, wider than an iPhone’s 390. Make this panel wider (drag its edge) and the page narrows to fit.`);
     else assert.equal(b.width, null);
     assert.equal(await desk.ev('document.getElementById("phone-hint").hidden'), true, 'the side panel opened there: no hint');
     // the screenshots: the phone's page, the side panel beside it, and the two side by side (headless draws no

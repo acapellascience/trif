@@ -29,6 +29,8 @@ const { envVar } = require('./env');
 const R = require('./runtime');
 const { boxRoot } = require('./runs');
 const { isWindows, systemExe } = require('./platform');
+// (now, not when it's used: by then <home>\app, where this code is, may be gone)
+const { psArgs, encode: encodePs } = require('./win/powershell');
 
 const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
 const exists = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
@@ -68,11 +70,16 @@ const psq = (s) => `'${String(s).replace(/'/g, "''")}'`;
 
 /**
  * Windows: deletes `dirs` once process `pid` has ended (this one: its node.exe and the trif.cmd that started it
- * can't go while it runs), from a hidden, detached Windows PowerShell (System32's: never one on PATH, nor
- * TRIF_POWERSHELL_BIN's stand-in). Tries for a minute: a terminal whose current folder is in one keeps it.
- * The paths go in the script itself (-EncodedCommand, UTF-16): nothing secret.
+ * can't go while it runs), from a hidden Windows PowerShell (System32's: never one on PATH, nor
+ * TRIF_POWERSHELL_BIN's stand-in) that outlives this process. Tries for a minute: a terminal whose current
+ * folder is in one keeps it. The paths go in the script itself (-EncodedCommand, UTF-16): nothing secret.
+ *
+ * Started by a short-lived PowerShell's Start-Process, not spawned from here: Node puts the programs it starts
+ * in a job that ends them when it exits, and a detached one has no console, which Windows PowerShell won't
+ * start without (seen in a Windows 11 VM: neither ran). What Start-Process starts leaves that job (Node's
+ * allows it) and gets a console with no window. Takes the second or two PowerShell takes to start.
  */
-function removeLater(dirs, { pid = process.pid, env = process.env } = {}) {
+function removeLater(dirs, { pid = process.pid, env = process.env, run = spawnSync } = {}) {
   if (!dirs.length) return null;
   const script = [
     "$ErrorActionPreference = 'SilentlyContinue'",
@@ -87,11 +94,13 @@ function removeLater(dirs, { pid = process.pid, env = process.env } = {}) {
   ].join('\n');
   const root = env.SystemRoot || env.SYSTEMROOT || env.windir || 'C:\\Windows';
   const ps = path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  const { psArgs } = require('./win/powershell');
-  const child = require('child_process').spawn(ps, psArgs(script), { detached: true, stdio: 'ignore', windowsHide: true, cwd: path.parse(dirs[0]).root });
-  child.on('error', () => { /* said below: the folders stay */ });
-  child.unref();
-  return child;
+  // (the inner arguments as one string: base64 needs no quoting)
+  const inner = ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encodePs(script)].join(' ');
+  const outer = `Start-Process -FilePath ${psq(ps)} -WindowStyle Hidden -WorkingDirectory ${psq(path.parse(dirs[0]).root)} -ArgumentList ${psq(inner)}`;
+  const r = run(ps, psArgs(outer), { encoding: 'utf8', windowsHide: true, timeout: 60000, cwd: path.parse(dirs[0]).root });
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error(String(r.stderr || r.stdout || `exit ${r.status}`).trim().split(/\r?\n/)[0]);
+  return true;
 }
 
 function sleepSync(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }

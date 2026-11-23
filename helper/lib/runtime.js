@@ -107,11 +107,13 @@ async function ensureRuntime(home, { fetch = null, platform = process.platform, 
     fs.writeFileSync(file, data);
     const unpacked = path.join(tmp, 'x');
     fs.mkdirSync(unpacked);
+    // (tar runs in the temporary folder, every name it's given relative and ASCII: Windows' tar.exe takes its
+    // arguments in the console's code page, so a profile folder like C:\Users\Zoë would reach it garbled.)
     // (Windows' .zip holds npm and its ~2000 files beside node.exe: only node.exe and LICENSE are taken out
     // of it, by name. The tarballs keep bin/node under the same top folder and are unpacked whole.)
     const topName = archive.file.replace(/\.(tar\.xz|tar\.gz|zip)$/, '');
     const members = archive.file.endsWith('.zip') ? [`${topName}/node.exe`, `${topName}/LICENSE`] : [];
-    const r = await run(tar, ['-xf', file, '-C', unpacked, ...members]);
+    const r = await run(tar, ['-xf', archive.file, '-C', 'x', ...members], { cwd: tmp });
     if (r.code) throw new RuntimeError(`couldn't unpack ${archive.file}: ${r.out.trim().slice(-300)}`);
     const top = path.join(unpacked, topName);
     const from = nodeIn(top, platform);

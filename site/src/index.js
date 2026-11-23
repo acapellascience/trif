@@ -19,6 +19,7 @@ import { DEMO_FILES, EXTENSION_FILES, homeWith, modScript, pageWith, panelHtml, 
 import { IMAGES } from './images.js';
 import { noteHasFile, notePage } from './notes.js';
 import { CLIP, CLIP_JS } from './clip.js';
+import { INSTALL_PS1 } from './install-windows.js';
 
 const CSP = {
   'default-src': "'none'", 'script-src': "'self'", 'style-src': "'unsafe-inline'", 'connect-src': "'self'", 'img-src': "'self'",
@@ -49,6 +50,16 @@ const FORM_PAGE = { 'Referrer-Policy': 'same-origin' };
 const script = (body) => respond(body, 'text/javascript; charset=utf-8', 200, CACHE);
 const bodyType = (request) => (request.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
 const notFound = () => respond('Not found', 'text/plain', 404);
+
+/**
+ * /install.ps1: Windows' installer as release.js wrote it (`text`, or null before a release has one), as
+ * text/plain (what `irm` returns as a string). Only a filled-in install.ps1, its package pinned. GET and HEAD.
+ */
+export function installerWindows(request, text) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return respond('Method not allowed', 'text/plain', 405);
+  if (typeof text !== 'string' || !text.startsWith('# Installs TRIF ') || !/^ {2}\$PackageSha256 = '[0-9a-f]{64}'$/m.test(text)) return notFound();
+  return respond(request.method === 'HEAD' ? null : text, 'text/plain; charset=utf-8', 200, { 'Cache-Control': 'public, max-age=300' });
+}
 
 /** A side panel file from the extension's folder (ext/ in the ASSETS binding), if the panel uses it. */
 // (no-cache, with the asset's ETag: the browser asks again every time and gets a 304 when nothing changed.
@@ -242,6 +253,8 @@ export default {
     const { pathname, searchParams } = new URL(request.url);
     // (No /install.sh for now (Tim 11-23): a redirect to the newest release's file would run whatever was uploaded
     // there. The no-Node installer comes back served from this site, with what it downloads checked.)
+    // Windows' installer, the same way: this site's own code (install-windows.js, written by release.js).
+    if (pathname === '/install.ps1') return installerWindows(request, INSTALL_PS1);
     if (pathname === '/report' && request.method === 'POST') return receiveReport(request, env);
     if (pathname === '/windows' && request.method === 'POST') return receiveSignup(request, env);
     if (request.method !== 'GET' && request.method !== 'HEAD') return respond('Method not allowed', 'text/plain', 405);

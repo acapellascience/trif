@@ -36,7 +36,8 @@
 // Chrome and Firefox extensions and the npm package, has Mozilla sign the Firefox add-on (unlisted),
 // makes the two beta zips and install.sh (scripts/install.sh filled in with the package's URL and SHA-256
 // and the runtime pins: `curl -fsSL …/install.sh | sh` installs with no Node; install.ps1 likewise for
-// Windows, `irm …/install.ps1 | iex`), and writes the update feeds: updates/latest.json (+ .sig, signed with the
+// Windows, `irm https://timsrobot.com/install.ps1 | iex`, which the site serves from site/src/install-windows.js,
+// never from the release), and writes the update feeds: updates/latest.json (+ .sig, signed with the
 // release key) for the helper, updates/firefox.json for Firefox, and updates/mods.json (+ .sig), the mods
 // feed, empty: the release ships every mod as it is. Then it asks before publishing
 // anything: a commit and tag, a GitHub release with the files, and the feeds (pushed last, once the files
@@ -527,11 +528,13 @@ function installScript(template, { version, packageUrl, packageSha256, pins }) {
  * and the Windows runtime pins (.zip) written in, as installScript does install.sh's. Single-quoted
  * PowerShell strings, so only plain values go in (checked here).
  */
-function installScriptWindows(template, { version, packageUrl, packageSha256, pins }) {
+function installScriptWindows(template, { version, packageUrl, packageSha256, pins, nodeDist = NODE_DIST }) {
   const problem = runtimePinsProblem(pins);
   if (problem) throw new Error(problem);
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`bad version ${version}`);
   if (!/^https:\/\/[\w.-]+\/[\w./%+-]+$/.test(packageUrl)) throw new Error(`install.ps1: the package URL ${packageUrl} isn't a plain https URL`);
+  // (node.exe from nodejs.org's own release folder for the pinned version, as refresh-runtime pinned it)
+  if (pins.base !== `${nodeDist}v${pins.version}/`) throw new Error(`install.ps1: the runtime's base ${pins.base} isn't ${nodeDist}v${pins.version}/`);
   if (!/^[0-9a-f]{64}$/.test(packageSha256)) throw new Error('install.ps1: the package SHA-256 is not 64 hex digits');
   const rows = Object.entries(pins.archives).filter(([key]) => key.startsWith('win-'))
     .flatMap(([key, list]) => list.filter((a) => /\.zip$/.test(a.file)).map((a) => `${key} ${a.file} ${a.sha256}`));
@@ -541,6 +544,68 @@ function installScriptWindows(template, { version, packageUrl, packageSha256, pi
     if (!(name in values)) throw new Error(`install.ps1 template: unknown ${m}`);
     return values[name];
   });
+}
+
+/**
+ * site/src/install-windows.js for a release: `script` (installScriptWindows') as the module
+ * timsrobot.com/install.ps1 serves (site/src/index.js installerWindows). Throws on a script with a
+ * placeholder left or without its pins.
+ */
+function installModuleWindows(script, version) {
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`bad version ${version}`);
+  if (!String(script).startsWith('# Installs TRIF ') || /@@[A-Z0-9_]+@@/.test(script)) throw new Error('install-windows.js: the script isn\'t a filled-in install.ps1');
+  if (!/^ {2}\$PackageSha256 = '[0-9a-f]{64}'$/m.test(script)) throw new Error('install-windows.js: the script has no pinned package SHA-256');
+  if (!/^win-(x64|arm64) node-v[\w.-]+\.zip [0-9a-f]{64}$/m.test(script)) throw new Error('install-windows.js: the script has no pinned node.exe .zip');
+  return [
+    `// Made by scripts/release.js (installModuleWindows) for TRIF ${version}, from scripts/install.ps1: don't edit here.`,
+    '// timsrobot.com/install.ps1 serves it (site/src/index.js). Its package and TRIF\'s own node.exe .zip are pinned by',
+    '// SHA-256 in the script, which checks both before it runs anything; it changes only with a commit and a deploy of the site.',
+    `export const INSTALL_PS1_VERSION = ${JSON.stringify(version)};`,
+    `export const INSTALL_PS1 = ${JSON.stringify(script)};`,
+    '',
+  ].join('\n');
+}
+const INSTALL_WINDOWS_MODULE = path.join(ROOT, 'site', 'src', 'install-windows.js');
+
+/**
+ * Whether the package as published (`url`) is the very file the installer pins (`sha256`): a few tries, since a
+ * new release's download can take a moment to appear. Throws when it isn't, or can't be fetched.
+ */
+async function checkPublished(url, expected, { fetch = require('../helper/lib/update').fetchUrl, tries = 5, wait = 5000 } = {}) {
+  let last;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const got = crypto.createHash('sha256').update(await fetch(url, { maxBytes: 60 * 1024 * 1024, timeoutMs: 120000 })).digest('hex');
+      if (got !== expected) throw Object.assign(new Error(`${url} is ${got}, not the ${expected} the installer pins`), { final: true });
+      return;
+    } catch (e) {
+      if (e.final) throw e;
+      last = e;
+      if (i + 1 < tries) await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  throw new Error(`couldn't fetch ${url} to check it: ${last && last.message}`);
+}
+
+/**
+ * Whether the Windows runtime pins (helper/runtime.json's win-* .zip files) are what nodejs.org's
+ * SHASUMS256.txt for that version says, fetched now (install.ps1 pins them). Throws on any difference.
+ */
+async function checkWindowsPins(pins, { fetch = require('../helper/lib/update').fetchUrl, dist = NODE_DIST } = {}) {
+  const sums = new Map();
+  for (const line of String(await fetch(`${dist}v${pins.version}/SHASUMS256.txt`, { maxBytes: 1024 * 1024, timeoutMs: 60000 })).split('\n')) {
+    const m = line.trim().match(/^([0-9a-f]{64})\s+\*?(\S+)$/);
+    if (m) sums.set(m[2], m[1]);
+  }
+  let n = 0;
+  for (const [key, list] of Object.entries(pins.archives || {})) {
+    if (!key.startsWith('win-')) continue;
+    for (const a of list) {
+      n++;
+      if (sums.get(a.file) !== a.sha256) throw new Error(`helper/runtime.json pins ${a.file} as ${a.sha256}; nodejs.org's SHASUMS256.txt says ${sums.get(a.file) || 'nothing'}`);
+    }
+  }
+  if (!n) throw new Error('helper/runtime.json has no Windows .zip');
 }
 
 /** The newest Node release of `major` in nodejs.org's index.json. */
@@ -629,10 +694,11 @@ function preflight(version, { dryRun }) {
  * releases/latest/download/trif-firefox.xpi is a link to the newest add-on that never changes. install.sh
  * likewise: releases/latest/download/install.sh is always the newest release's.
  */
-function releaseAssets(out, { tgz, chromeZip, xpi, zips, installSh = null, installPs1 = null }) {
+// (Never install.ps1: the site serves it, site/src/install-windows.js.)
+function releaseAssets(out, { tgz, chromeZip, xpi, zips, installSh = null }) {
   const latestXpi = xpi && path.join(out, FIREFOX_XPI);
   if (latestXpi) fs.copyFileSync(xpi, latestXpi);
-  return [tgz, chromeZip, ...(xpi ? [xpi, latestXpi] : []), ...zips, ...(installSh ? [installSh] : []), ...(installPs1 ? [installPs1] : [])];
+  return [tgz, chromeZip, ...(xpi ? [xpi, latestXpi] : []), ...zips, ...(installSh ? [installSh] : [])];
 }
 
 function bump(version, dir = ROOT) {
@@ -791,13 +857,19 @@ async function release(version, { dryRun, skipTests }) {
   fs.writeFileSync(installSh, installScript(fs.readFileSync(path.join(src, 'scripts', 'install.sh'), 'utf8'), {
     version, packageUrl: `${base}/${tgzName}`, packageSha256: sha256(tgz), pins: readJson(path.join(src, 'helper', 'runtime.json')),
   }), { mode: 0o755 });
-  // install.ps1: the same for Windows (Windows PowerShell; TRIF's own node.exe).
-  const installPs1 = path.join(out, 'install.ps1');
-  fs.writeFileSync(installPs1, installScriptWindows(fs.readFileSync(path.join(src, 'scripts', 'install.ps1'), 'utf8'), {
-    version, packageUrl: `${base}/${tgzName}`, packageSha256: sha256(tgz), pins: readJson(path.join(src, 'helper', 'runtime.json')),
-  }));
+  // install.ps1: the same for Windows (Windows PowerShell; TRIF's own node.exe). Not a release file either:
+  // site/src/install-windows.js, written after the release once the published package is checked against its
+  // pin (here, a copy to read). Its node.exe pins are checked against nodejs.org's SHASUMS256.txt first.
+  const runtimePinsNow = readJson(path.join(src, 'helper', 'runtime.json'));
+  await checkWindowsPins(runtimePinsNow, { dist: process.env.TRIF_NODE_DIST || NODE_DIST });
+  const installPs1Text = installScriptWindows(fs.readFileSync(path.join(src, 'scripts', 'install.ps1'), 'utf8'), {
+    version, packageUrl: `${base}/${tgzName}`, packageSha256: sha256(tgz), pins: runtimePinsNow,
+  });
+  fs.writeFileSync(path.join(out, 'install.ps1'), installPs1Text);
+  const installWindowsJs = installModuleWindows(installPs1Text, version);
+  fs.writeFileSync(path.join(out, 'install-windows.js'), installWindowsJs);
 
-  const assets = releaseAssets(out, { tgz, chromeZip: path.join(out, `trif-chrome-${version}.zip`), xpi, zips, installSh, installPs1 });
+  const assets = releaseAssets(out, { tgz, chromeZip: path.join(out, `trif-chrome-${version}.zip`), xpi, zips, installSh });
   console.log(`\nReady in ${path.relative(ROOT, out)}:`);
   for (const a of assets) console.log(`  ${path.basename(a)}`);
   console.log(`\nWhat's new in ${version} (the side panel's summary):\n${panelNotes(notes, { repo, version })}\n`);
@@ -828,10 +900,19 @@ async function release(version, { dryRun, skipTests }) {
   const notesFile = path.join(out, 'notes.md');
   fs.writeFileSync(notesFile, notes + '\n');
   execFileSync('gh', ['release', 'create', `v${version}`, ...assets, '--repo', repo, '--title', `TRIF ${version}`, '--notes-file', notesFile], { cwd: ROOT, stdio: 'inherit' });
+  // Windows' installer: the package as GitHub serves it must be the one install.ps1 pins, or nothing changes
+  // on the site (the release stays; the feeds below still check every download themselves).
+  let installerWindows = true;
+  try { await checkPublished(`${base}/${tgzName}`, sha256(tgz)); } catch (e) {
+    installerWindows = false;
+    console.error(`\nThe published package doesn't check out, so site/src/install-windows.js is left as it was: ${e.message}`);
+  }
+  if (installerWindows) fs.writeFileSync(INSTALL_WINDOWS_MODULE, installWindowsJs);
   // The feeds go live last: by now the files they point at exist.
-  sh('git', ['add', 'updates']);
-  sh('git', ['commit', '-m', `Update feeds for ${version}`]);
+  sh('git', ['add', 'updates', ...(installerWindows ? [INSTALL_WINDOWS_MODULE] : [])]);
+  sh('git', ['commit', '-m', installerWindows ? `Update feeds and the Windows installer for ${version}` : `Update feeds for ${version}`]);
   sh('git', ['push', 'origin', branch], { stdio: 'inherit' });
+  if (installerWindows) console.log(`\nThe Windows installer for ${version} is in site/src/install-windows.js. It goes live when the site is deployed from this commit (cd site && npx wrangler deploy); until then timsrobot.com/install.ps1 installs the release it had.`);
   if (branch !== 'main') {
     console.log(`\nReleased TRIF ${version} from ${branch}. The feeds are committed there: installs see the update once ${branch} is merged into main and main is pushed.`);
     return;
@@ -860,4 +941,4 @@ if (require.main === module) {
   else release(cmd, { dryRun: flags.has('--dry-run'), skipTests: flags.has('--skip-tests') }).catch((e) => fail(e.stack || e.message));
 }
 
-module.exports = { runtimePins, runtimePinsProblem, installScript, installScriptWindows, newestNode, refreshRuntimeCommand, RUNTIME_PLATFORMS, modsFeedBytes, modsFeedEntries, refreshModsFeed, AMO_ISSUER, AMO_SECRET, keychain, keychainItem, keychainWriteInput, saveKeychainItem, refreshFeed, feedStaleOn, webExtSignArgs, webExtEnv, WEB_EXT_CONFIG, changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };
+module.exports = { runtimePins, runtimePinsProblem, installScript, installScriptWindows, installModuleWindows, INSTALL_WINDOWS_MODULE, checkPublished, checkWindowsPins, newestNode, refreshRuntimeCommand, RUNTIME_PLATFORMS, modsFeedBytes, modsFeedEntries, refreshModsFeed, AMO_ISSUER, AMO_SECRET, keychain, keychainItem, keychainWriteInput, saveKeychainItem, refreshFeed, feedStaleOn, webExtSignArgs, webExtEnv, WEB_EXT_CONFIG, changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };

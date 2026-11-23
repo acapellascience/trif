@@ -211,6 +211,8 @@ test('the front door on Windows: install.ps1 in PowerShell, the same in the exte
   const d = await doctor({ home: path.join(home, 'nope'), platform: 'win32', homedir: home, env: {}, regOpts: { env: {}, run: () => ({ status: 1, stdout: '', stderr: '' }) } });
   const ws = d.checks.find((c) => /^workspace /.test(c.title));
   if (!P.isGitCheckout()) assert.match(ws.fix, /irm https:\/\/timsrobot\.com\/install\.ps1 \| iex/);
+  const site = fs.readFileSync(path.join(__dirname, '..', 'site', 'src', 'index.js'), 'utf8');
+  assert.ok(site.includes(`pathname === '${new URL(P.WINDOWS_INSTALL_URL).pathname}') return installerWindows(request, INSTALL_PS1)`), 'timsrobot.com serves that path itself');
 });
 
 // install.ps1 (scripts/install.ps1, filled in by release.js installScriptWindows): the values, Windows' .zip
@@ -228,6 +230,7 @@ test('installScriptWindows: every value written in, Windows .zip archives only; 
   assert.match(s, new RegExp(`^ {2}\\$NodeBase = '${R.PINS.base}'$`, 'm'));
   for (const k of ['win-x64', 'win-arm64']) for (const a of R.PINS.archives[k]) assert.ok(s.includes(`\n${k} ${a.file} ${a.sha256}\n`), k);
   assert.doesNotMatch(s, /darwin-|linux-|\.tar\./);
+  assert.match(s, /^[\x00-\x7f]*$/, 'plain ASCII (Windows PowerShell 5.1 reads a saved .ps1 without a BOM in the ANSI code page)');
   assert.match(s, /^& \{$/m, 'all in one script block...');
   assert.strictEqual(s.trimEnd().split('\n').pop(), '} @args', '...run at the very end');
   assert.doesNotMatch(s.replace(/^\s*#.*$/gm, ''), /\bexit\b/, 'never exit (it would close the window under iex)');
@@ -235,5 +238,46 @@ test('installScriptWindows: every value written in, Windows .zip archives only; 
   assert.throws(() => fillW({ packageUrl: 'http://x.test/a.tgz' }), /plain https URL/);
   assert.throws(() => fillW({ packageSha256: 'abc' }), /64 hex/);
   assert.throws(() => fillW({ pins: { ...R.PINS, archives: {} } }), /no archive for/);
+  assert.throws(() => fillW({ pins: { ...R.PINS, base: 'https://mirror.example/node/' } }), /isn't https:\/\/nodejs\.org\/dist\//, "node.exe from nodejs.org's folder for the pinned version");
   assert.throws(() => rel.installScriptWindows(`${PS1}@@OTHER@@`, { version: '0.4.0', packageUrl: 'https://x.test/a.tgz', packageSha256: 'c'.repeat(64), pins: R.PINS }), /unknown @@OTHER@@/);
+});
+
+test('installModuleWindows: the site\'s module serves install.ps1 byte for byte; refuses one with a placeholder or no pin', async () => {
+  const s = rel.installScriptWindows(PS1, { version: '0.4.0', packageUrl: 'https://github.com/acapellascience/trif/releases/download/v0.4.0/timsrobot-0.4.0.tgz', packageSha256: 'c'.repeat(64), pins: R.PINS });
+  const text = rel.installModuleWindows(s, '0.4.0');
+  assert.ok(rel.INSTALL_WINDOWS_MODULE.endsWith(path.join('site', 'src', 'install-windows.js')));
+  const file = path.join(tempDir('install-ps1-js-'), 'install-windows.mjs');
+  fs.writeFileSync(file, text);
+  const m = await import(require('url').pathToFileURL(file).href);
+  assert.strictEqual(m.INSTALL_PS1, s);
+  assert.strictEqual(m.INSTALL_PS1_VERSION, '0.4.0');
+  const { installerWindows } = await import('../site/src/index.js');
+  const res = installerWindows(new Request('https://timsrobot.com/install.ps1'), m.INSTALL_PS1);
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(await res.text(), s);
+  assert.throws(() => rel.installModuleWindows(PS1, '0.4.0'), /filled-in/);
+  assert.throws(() => rel.installModuleWindows(s.replace(/^ {2}\$PackageSha256 = .*$/m, "  $PackageSha256 = ''"), '0.4.0'), /no pinned package/);
+  assert.throws(() => rel.installModuleWindows(s.replace(/^win-.*$/gm, ''), '0.4.0'), /no pinned node\.exe/);
+  assert.throws(() => rel.installModuleWindows(s, 'x'), /bad version/);
+  // (the committed module: none yet, or a filled-in script)
+  const { INSTALL_PS1 } = await import('../site/src/install-windows.js');
+  if (INSTALL_PS1 !== null) assert.doesNotThrow(() => rel.installModuleWindows(INSTALL_PS1, '0.0.0'));
+});
+
+test('checkPublished and checkWindowsPins: the package as served, and node.exe\'s pins as nodejs.org lists them', async () => {
+  const body = Buffer.from('the package');
+  const sum = crypto.createHash('sha256').update(body).digest('hex');
+  await rel.checkPublished('https://x.test/p.tgz', sum, { fetch: async () => body, wait: 0 });
+  await assert.rejects(rel.checkPublished('https://x.test/p.tgz', sum, { fetch: async () => Buffer.from('another'), wait: 0 }), /not the .* installer pins/);
+  let n = 0;
+  await rel.checkPublished('https://x.test/p.tgz', sum, { fetch: async () => { if (++n < 3) throw new Error('404'); return body; }, wait: 0 });
+  await assert.rejects(rel.checkPublished('https://x.test/p.tgz', sum, { fetch: async () => { throw new Error('404'); }, tries: 2, wait: 0 }), /couldn't fetch/);
+  // SHASUMS256.txt as nodejs.org writes it: every pinned file, the Windows .zip ones checked.
+  const shasums = Object.values(R.PINS.archives).flat().map((a) => `${a.sha256}  ${a.file}`).join('\n') + '\n';
+  const urls = [];
+  await rel.checkWindowsPins(R.PINS, { fetch: async (u) => { urls.push(u); return Buffer.from(shasums); }, dist: 'https://nodejs.org/dist/' });
+  assert.deepStrictEqual(urls, [`https://nodejs.org/dist/v${R.PINS.version}/SHASUMS256.txt`]);
+  const zip = R.PINS.archives['win-x64'][0];
+  await assert.rejects(rel.checkWindowsPins(R.PINS, { fetch: async () => Buffer.from(shasums.replace(zip.sha256, 'd'.repeat(64))) }), new RegExp(`pins ${zip.file.replace(/\./g, '\\.')} as`));
+  await assert.rejects(rel.checkWindowsPins({ ...R.PINS, archives: {} }, { fetch: async () => Buffer.from(shasums) }), /no Windows \.zip/);
 });

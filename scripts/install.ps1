@@ -11,7 +11,8 @@
 # administrator, and the Node.js you may already have (and your PATH's node) is left alone.
 #
 # The template is scripts/install.ps1 in TRIF's repo; scripts/release.js fills in the placeholders for each
-# release (installScriptWindows), as it does install.sh's. Needs only Windows PowerShell 5.1 (every
+# release (installScriptWindows) and, once the package GitHub serves is the one pinned here, writes the result
+# into site/src/install-windows.js, which timsrobot.com/install.ps1 serves (never a file on a release). Needs only Windows PowerShell 5.1 (every
 # Windows 10 and 11 has it) and Windows' own tar.exe. Everything is inside one script block, run at its
 # end: a download that's cut off doesn't parse, so it runs nothing. It never calls `exit` (under `iex`
 # that would close the PowerShell window it was typed in): a problem is said, and it stops.
@@ -98,7 +99,10 @@
       $nodeDir = Join-Path $tmp 'node'
       New-Item -ItemType Directory -Path $nodeDir | Out-Null
       # (only node.exe: the .zip holds npm's ~2000 files beside it)
-      Invoke-Program $tar @('-xf', $zip, '-C', $nodeDir, "$top/node.exe")
+      # (tar.exe runs in the temporary folder with relative names: it takes its arguments in the console's
+      # code page, so a profile folder with an accent in its name would reach it garbled)
+      Push-Location -LiteralPath $tmp
+      try { Invoke-Program $tar @('-xf', $file, '-C', 'node', "$top/node.exe") } finally { Pop-Location }
       if ($LASTEXITCODE -ne 0) { Stop-Install "couldn't unpack $file" }
       $node = Join-Path $nodeDir "$top\node.exe"
       $v = $null
@@ -110,7 +114,8 @@
       Save-Checked $PackageUrl $tgz $PackageSha256
       $pkg = Join-Path $tmp 'pkg'
       New-Item -ItemType Directory -Path $pkg | Out-Null
-      Invoke-Program $tar @('-xzf', $tgz, '-C', $pkg)
+      Push-Location -LiteralPath $tmp
+      try { Invoke-Program $tar @('-xzf', 'trif.tgz', '-C', 'pkg') } finally { Pop-Location }
       if ($LASTEXITCODE -ne 0) { Stop-Install "couldn't unpack TRIF's package" }
       $cli = Join-Path $pkg 'package\helper\cli.js'
       if (-not (Test-Path -LiteralPath $cli)) { Stop-Install "TRIF's package has no helper in it" }

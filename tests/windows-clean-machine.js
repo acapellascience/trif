@@ -90,7 +90,7 @@ function runCmd(file, args, env, { timeout = 300000 } = {}) {
   });
 }
 function powershell(script, env, { timeout = 600000 } = {}) {
-  const full = `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); ${script}`;
+  const full = `$ProgressPreference = 'SilentlyContinue'; [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); ${script}`;
   const t = t0();
   const r = spawnSync(POWERSHELL, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(full, 'utf16le').toString('base64')], { env, encoding: 'utf8', timeout, windowsHide: true });
   return { code: r.status, out: `${r.stdout || ''}${r.stderr || ''}${r.error ? `\n${r.error.message}` : ''}`, ms: msSince(t) };
@@ -181,7 +181,9 @@ const BROWSER_KEYS = { chrome: 'Google\\Chrome', edge: 'Microsoft\\Edge' };
 
 function wrapperNode(c, name) {
   const file = path.join(c.bin, name);
-  const p = launchers.parseLauncher(fs.readFileSync(file, 'utf8'), { file, profile: c.profile });
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return null; }
+  const p = launchers.parseLauncher(text, { file, profile: c.profile });
   return p && p.node;
 }
 
@@ -324,7 +326,8 @@ function fenceCheck(c) {
         .replace(/^ {2}\$NodeBase = .*$/m, `  $NodeBase = '${srv.base}'`);
       fs.writeFileSync(path.join(S, 'files', 'install.ps1'), script);
       const setupArgs = ['--browser', 'chrome,edge', '--no-examples', ...(SAFE ? ['--no-link'] : [])];
-      const r = powershell(`& ([scriptblock]::Create((irm ${srv.base}install.ps1))) ${setupArgs.join(' ')}`, c.env);
+      // (each option in quotes: PowerShell would pass chrome,edge as an array, "chrome edge")
+      const r = powershell(`& ([scriptblock]::Create((irm ${srv.base}install.ps1))) ${setupArgs.map((a) => `'${a}'`).join(' ')}`, c.env);
       info(`install.ps1 (local server, the real .zip): ${r.ms} ms`);
       check(r.code === 0 && !/TRIF install:/.test(r.out), 'install.ps1 runs to the end', r.out);
       const rt = R.installedNode(c.ws);

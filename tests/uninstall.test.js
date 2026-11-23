@@ -170,7 +170,7 @@ test('uninstall on Windows: registry keys, the PATH entry, bin and runtime remov
   assert.equal(exists(ws.private), false);
 });
 
-test('removeLater: a hidden, detached Windows PowerShell that waits for the process, then deletes the folders', { skip: process.platform !== 'win32' && 'Windows only' }, async () => {
+test('removeLater: a hidden Windows PowerShell that outlives this process waits for it, then deletes the folders', { skip: process.platform !== 'win32' && 'Windows only' }, async () => {
   const { removeLater } = require('../helper/lib/uninstall');
   const { spawn } = require('child_process');
   const root = tempDir('later-');

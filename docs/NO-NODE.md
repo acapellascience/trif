@@ -133,14 +133,21 @@ The same runtime, the same pins file. What's different there:
   OS's architecture, downloads the .zip and the package, checks each against its SHA-256 (`Save-Checked`,
   the one place that verifies), runs `node.exe package\helper\cli.js setup --copy` with
   `TRIF_RUNTIME_ARCHIVE` = the checked .zip. All in one script block run at its end (a cut-off download
-  doesn't parse); it never calls `exit` (under `iex` it would close the window). Not served yet: the site
-  delivery waits on the release's design for install.sh (served from the site, its downloads checked),
-  which install.ps1 follows.
+  doesn't parse); it never calls `exit` (under `iex` it would close the window).
+- **Delivery** (the pattern of release-0.4.0's install.sh): timsrobot.com/install.ps1 is the site's own code,
+  `site/src/install-windows.js` (`INSTALL_PS1`, null until a release writes it: a 404), served by
+  `site/src/index.js` `installerWindows` as text/plain (what `irm` returns as a string), only a filled-in
+  script with its package pinned; never a redirect, never a release file. release.js checks the Windows
+  pins against nodejs.org's SHASUMS256.txt (`checkWindowsPins`), fills the script, and after `gh release
+  create` writes the module only if the package GitHub serves has the pinned SHA-256 (`checkPublished`);
+  it goes live with a deploy of the site from that commit.
 - **Uninstall**: the browsers' registry keys naming a removed manifest go, `<home>\bin` comes off the user's
   PATH (win/userpath.js `removeFromUserPath`), running helpers are found by their pipe markers and ended with
   `taskkill /T`. `bin\` and `runtime\` (with `--all`, the workspace) can't be deleted while this command runs
-  from them (node.exe is in use; cmd.exe re-reads trif.cmd after each command): a hidden, detached Windows
-  PowerShell waits for the process to end and deletes them (`removeLater`).
+  from them (node.exe is in use; cmd.exe re-reads trif.cmd after each command): a hidden Windows PowerShell
+  waits for the process to end and deletes them (`removeLater`). It's started by a short PowerShell's
+  `Start-Process`: what Node spawns is in a job that ends with it, and a detached PowerShell (no console)
+  doesn't start at all (both seen in the VM).
 - **Upgrade from a Node-based install**: as on macOS: the old updater runs the new setup on the system node;
   setup fetches the runtime and rewrites the wrappers. Pruning an older runtime that's running (the helper
   that ran the update) fails on its node.exe and is retried at the next setup.

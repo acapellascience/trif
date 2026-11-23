@@ -146,6 +146,27 @@ test('/install.sh is not a redirect to a release file (for now there is none)', 
   }
 });
 
+test('/install.ps1 is the site\'s own: install-windows.js\'s script, never a redirect; a 404 before a release has one', async () => {
+  const [{ default: worker, installerWindows }] = await load();
+  const { INSTALL_PS1 } = await import('../site/src/install-windows.js');
+  for (const method of ['GET', 'HEAD']) {
+    const res = await worker.fetch(new Request('https://timsrobot.com/install.ps1', { method }), env());
+    assert.equal(res.headers.get('Location'), null, 'no redirect');
+    assert.equal(res.status, INSTALL_PS1 ? 200 : 404);
+  }
+  const script = "# Installs TRIF 0.4.0 on Windows\n& {\n  $PackageSha256 = '" + 'a'.repeat(64) + "'\n} @args\n";
+  const res = installerWindows(new Request('https://timsrobot.com/install.ps1'), script);
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), script, 'the text as release.js wrote it');
+  assert.match(res.headers.get('Content-Type'), /^text\/plain; charset=utf-8/, "text, which irm returns as a string");
+  assert.equal(res.headers.get('X-Content-Type-Options'), 'nosniff');
+  assert.equal(await installerWindows(new Request('https://timsrobot.com/install.ps1', { method: 'HEAD' }), script).text(), '');
+  assert.equal(installerWindows(new Request('https://timsrobot.com/install.ps1', { method: 'POST' }), script).status, 405);
+  assert.equal(installerWindows(new Request('https://timsrobot.com/install.ps1'), '<html>').status, 404, 'only a filled-in install.ps1');
+  assert.equal(installerWindows(new Request('https://timsrobot.com/install.ps1'), "# Installs TRIF 0.4.0\n  $PackageSha256 = '@@PACKAGE_SHA256@@'\n").status, 404, 'not the template');
+  assert.equal((await worker.fetch(new Request('https://www.timsrobot.com/install.ps1'), env())).headers.get('Location'), 'https://timsrobot.com/install.ps1', 'www goes to the bare name first');
+});
+
 test('the home page\'s robot is the extension\'s shaded robot', async () => {
   const fs = require('fs');
   const path = require('path');

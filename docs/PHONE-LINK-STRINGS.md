@@ -19,7 +19,7 @@ approved, then can move into extension/explain.json so that `trif explain` knows
 | The line under it | Your iPhone asks this computer's agent for mods. | new in round 9 (draft): the 6 to 9 word line. Always shown, on or off |
 | Behind the line's "i" (the explanation; "more" shows what follows the line) | Your iPhone asks this computer's agent for mods. TRIF on your iPhone sends the page you're on to your coding agent here, over your Wi-Fi, and gets a phone mod back to approve there. The agent works inside TRIF's sandbox, as in this chat, and writes phone mods only. Nothing here answers the network until you connect a phone. | new in round 9 (draft). It replaces round 1's draft for the line under the name: "TRIF on your iPhone can ask your coding agent on this computer to make phone mods, over your Wi-Fi. Off until you connect a phone." |
 | The button | Connect a phone | turns the link on if it was off, opens the pairing window and shows the QR code |
-| Over the QR code | Scan this with TRIF on your iPhone: More, then My computer. | |
+| Over the QR code | Scan this with your phone’s camera. (Tim 11-23: the camera opens TRIF's trif://pair link; was "Scan this with TRIF on your iPhone: More, then My computer.") | |
 | Under it | Good for 5 minutes, for one phone. | |
 | The button under the code | Cancel | new in round 9 (draft): closes the pairing window. Closing Settings or the panel does the same |
 | The QR code's name for a screen reader | The code to scan | new in round 9 (draft) |

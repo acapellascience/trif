@@ -649,3 +649,11 @@ test('windows: the npm package installs there; checkouts keep LF line endings', 
   assert.match(fs.readFileSync(path.join(__dirname, '..', '.gitattributes'), 'utf8'), /^\* text=auto eol=lf$/m);
   assert.ok(os.EOL); // (keeps `os` used on every system)
 });
+
+test('windows PowerShell: started without PSModulePath (PowerShell 7\'s module folders break 5.1\'s own cmdlets)', () => {
+  const { psEnv } = require('../helper/lib/win/powershell');
+  const env = psEnv({ PATH: 'C:\\Windows\\System32', PSModulePath: 'C:\\Program Files\\PowerShell\\7\\Modules', SystemRoot: 'C:\\Windows' });
+  assert.deepEqual(env, { PATH: 'C:\\Windows\\System32', SystemRoot: 'C:\\Windows' });
+  assert.equal('PSModulePath' in psEnv({ psmodulepath: 'x' }), false);
+  assert.deepEqual(Object.keys(psEnv({ psmodulepath: 'x', A: '1' })), ['A']);
+});

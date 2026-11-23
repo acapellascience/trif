@@ -28,6 +28,17 @@ function powershellBin({ env = process.env, bin = null } = {}) {
   return { file: path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), prefix: [] };
 }
 
+/**
+ * The environment for Windows PowerShell: the helper's, without PSModulePath. A TRIF started from PowerShell 7
+ * (`trif …` typed there) has 7's module folders in it, and Windows PowerShell 5.1 then can't load its own
+ * ConvertFrom-Json or Get-FileHash (seen on windows-latest); without the variable it uses its own defaults.
+ */
+function psEnv(env = process.env) {
+  const out = {};
+  for (const [k, v] of Object.entries(env)) if (k.toLowerCase() !== 'psmodulepath') out[k] = v;
+  return out;
+}
+
 /** `input` as one JSON line in ASCII. */
 function inputLine(input) {
   return `${JSON.stringify(input).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)}\n`;
@@ -52,7 +63,7 @@ function runPowerShell(script, input, { env = process.env, bin = null, timeout =
     let child;
     try {
       // (Its own environment is the helper's: PowerShell needs SystemRoot, PSModulePath, TEMP...)
-      child = spawnFn(file, [...prefix, ...psArgs(script)], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: process.env });
+      child = spawnFn(file, [...prefix, ...psArgs(script)], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: psEnv() });
     } catch (e) {
       resolve({ code: null, stdout: '', stderr: e.message });
       return;
@@ -78,7 +89,7 @@ function runPowerShellSync(script, input, { env = process.env, bin = null, timeo
   const { file, prefix } = powershellBin({ env, bin });
   try {
     const r = spawnSyncFn(file, [...prefix, ...psArgs(script)], {
-      input: input === undefined ? '' : inputLine(input), encoding: 'utf8', timeout, windowsHide: true, env: process.env,
+      input: input === undefined ? '' : inputLine(input), encoding: 'utf8', timeout, windowsHide: true, env: psEnv(),
     });
     if (r.error) return { code: null, stdout: '', stderr: r.error.message };
     return { code: r.status, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') };
@@ -93,4 +104,4 @@ function psComplaint(r) {
   return (lines[0] || (r.code === null ? 'couldn\'t run PowerShell' : `exit status ${r.code}`)).slice(0, 300);
 }
 
-module.exports = { powershellBin, psArgs, encode, inputLine, runPowerShell, runPowerShellSync, psComplaint };
+module.exports = { powershellBin, psArgs, psEnv, encode, inputLine, runPowerShell, runPowerShellSync, psComplaint };

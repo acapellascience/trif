@@ -30,7 +30,7 @@ const R = require('./runtime');
 const { boxRoot } = require('./runs');
 const { isWindows, systemExe } = require('./platform');
 // (now, not when it's used: by then <home>\app, where this code is, may be gone)
-const { psArgs, encode: encodePs } = require('./win/powershell');
+const { psArgs, psEnv, encode: encodePs } = require('./win/powershell');
 
 const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
 const exists = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
@@ -97,7 +97,7 @@ function removeLater(dirs, { pid = process.pid, env = process.env, run = spawnSy
   // (the inner arguments as one string: base64 needs no quoting)
   const inner = ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encodePs(script)].join(' ');
   const outer = `Start-Process -FilePath ${psq(ps)} -WindowStyle Hidden -WorkingDirectory ${psq(path.parse(dirs[0]).root)} -ArgumentList ${psq(inner)}`;
-  const r = run(ps, psArgs(outer), { encoding: 'utf8', windowsHide: true, timeout: 60000, cwd: path.parse(dirs[0]).root });
+  const r = run(ps, psArgs(outer), { encoding: 'utf8', windowsHide: true, timeout: 60000, cwd: path.parse(dirs[0]).root, env: psEnv() });
   if (r.error) throw r.error;
   if (r.status !== 0) throw new Error(String(r.stderr || r.stdout || `exit ${r.status}`).trim().split(/\r?\n/)[0]);
   return true;

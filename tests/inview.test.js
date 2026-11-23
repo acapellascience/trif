@@ -181,7 +181,8 @@ test('helper inview.shot: the picture in the site\'s screenshots folder, fresh, 
     assert.equal(path.dirname(r.file), path.join(home, 'private', 'screenshots', 'x.com'));
     assert.match(path.basename(r.file), /^in-view-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-[0-9a-f]{6}\.jpg$/);
     assert.deepEqual(fs.readFileSync(r.file), jpg);
-    assert.equal(fs.statSync(r.file).mode & 0o777, 0o600);
+    // (modes do nothing on Windows, where the private folder's access list keeps other users out)
+    if (process.platform !== 'win32') assert.equal(fs.statSync(r.file).mode & 0o777, 0o600);
     // the phone view's chat: its phone twin's folder (as runs.js names it)
     const p = saveInViewShot(ws, { scope: 'phone~x.com', dataUrl: `data:image/jpeg;base64,${jpg.toString('base64')}` });
     assert.equal(path.basename(path.dirname(p.file)), 'phone_x.com');

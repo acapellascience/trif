@@ -55,6 +55,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   a.stop();
   const after = browse();
   console.log(`  | (information) browsing after: ${JSON.stringify(after.stdout)}`);
+  // (information) Windows Firewall as doctor reads it, for this node.exe: the runner has no rule for it
+  const fw = require('../helper/lib/win/firewall');
+  const v = fw.check(process.execPath);
+  console.log(`  | (information) Windows Firewall for ${process.execPath}: ${JSON.stringify(v)}; doctor: ${JSON.stringify(fw.doctorCheck(v))}`);
   console.log(failed ? `${failed} checks failed` : 'all passed');
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.log(`FAIL  ${e.stack}`); process.exit(1); });

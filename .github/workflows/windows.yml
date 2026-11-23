@@ -61,7 +61,6 @@ jobs:
         run: node tests/windows-smoke.js
       - name: The phone link's announcer (trif-dnssd.exe built by csc.exe, Windows' DNS-SD API, found by browsing)
         if: always()
-        continue-on-error: true
         run: node tests/windows-dnssd.js
       - name: Chrome for Testing, for the browser check
         if: always() && matrix.node != 18

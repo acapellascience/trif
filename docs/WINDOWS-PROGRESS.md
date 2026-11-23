@@ -509,8 +509,16 @@ install) and Windows Firewall's own prompt (no setup rule, no administrator).
 - **Tests**: `tests/phone-link-windows.test.js` on every system (the announcer on `win32` with a `.js` stand-in:
   the Mac's arguments, ended by closing its input, retried when it exits; no csc.exe → `missing`; the program's
   build with a stand-in compiler; the firewall's verdicts and doctor's lines; the PowerShell read; doctor's
-  line end to end on Windows only). `tests/windows-dnssd.js` on windows-latest (windows.yml, information
-  first): the real program built, registered, found by browsing, taken back. The older phone-link tests stay
+  line end to end on Windows only). `tests/windows-dnssd.js` on windows-latest (windows.yml, a required step
+  since its first run passed): the real program built by csc.exe (170 ms), registered through Windows' DNS-SD
+  API, found by browsing (`TRIF CI <pid>._trif._tcp.local`), taken back when its input closed (exit 0); then,
+  for information, the runner's firewall as doctor reads it. CI at `e836e30`: windows
+  [45120851670](https://github.com/acapellascience/trif/actions/runs/45120851670) green (both Node versions,
+  `still-skipped`), windows-fence [45120851766](https://github.com/acapellascience/trif/actions/runs/45120851766)
+  green, the macOS tests [45120851697](https://github.com/acapellascience/trif/actions/runs/45120851697) red only
+  on phone-link's own two (`skill-browser` try-style, `phone-browser`'s 750 px), as before. (Browsing again
+  right after the record was taken back still listed it: Windows' cache, not a record left behind; a phone
+  that asks then finds nothing at the port.) The older phone-link tests stay
   skipped on Windows (reason `phone-link`, reworded: their keyring and dns-sd stand-ins are the Mac's scripts).
 - **Only a real pairing shows**: the iPhone finding the record over Wi-Fi (Parallels on Bridged), the host name
   resolving without an address in the record, the firewall prompt and its rule, a phone run and sync through

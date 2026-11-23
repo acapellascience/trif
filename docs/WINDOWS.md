@@ -25,13 +25,14 @@ this on a real Windows desktop: see [Not seen yet](#not-seen-yet).
 | | On Windows now | Seen |
 |---|---|---|
 | `npx timsrobot setup` | workspace `%USERPROFILE%\.trif`, the copy in `~\.trif\app`, wrappers, native host manifests, registry keys, `~\.trif\bin` on the user's Path | smoke test |
+| No Node needed: `irm https://timsrobot.com/install.ps1 \| iex` | TRIF's own `node.exe` (pinned .zip from nodejs.org) in `~\.trif\runtime\node-v<ver>-win-<arch>`, the wrappers on it, then setup as above; `trif uninstall` (registry keys, Path, the folders once it ends); the upgrade from a Node-based install moves onto it (docs/NO-NODE.md "Windows") | `tests/windows-clean-machine.js`: CI job `clean-machine` (x64) and Tim's Windows 11 ARM VM (arm64, `--safe`), no node on PATH. The site doesn't serve install.ps1 until a release writes it |
 | Native messaging | Chrome, Chromium, Edge, Brave, Firefox keys under `HKCU\Software` | Chrome for Testing 157, Edge 156–157, Brave 157: browser check, each starting the helper itself; since 11-20 the check in Edge (stable, as the runner has it) is required, not just informing, and the smoke test sets Edge up too. Firefox: the key is written and read back, not tried in a real Firefox |
 | The helper | started by the browser through `trif-host.bat`; ends when the browser closes its end | browser check |
 | The extension | loads unpacked, its service worker connects, hello with version and browser | browser check |
 | `trif` CLI | `trif.cmd` (Command Prompt, PowerShell); talks to the helper over a named pipe. A `trif` script for Git Bash is written too | smoke test, browser check (`trif.cmd`, through `cmd.exe`). The Git Bash script: written, never run |
 | `trif doctor` | wrappers, manifests, registry keys, helper, extension | smoke test, browser check |
 | API keys | Windows Credential Manager, never in argv or the environment | smoke test (a decision for Tim: [Keys](#keys-and-secrets)) |
-| Updates | unpacked with System32's `tar.exe`; `~\.trif\app` swapped with retries | unit tests with stand-ins only |
+| Updates | unpacked with System32's `tar.exe`; `~\.trif\app` swapped with retries | a real update from a local signed feed, and the upgrade from 014da14 (a Node-based install): `tests/windows-clean-machine.js` |
 | Mods | scanned, sent, held, switched, as elsewhere | unit tests |
 | Chats from the panel, `trif agent run` | **Claude Code and Codex: yes**, fenced (no shell; `trif` as a tool whose program runs in the run's AppContainer; Codex with TRIF's fenced file tools). Open models are listed as not available from the panel, with why | `tests/windows-run.js`: a real run with the real Claude Code, 70 checks, and with the real Codex, 134 (**seen**); unit tests |
 | Logging in from the panel | off on Windows: the agent's own sign-in is done in a terminal | unit tests |

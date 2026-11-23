@@ -28,7 +28,10 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
 - [x] 10. CI: job on macos-latest and ubuntu-latest that builds, removes node from PATH, runs 8 and 9; CI
       tests on the pinned Node version.
 - [x] 11. Size and startup time recorded here; phone-link branch checked on the runtime (crypto X25519, http).
-- [ ] 12. Windows: list what's left for branch `windows` (node.exe zip, .cmd wrappers) once it's on main.
+- [x] 12. Windows, built on branch `windows` (Tim 11-23: "we should build no-node for windows", before
+      `windows` reaches main): node.exe from the pinned .zip, the .bat/.cmd wrappers on it, install.ps1
+      served by the site, uninstall, the upgrade, CI job `clean-machine` in windows.yml. Below and in
+      docs/NO-NODE.md "Windows"; docs/WINDOWS-PROGRESS.md "No Node on Windows".
 
 ## Measurements
 
@@ -131,11 +134,21 @@ Branch `no-node`, worktree ~/WebMods-worktrees/no-node.
 
 ## Next step
 
-Step 12 (Windows list) waits on `windows` reaching main. Nothing else is open: if it hasn't moved, stop
-and report rather than start new work. (Tim reviews the step-7 drafts in docs/NO-NODE-STRINGS.md; apply
+Nothing on the checklist is open. Waiting on others: Tim's words (NO-NODE-STRINGS.md, WINDOWS-STRINGS.md
+47-55), `windows` and release-0.4.0 meeting main (install.ps1's delivery copies release-0.4.0's install.sh
+pattern; when they meet, site/src/index.js gets both routes, release.js both modules). (Tim reviews the step-7 drafts in docs/NO-NODE-STRINGS.md; apply
 his changes if he sends any.)
 
 ## Notes for next round
+
+- Step 12 as built (branch `windows`, 11-23): see docs/NO-NODE.md "Windows". Found on the way, each seen in
+  Tim's Windows 11 ARM VM and on windows-latest: Windows' tar.exe takes its arguments in the console's code
+  page (a profile folder with an accent reached it as "Zo? ??": run it in the folder with relative ASCII
+  names); a Windows PowerShell started from PowerShell 7 can't load Get-FileHash (7's module folders: .NET's
+  own SHA256 and WebClient instead); Node's children die with it (its job), and a detached PowerShell has no
+  console and doesn't start (uninstall's deferred delete goes through Start-Process); in PowerShell
+  `--browser chrome,edge` is an array (quote it); Node has navigator.platform "win32" (the extension tells
+  Windows by the browser's userAgent).
 
 - Tim's answers (2026-11-17), now the plan: (1) TRIF ships its own pinned Node (the private runtime);
   (2) the main install command is `curl -fsSL https://timsrobot.com/install.sh | sh`, `npx timsrobot setup`

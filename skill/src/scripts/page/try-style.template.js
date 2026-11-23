@@ -22,6 +22,7 @@
     const text = on ? el.innerText : [el, ...el.querySelectorAll('*')].map((x) => [...x.childNodes].filter((c) => c.nodeType === 3).map((c) => c.data.trim()).join(' ')).filter(Boolean).join(' ');
     return `${el.tagName.toLowerCase()}${id} ${on ? `${Math.round(r.width)}x${Math.round(r.height)}` : '(hidden)'} "${clip(text, 50)}"`;
   };
+  const topLevelList = /*TOP_LEVEL_LIST*/;
   const selectorsOf = /*SELECTORS_OF*/;
 
   // A style mod's rules, or a style section's object, as TRIF hands them to its runtime (rules.js checkRules,

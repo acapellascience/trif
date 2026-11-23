@@ -22,6 +22,21 @@
     const text = on ? el.innerText : [el, ...el.querySelectorAll('*')].map((x) => [...x.childNodes].filter((c) => c.nodeType === 3).map((c) => c.data.trim()).join(' ')).filter(Boolean).join(' ');
     return `${el.tagName.toLowerCase()}${id} ${on ? `${Math.round(r.width)}x${Math.round(r.height)}` : '(hidden)'} "${clip(text, 50)}"`;
   };
+  const topLevelList = function topLevelList(list) {
+  const out = [];
+  let depth = 0, quote = '', from = 0;
+  for (let i = 0; i < list.length; i++) {
+    const c = list[i];
+    if (quote) { if (c === '\\') i++; else if (c === quote) quote = ''; continue; }
+    if (c === '\\') i++;
+    else if (c === '"' || c === "'") quote = c;
+    else if (c === '(' || c === '[') depth++;
+    else if ((c === ')' || c === ']') && depth > 0) depth--;
+    else if (c === ',' && depth === 0) { out.push(list.slice(from, i)); from = i + 1; }
+  }
+  out.push(list.slice(from));
+  return out;
+};
   const selectorsOf = function selectorsOf(rules) {
   const out = new Set();
   const add = (s) => { const t = String(s || '').trim(); if (t && t.length <= 300 && !/^(html|body|:root|\*)$/i.test(t)) out.add(t); };

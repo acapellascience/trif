@@ -105,7 +105,9 @@ function tryStyleFile() {
   once(rt, 'new MutationObserver(', 'new MutationObserver(', 'rulesRuntime (its observer)');
   once(rt, "style.setAttribute('data-trif-style', String(id));", "style.setAttribute('data-trif-style', String(id));", 'rulesRuntime (its style element)');
   const tpl = fs.readFileSync(path.join(SRC, 'scripts', 'page', 'try-style.template.js'), 'utf8');
-  return once(once(tpl, '/*RULES_RUNTIME*/', rt, 'try-style template'), '/*SELECTORS_OF*/', rules.selectorsOf.toString(), 'try-style template');
+  let out = once(tpl, '/*RULES_RUNTIME*/', rt, 'try-style template');
+  out = once(out, '/*TOP_LEVEL_LIST*/', rules.topLevelList.toString(), 'try-style template');
+  return once(out, '/*SELECTORS_OF*/', rules.selectorsOf.toString(), 'try-style template');
 }
 
 /** scripts/page/sweep.js: `trif sweep` itself (extension/sweep.js sweepPage, self-contained by design). */

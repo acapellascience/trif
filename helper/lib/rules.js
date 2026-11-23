@@ -332,4 +332,4 @@ function hidesOnly(rules) {
   return blocks > 0 || (rules.hide || []).length > 0;
 }
 
-module.exports = { selectorsOf, hidesOnly, parseRules, checkRules, checkCss, checkSelector, checkRegex, cssScan, rulesRuntime, rulesCode, RulesError };
+module.exports = { selectorsOf, topLevelList, hidesOnly, parseRules, checkRules, checkCss, checkSelector, checkRegex, cssScan, rulesRuntime, rulesCode, RulesError };

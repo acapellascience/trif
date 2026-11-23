@@ -657,3 +657,11 @@ test('windows PowerShell: started without PSModulePath (PowerShell 7\'s module f
   assert.equal('PSModulePath' in psEnv({ psmodulepath: 'x' }), false);
   assert.deepEqual(Object.keys(psEnv({ psmodulepath: 'x', A: '1' })), ['A']);
 });
+
+test('windows PowerShell: an error written as CLIXML (stderr not a console) is read out of it', () => {
+  const { psComplaint, clixmlText } = require('../helper/lib/win/powershell');
+  const stderr = '#< CLIXML\r\n<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T></TN><MS><PR N="Record"><AV>Preparing modules for first use.</AV></PR></MS></Obj><S S="Error">Add-Type : Cannot add type &amp; compile_x000D__x000A_</S><S S="Error">At line:3 char:1_x000D__x000A_</S></Objs>';
+  assert.equal(clixmlText(stderr), 'Add-Type : Cannot add type & compile\r\nAt line:3 char:1\r\n');
+  assert.equal(psComplaint({ code: 1, stderr }), 'Add-Type : Cannot add type & compile');
+  assert.equal(psComplaint({ code: 1, stderr: 'plain\nAt line:1 char:1' }), 'plain');
+});

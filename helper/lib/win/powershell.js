@@ -99,9 +99,19 @@ function runPowerShellSync(script, input, { env = process.env, bin = null, timeo
 }
 
 // PowerShell's error records are long ("At line:1 char:...", "+ CategoryInfo ..."): the first line says it.
+// (When its stderr isn't a console, Windows PowerShell writes it as CLIXML: "#< CLIXML" and <S S="Error">
+// elements, with _x000D__x000A_ for line ends. The error text is taken out of them.)
+function clixmlText(text) {
+  const t = String(text || '');
+  if (!t.startsWith('#< CLIXML')) return t;
+  const unx = (x) => x.replace(/_x([0-9A-Fa-f]{4})_/g, (m, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+  return [...t.matchAll(/<S S="Error">([\s\S]*?)<\/S>/g)].map((m) => unx(m[1])).join('');
+}
+
 function psComplaint(r) {
-  const lines = String(r.stderr || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^(At line:|\+ |CategoryInfo|FullyQualifiedErrorId)/.test(l));
+  const lines = clixmlText(r.stderr).split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^(At line:|\+ |CategoryInfo|FullyQualifiedErrorId)/.test(l));
   return (lines[0] || (r.code === null ? 'couldn\'t run PowerShell' : `exit status ${r.code}`)).slice(0, 300);
 }
 
-module.exports = { powershellBin, psArgs, psEnv, encode, inputLine, runPowerShell, runPowerShellSync, psComplaint };
+module.exports = { powershellBin, psArgs, psEnv, clixmlText, encode, inputLine, runPowerShell, runPowerShellSync, psComplaint };

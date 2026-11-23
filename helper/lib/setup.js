@@ -14,6 +14,7 @@ const { envVar } = require('./env');
 const P = require('./paths');
 const { selectBrowsers, manifestFiles, SAFARI_AGENT_LABEL, LEGACY_SAFARI_AGENT_LABEL, safariAgentPlist, legacySafariAgentPlist, legacySafariAgentLoaded } = require('./browsers');
 const { migrateHome, describeMigration, migratePrivate } = require('./migrate');
+const { syncGuides } = require('./guides');
 const { preinstallMods, updateShippedMods, retireShippedMods, starterSites, starterChoices, chooseNoStarter, siteOf, siteName } = require('./preinstalled');
 const { acquireInstallLock, pidAlive } = require('./lock');
 const { isWindows, renameRetry, nodeExeName } = require('./platform');
@@ -490,19 +491,15 @@ function setup(opts = {}) {
   const extensionDir = path.join(root, 'extension');
   tell(`✓ TRIF ${P.VERSION} ${mode === 'copy' ? 'installed' : `linked to ${root}`} in ${homeRelative(home)}`);
 
-  // (TECHNIQUES.md beside it: the how-to half, read on demand, so every message doesn't carry it)
-  // (and BOXED.md: boxed mods and their powers, read only when writing one)
-  for (const doc of ['TECHNIQUES.md', 'BOXED.md']) {
-    const src = path.join(helperDir, 'workspace', doc);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(home, doc));
-  }
+  // The guides: AGENTS.md, TECHNIQUES.md beside it (the how-to half, read on demand, so every message
+  // doesn't carry it), BOXED.md (boxed mods and their powers, read only when writing one) and CLAUDE.md,
+  // from this copy's helper/workspace/ (guides.js; the helper also keeps them in step when it starts).
   const agentsSrc = path.join(helperDir, 'workspace', 'AGENTS.md');
-  if (fs.existsSync(agentsSrc)) {
-    fs.copyFileSync(agentsSrc, path.join(home, 'AGENTS.md'));
-    say(`              AGENTS.md refreshed from ${agentsSrc}`);
-  } else {
-    note(`              AGENTS.md not found at ${agentsSrc}; skipped`);
-  }
+  const guides = syncGuides(ws, helperDir, { force: true });
+  for (const e of guides.errors) note(`              couldn't refresh ${e}`);
+  for (const name of guides.edited) note(`              ${name} had been changed by hand; replaced (the changed copy is in ${path.join(ws.private, 'replaced-guides', name)})`);
+  if (fs.existsSync(agentsSrc)) say(`              AGENTS.md refreshed from ${agentsSrc}`);
+  else note(`              AGENTS.md not found at ${agentsSrc}; skipped`);
   // The browsers being set up, by name ("your browser" when that can't be told).
   const browserWord = () => {
     let chosen = [];
@@ -563,9 +560,6 @@ function setup(opts = {}) {
       note(`mods          couldn't update the mods TRIF ships: ${e.message}`);
     }
   }
-  const claudeSrc = path.join(helperDir, 'workspace', 'CLAUDE.md');
-  const claude = fs.existsSync(claudeSrc) ? fs.readFileSync(claudeSrc, 'utf8') : '@AGENTS.md\n@instructions.md\n';
-  fs.writeFileSync(path.join(home, 'CLAUDE.md'), claude);
 
   // Side panel agent runs: Claude Code's permissions for the workspace (overwritten every time), and
   // this terminal's PATH, since Chrome starts the helper with a minimal one and agents live on PATH.

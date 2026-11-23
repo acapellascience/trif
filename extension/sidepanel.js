@@ -3,6 +3,7 @@
 // chrome.storage.local `chat:<site>`; this page renders that record and reacts to storage changes.
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
+import { SEE_TAB_TITLE, seeTabWhere } from './capturegrant.js';
 import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, SAFARI, BROWSER, setBrowser, SETUP_COMMAND, PHONE_PREFIX, isPhoneMod,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, sensitiveSites, splitForPage,
   normalizeModOrder, orderMods, moveId, setModOrder,
@@ -17,6 +18,7 @@ import { loadExplain, term, warningByLine, moreText } from './explain.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { mountOpenModel, renderOpenModel, openModelKeyMissing, watchOpenModel } from './openmodel.js';
 import { createPhoneLink, renderPhoneLink, TEXT as PHONE_TEXT } from './phonelink.js';
+import { mountDictation } from './dictation.js';
 
 const $ = (sel) => document.querySelector(sel);
 const chatKey = (site) => `chat:${site}`;
@@ -33,6 +35,12 @@ const QUEUE_WORDS = {
   remove: 'Don’t send this',
   edit: 'Click to edit',
   pushed: 'Sent while your agent was working',
+};
+// A sent message's note of what was in view (background.js inViewFor, inview.js): drafts, docs/IN-VIEW-STRINGS.md.
+const IN_VIEW_WORDS = {
+  chip: 'with what’s in view',
+  shot: 'Your agent also got a screenshot of the page as you saw it, and a list of what was on screen.',
+  outline: 'Your agent also got a list of what was on screen (no screenshot).',
 };
 
 const ui = {
@@ -66,6 +74,7 @@ const ui = {
   siteStarter: $('#site-starter'), siteStarterLink: $('#site-starter-link'), siteStarterErr: $('#site-starter-err'),
   notice: $('#notice'), paused: $('#paused'), tabLock: $('#tab-lock'), mods: $('#mods'), modsCount: $('#mods-count'), modList: $('#mod-list'), modsReviewNote: $('#mods-review-note'), modsLive: $('#mods-live'),
   chat: $('#chat'), empty: $('#empty'), messages: $('#messages'), working: $('#working'), queue: $('#queue'),
+  seeTab: $('#see-tab'), seeTabTitle: $('#see-tab-title'), seeTabWhere: $('#see-tab-where'),
 
   noSandbox: $('#no-sandbox'),
   composer: $('#composer'), input: $('#input'), send: $('#send'), stop: $('#stop'),
@@ -691,6 +700,11 @@ function messageNode(m) {
   if (m.role === 'assistant' || m.role === 'error') setMarkdown(li, m.text);
   else li.textContent = m.text;
   if (m.role === 'user' && m.pushed) li.title = QUEUE_WORDS.pushed; // (Send now, while it worked)
+  if (m.role === 'user' && (m.inView === 'shot' || m.inView === 'outline')) {
+    const chip = el('span', 'in-view-chip', IN_VIEW_WORDS.chip);
+    chip.title = IN_VIEW_WORDS[m.inView];
+    li.append(chip);
+  }
   if (m.role === 'tool') li.title = m.text;
   // "x.js was deleted." from the panel's trash icon: Undo until it's used (the restore adds its own line).
   if (m.undo && !m.undone) {
@@ -823,6 +837,7 @@ function render() {
   renderSiteStarter();
   renderMessages();
   renderQueue();
+  renderSeeTab();
   renderNoSandbox();
 
   ui.empty.hidden = !site || chat.messages.length > 0;
@@ -838,6 +853,7 @@ function render() {
   ui.newChat.disabled = !site || (chat.messages.length === 0 && !running);
   ui.input.disabled = !site;
   ui.input.placeholder = site ? `What should I fix on ${site}?` : 'Open a website to fix it';
+  dictationUI?.render(); // (the mic follows the box: dictation.js)
   // While the agent works the box stays usable: Send (and Enter) queue the message (renderQueue), Stop beside it.
   ui.composer.classList.toggle('busy', running);
   if (running && !waitsForLogin) ui.send.title = QUEUE_WORDS.sendTitle;
@@ -1002,6 +1018,18 @@ function renderPausedAll() {
  * Another kind (TABLOCK-AUDIT TL-4): another tab of a site the agent ran code in, locked with it (the same
  * rules: no posting, no other sites) until that tab reloads, with a button to show that tab.
  */
+/**
+ * A screenshot of this tab waiting for the click on TRIF's robot (background.js waitForGrant): one line in the chat,
+ * where the robot is, and TRIF's shortcut. It goes as the click comes (the screenshot is taken) or the wait ends.
+ */
+function renderSeeTab() {
+  const w = view.tab && (view.status?.seeTab || []).find((x) => x.tabId === view.tab.id);
+  ui.seeTab.hidden = !w;
+  if (!w) return;
+  ui.seeTabTitle.textContent = SEE_TAB_TITLE;
+  ui.seeTabWhere.textContent = seeTabWhere(BROWSER, w.shortcut);
+}
+
 function renderTabLock() {
   const n = ui.tabLock;
   const lock = view.tab && (view.status?.lockedTabs || []).find((l) => l.tabId === view.tab.id);
@@ -1875,6 +1903,19 @@ function modItem(m) {
     badge.addEventListener('click', (e) => { e.stopPropagation(); openCodeView(m.id, { error: first }); });
     name.append(badge);
   }
+  // (the load power, running here, without the browser's access to a site it loads from: a tag that asks for it)
+  if (!m.held && Array.isArray(m.loadMissing) && m.loadMissing.length) {
+    const need = el('button', 'tag row-tag mod-load-access', 'needs access');
+    need.type = 'button';
+    need.dataset.rank = '3';
+    need.title = `This mod loads data from ${m.loadMissing.join(', ')}. Click to give TRIF that site (your browser asks).`;
+    need.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const asking = loadAccessAsk([{ loadSites: m.loadMissing }]);
+      if (asking) asking.then((ok) => { if (!ok) rowError(m.id, loadRefusedWords([{ loadSites: m.loadMissing }])); else refreshStatus(); });
+    });
+    name.append(need);
+  }
   if (m.fixUndo) {
     const undo = el('button', 'tag fix-undo', 'Undo fix');
     undo.type = 'button';
@@ -2029,9 +2070,13 @@ function factsBox(m, info, kind) {
   });
   const decide = (type, label, title) => {
     const b = button(label, type === 'mod.approve' ? 'primary' : '', async () => {
+      const loading = type === 'mod.approve' ? loadAccessAsk([m]) : null; // (in the click: loadAccessAsk)
       b.disabled = true;
       clearRowError(m.id);
-      try { await request({ type, id: m.id, hash: info.hash, tab: view.tab?.id }); } catch (e) { b.disabled = false; rowError(m.id, String(e?.message ?? e)); }
+      try {
+        if (loading && !(await loading)) throw new Error(loadRefusedWords([m]));
+        await request({ type, id: m.id, hash: info.hash, tab: view.tab?.id });
+      } catch (e) { b.disabled = false; rowError(m.id, String(e?.message ?? e)); }
     });
     b.title = title;
     return b;
@@ -2299,7 +2344,7 @@ const FACT_ICONS = {
   'read-drafts': '✎', keys: '⌨', 'site-data': '⇣', 'page-data': '◫', sound: '♪', controls: '◐', mods: '⇆', media: '▶',
   'search-box': '⌕', 'go-to': '↪', click: '◉', 'write-drafts': '⇄',
   'site-storage': '▤', 'local-fonts': 'Aa', 'image-variants': '▣', preload: '⇡', embeds: '▷', 'rewrite-requests': '⇌', 'block-events': '⊘', 'page-events': '↯', 'edit-uploads': '⧉', migrate: '⇢',
-  sends: '↗', loads: '↗', site: '↗', acts: '◉', navigates: '↪', hidden: '?', match: '◎', risk2: '⚠', tier: '⚠',
+  load: '⇣', sends: '↗', loads: '↗', site: '↗', acts: '◉', navigates: '↪', hidden: '?', match: '◎', risk2: '⚠', tier: '⚠',
 };
 const iconOf = (key) => {
   const k = String(key || '');
@@ -2488,7 +2533,8 @@ function renderApproval() {
   P.siteBox.hidden = !P.siteBox.childNodes.length;
   const fromAgent = kind !== 'sandbox' && info.by !== 'outside' && info.by !== 'switch' && info.by !== 'edit';
   const who = info.by === 'switch' ? 'You switched it on, and it adds to what this site\'s boxed mods can do together.' : info.by === 'edit' ? 'You edited it.' : m.imported && !fromAgent ? 'You imported it from a file.' : fromAgent ? `An agent ${kind === 'pending' ? 'changed' : 'wrote'} it in your chat on ${info.site || view.site}.` : fromPhone(info) || 'It\'s new or changed since TRIF last let it run.';
-  P.note.textContent = kind === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
+  P.note.textContent = kind === 'sandbox' && info.cant ? 'It runs once a version of TRIF here can do that.'
+    : kind === 'sandbox' ? 'Allow runs this version as a free mod, in this browser only.'
     : kind === 'pending' ? `${who} The version before keeps running until you decide.`
       : info.asks ? `${who} Updates that ask for the same powers won't ask again.`
         : who; // (a free mod's: its warning above says what it can do)
@@ -2502,6 +2548,8 @@ function renderApproval() {
   P.show.textContent = kind === 'pending' ? 'Show what changed' : 'Show code';
   P.show.hidden = false;
   P.reject.hidden = kind !== 'pending';
+  // (a boxed mod this browser can't give its powers to (the load power in Safari: lib.js sandboxFallback): no Allow)
+  P.allow.hidden = kind === 'sandbox' && !!info.cant;
   for (const b of [P.allow, P.show, P.reject]) b.disabled = false;
 }
 
@@ -2584,9 +2632,13 @@ async function decideApproval(type) {
   const m = approval.queue[approval.at];
   if (!m) return;
   const info = holdOf(m);
+  // (the load power: the browser's access to the sites it loads from, asked for now, in the click (the browser
+  // asks only within one); its usual per-site prompt, nothing asked when it's there already)
+  const loading = type === 'mod.approve' ? loadAccessAsk(m.group || [m]) : null;
   P.allow.disabled = P.reject.disabled = true;
   P.err.hidden = true;
   try {
+    if (loading && !(await loading)) throw new Error(loadRefusedWords(m.group || [m]));
     // (a request's mods: Allow is for all of them, one after another)
     if (m.group) { for (const x of m.group) { await request({ type, id: x.id, hash: holdOf(x).hash, tab: view.tab?.id }); approval.done.add(holdKey(x)); } }
     else await request({ type, id: m.id, hash: info.hash, tab: view.tab?.id });
@@ -2603,6 +2655,19 @@ async function decideApproval(type) {
   }
   renderWaitingBadge();
 }
+
+// The load power's sites (background.js loadSites): the browser's access to them, asked for from a click (Allow on
+// the hold, or the row's "needs access" tag). Null when there's nothing to ask (or the browser asks per site itself:
+// Safari), else a promise of whether the browser gave it.
+function loadAccessAsk(mods) {
+  const sites = [...new Set(mods.flatMap((x) => (Array.isArray(x.loadSites) ? x.loadSites : [])))];
+  if (!sites.length || !SITE_ACCESS) return null;
+  return chrome.permissions.request({ origins: [...new Set(sites.flatMap(siteOrigins))] }).catch(() => false);
+}
+const loadRefusedWords = (mods) => {
+  const sites = [...new Set(mods.flatMap((x) => (Array.isArray(x.loadSites) ? x.loadSites : [])))];
+  return `Your browser didn't give TRIF ${sites.join(', ')}, which this mod loads from. Click Allow again to be asked again.`;
+};
 
 function renderWaitingBadge() {
   if (!ui.waitingBadge) return;
@@ -3478,7 +3543,7 @@ function renderPhone() {
   // (the page wider than the phone's, as far as the window goes: said, with its width)
   const w = on ? view.phone.width : null;
   ui.phoneWidth.hidden = !(Number.isFinite(w) && w > PHONE_WIDTH + 2);
-  if (!ui.phoneWidth.hidden) ui.phoneWidth.textContent = PHONE_VIEW_TEXT.wider.replace('{w}', String(w));
+  if (!ui.phoneWidth.hidden) ui.phoneWidth.textContent = PHONE_VIEW_TEXT.wider.replace('{w}', String(w)).replace('{p}', String(PHONE_WIDTH));
   showPhoneUrl();
   renderPhoneSync();
   renderPhoneHint();
@@ -3487,10 +3552,10 @@ function renderPhone() {
 // The phone view's words beyond the menu's (drafts for Tim: docs/PHONE-LINK-STRINGS.md "The phone view's window").
 const PHONE_VIEW_TEXT = {
   hint: 'The phone view is in a window of its own. Click TRIF’s button there to open TRIF beside the phone.',
-  wider: 'This page is {w} px wide, wider than an iPhone’s 390: the browser won’t make this window narrower.',
+  wider: 'This page is {w} px wide, wider than an iPhone’s {p}. Make this panel wider (drag its edge) and the page narrows to fit.',
   navFailed: 'Couldn’t go there: {error}',
 };
-const PHONE_WIDTH = 390;
+const PHONE_WIDTH = 402; // phone.js PHONE.viewport.width
 // (the phone view this panel opened without TRIF's panel beside it: {tabId}, until it's there: renderPhoneHint)
 let phoneHint = null;
 
@@ -4504,6 +4569,7 @@ async function panelCommand(text) {
 }
 
 async function send() {
+  dictationUI?.dictation.endForSend(); // (sending stops the mic; the words being heard go in first)
   const text = ui.input.value.trim();
   if (!text || !view.site || !ui.composer.dataset.canSend) return;
   if (text.startsWith('/')) {
@@ -4513,7 +4579,7 @@ async function send() {
   ui.input.value = '';
   // While the agent works (or messages wait already): it waits too, and goes when the agent is done.
   if (view.chat.run || view.chat.queue?.length) {
-    try { await queueMessage(text); } catch (e) {
+    try { await queueMessage(text, { withView: true }); } catch (e) {
       if (!ui.input.value) ui.input.value = text;
       request({ type: 'chat.note', site: chatSite(), text: `Couldn't keep that message: ${e?.message ?? e}` }).catch(() => {});
     }
@@ -4521,7 +4587,8 @@ async function send() {
   }
   const tabId = view.tab.id;
   try {
-    const runId = await startRun(text);
+    // (with what's in view as it's sent: background.js inViewFor)
+    const runId = await startRun(text, { withView: true });
     view.myRuns.set(runId, { prompt: text, tabId }); // (to put it back if the agent needs logging in)
   } catch (e) {
     // The background records start failures in the chat; anything earlier goes back in the box.
@@ -4532,11 +4599,11 @@ async function send() {
 }
 
 /** `text` waits for the run going (or, with none, goes now with the others waiting): background.js queueMessage. */
-async function queueMessage(text) {
+async function queueMessage(text, extra = {}) {
   const { id: agent } = currentAgent();
   await keepSettings();
   return request({
-    type: 'chat.queue', site: chatSite(), text, tabId: view.tab.id, url: view.tab.url,
+    type: 'chat.queue', site: chatSite(), text, tabId: view.tab.id, url: view.tab.url, ...extra,
     agent: agent || undefined, model: chosenModel(agent) || undefined, effort: chosenEffort(agent) || undefined,
   });
 }
@@ -4578,6 +4645,23 @@ function openSetup() {
   });
 }
 
+// The message box's microphone (dictation.js): Chrome, Edge and Safari, not Firefox (no speech recognition there).
+// Chrome's and Edge's side panel can't ask for the microphone: the first time, mic.html asks in a tab beside the
+// page (a panel in a window, Safari's or the fallback, asks the browser's own way).
+var dictationUI = null; // (var: render() may run before this line)
+try {
+  dictationUI = mountDictation({
+    composer: ui.composer, input: ui.input, browser: () => BROWSER, canPrompt: !!OPENED_FOR || SAFARI,
+    storage: chrome.storage?.local,
+    openNear: async (url) => {
+      const at = view.tab?.id !== undefined ? await chrome.tabs.get(view.tab.id).catch(() => null) : null;
+      const props = { url, active: true, ...(at ? { windowId: at.windowId, index: at.index + 1 } : FALLBACK ? { windowId: OPENED_FOR } : {}) };
+      // (closing it goes back to the page: its opener)
+      if (at) return chrome.tabs.create({ ...props, openerTabId: at.id }).catch(() => chrome.tabs.create(props));
+      return chrome.tabs.create(props);
+    },
+  });
+} catch (e) { console.warn('[TRIF] dictation', e); }
 ui.composer.addEventListener('submit', (e) => { e.preventDefault(); send(); });
 ui.input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {

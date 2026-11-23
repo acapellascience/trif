@@ -36,6 +36,20 @@ fair thing to say yes to.
 A "talk to this one server" power would break that for every other power, so it isn't on the menu. A mod that
 needs the network is a free mod.
 
+*Since 11-21 (Tim, "Option A"): one is, narrowed so it can't carry what a mod reads: **`load`**, data from the
+addresses the header lists, fetched by TRIF's background outside the page (so the page's Content Security
+Policy doesn't block it, as it blocks a free mod's `fetch` on x.com). GET only, no body, no headers or cookies
+of the mod's, so it never acts as the person there. Every part of an address that changes is the header's own
+text, one of its `[words]`, a whole number in its `{min-max}` (at most 1000 apart) or `{key}`, the value the
+same server last sent back under that key (a next-page cursor); TRIF builds the address again from those, so
+no text of the mod's goes in. 2 MB, 15 s, 3 at once and 30 a minute per mod in a tab; text or JSON only;
+redirects only within the origin. What's left is which address it loads and when, which the server sees, so
+`load` with any read power warns ("Together, it could put what it reads into an address it loads") and is
+refused beside another boxed mod's read (the page-wide rules). The browser's access to each site it loads
+from is the usual per-site prompt, asked for at Allow. Rules: extension/loadpower.js; the hold's words:
+docs/LOAD-POWER-STRINGS.md. Safari: the mod waits (its boxed mods run as page scripts, where the page could
+ask in the mod's place). The phone apps' boxed runtimes need the same power later (mobile/README.md).*
+
 The powers that *act* (clicking, going to pages, changing drafts) are where care is needed. Each one is
 narrowed below, so it can't be turned into a send.
 

@@ -91,8 +91,8 @@ test('quiet powers (sound, controls, mods, preload, embeds, media) don\'t hold o
   assert.deepEqual(Object.keys(review), ['x.com/keys']);
 });
 
-test('the hold sentences name the site; the menu has 21 powers (twelve, and nine in 0.3)', () => {
-  assert.equal(bp.NAMES.length, 21);
+test('the hold sentences name the site; the menu has 22 powers (twelve, nine in 0.3, and load)', () => {
+  assert.equal(bp.NAMES.length, 22);
   assert.deepEqual(bp.powerNeeds({ site: 'x.com', powers: ['sound'] }), [{ key: 'power:sound', fact: 'can play sounds', power: 'sound', soft: true, lines: [] }]);
   // (quiet: sound, controls, mods, preload, embeds, media; every read and every act as you asks)
   assert.deepEqual(bp.NAMES.filter((n) => bp.MENU[n].soft), ['sound', 'controls', 'mods', 'preload', 'media', 'embeds']);

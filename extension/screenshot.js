@@ -16,9 +16,12 @@
 //   permission isn't enough (Chromium's PermissionsData::CanCaptureVisiblePage, checked in Chrome 156), and
 //   Firefox's captureTab wants <all_urls> (its tabs.json schema; captureVisibleTab takes activeTab since
 //   Firefox 126). activeTab comes from the user clicking TRIF's toolbar button on that tab (in Chrome the
-//   button opens the panel from action.onClicked for that reason, background.js). So then only the tab in
-//   front can be captured, after that click; anything else is a clear error. Users who installed TRIF when
-//   <all_urls> was required keep it, and keep everything above.
+//   button opens the panel from action.onClicked for that reason, background.js), or pressing TRIF's shortcut
+//   there (the manifest's "see-tab" command; a click inside the panel gives nothing: checked in Chrome 156).
+//   So then only the tab in front can be captured, after that click; anything else is a clear error. When
+//   `trif screenshot` is refused that way with TRIF's panel open in the tab's window, the panel asks the user
+//   for the click and the screenshot waits for it (capturegrant.js, background.js waitForGrant). Users who
+//   installed TRIF when <all_urls> was required keep it, and keep everything above.
 // Every function takes the browser API and helpers as parameters, so the tests can drive them.
 
 export const FULL_MAX_HEIGHT = 12000;   // CSS px of a full-page capture; longer pages are cut
@@ -97,10 +100,24 @@ function notAllSites(browser, what, family) {
   return `${what}, ${browser} wants TRIF to have access to every site, and TRIF only has the sites the user turned it on for. ` +
     `It can capture the tab in front once the user has clicked ${theButton(browser, family)}. ${CHECK_INSTEAD}`;
 }
-function needsClick(browser, family) {
-  return `${browser} lets TRIF capture this tab only after the user clicks TRIF's button on it (TRIF has access to the sites ` +
-    `it's on, which isn't enough for ${browser} to let it take screenshots). Ask the user to go to this tab and click ` +
+// (`shortcut`: TRIF's "Let TRIF see this tab" shortcut as the user's keyboard says it, or ''; `waited`: the ms
+// TRIF waited for the click with a note in its panel asking for it, background.js waitForGrant, or 0)
+function needsClick(browser, family, { shortcut = '', waited = 0 } = {}) {
+  const press = shortcut ? ` (or press ${shortcut} with this tab in front)` : '';
+  if (waited) {
+    return `${browser} lets TRIF capture this tab only after the user clicks TRIF's button on it${press}, and they didn't: TRIF's panel ` +
+      `showed them a note asking for that click for ${Math.round(waited / 1000)} s (TRIF has access to the sites it's on, which isn't ` +
+      `enough for ${browser} to let it take screenshots; \`--copy\` needs the same click). Tell the user, in plain words, that you'd like ` +
+      `to see the tab and they can click ${theButton(browser, family)}; then run \`trif screenshot\` again, which waits for the click ` +
+      `again (while it waits, the click leaves TRIF's panel open). ${CHECK_INSTEAD}`;
+  }
+  return `${browser} lets TRIF capture this tab only after the user clicks TRIF's button on it${press} (TRIF has access to the sites ` +
+    `it's on, which isn't enough for ${browser} to let it take screenshots; \`--copy\` needs the same click). Ask the user to go to this tab and click ` +
     `${theButton(browser, family)}. Then try again. ${CHECK_INSTEAD}`;
+}
+/** Whether captureVisibleTab refused for want of <all_urls> or activeTab ("Either the '<all_urls>' or 'activeTab' permission is required."). */
+export function refusedForGrant(e) {
+  return /activeTab|all_urls|permission/i.test(String(e?.message ?? e));
 }
 
 /** Scroll offsets for a stitched full page: viewport-sized steps, the last one flush with the bottom. */
@@ -166,10 +183,15 @@ const sleepDefault = (ms) => new Promise((r) => setTimeout(r, ms));
 /**
  * Capture `tab`. deps: {pageCall(tabId, func, args) → result (isolated world), stitch(shots, size) → dataUrl,
  * sleep?, now?, browser, family?, firefox?, checkUrl?(url) (throws when the copy may not show that URL: the run's
- * scope, TRIF off there), onProbe?(windowId, open, info)}. `force`: make a copy of a one-time link anyway.
+ * scope, TRIF off there), onProbe?(windowId, open, info), grants? (capturegrant.js: told which tabs captured or
+ * were refused), shortcut?() → TRIF's shortcut as the user's keyboard says it, or '', waitForGrant?(tab, {shortcut})
+ * → {granted, waited (ms)} (without access to every site, a refused tab in front: wait for the user's click)}.
+ * `force`: make a copy of a one-time link anyway.
  * Returns {dataUrl, how, note, full, width?, height?, cut?}.
  */
-export async function captureScreenshot(api, tab, { full = false, copy = false, force = false, timeout = 45000 } = {}, deps) {
+export async function captureScreenshot(api, tab, { full = false, copy = false, force = false, timeout = 45000, format = 'png', quality = 80 } = {}, deps) {
+  // (`format`: 'png', or 'jpeg' at `quality` for a picture of the viewport that's quicker to make and to send: inview.js)
+  const fmt = format === 'jpeg' ? { format: 'jpeg', quality } : { format: 'png' };
   const sleep = deps.sleep || sleepDefault;
   const win = await api.windows.get(tab.windowId).catch(() => null);
   const showing = !!(tab.active && win && win.state !== 'minimized');
@@ -189,17 +211,43 @@ export async function captureScreenshot(api, tab, { full = false, copy = false, 
       return now;
     };
     await showingNow();
+    const grants = allUrls ? null : deps.grants;
+    const now = deps.now || Date.now;
+    // (Chrome allows two captureVisibleTab calls a second, refused ones too: over that, once more a second later)
+    const visible = async (quota = true) => {
+      try { return await api.tabs.captureVisibleTab(tab.windowId, fmt); } catch (e) {
+        if (!quota || !/quota|MAX_CAPTURE/i.test(String(e?.message ?? e))) throw e;
+        await sleep(1000);
+        await showingNow();
+        return visible(false);
+      }
+    };
     let dataUrl;
-    try { dataUrl = await api.tabs.captureVisibleTab(tab.windowId, { format: 'png' }); } catch (e) {
-      // ("Either the '<all_urls>' or 'activeTab' permission is required.")
-      if (!allUrls && /activeTab|all_urls|permission/i.test(String(e?.message ?? e))) throw new Error(needsClick(deps.browser, deps.family));
-      throw e;
+    const tried = now();
+    try { dataUrl = await visible(); } catch (e) {
+      if (allUrls || !refusedForGrant(e)) throw e;
+      // Without access to every site, and no click on this tab yet: with `waitForGrant` (`trif screenshot`, and a
+      // panel to ask in), a note in the panel asks the user to click the robot, and the picture is taken as soon as
+      // they do (capturegrant.js). Never a copy instead: that needs the same click.
+      grants?.refused(tab.id);
+      const shortcut = String((await Promise.resolve(deps.shortcut?.()).catch(() => '')) || '');
+      const wait = deps.waitForGrant ? await Promise.resolve(deps.waitForGrant(tab, { shortcut })).catch(() => null) : null;
+      if (!wait || !wait.granted) throw new Error(needsClick(deps.browser, deps.family, { shortcut, waited: wait ? wait.waited || 0 : 0 }));
+      const gap = tried + CAPTURE_INTERVAL_MS - now();
+      if (gap > 0) await sleep(gap);
+      await showingNow();
+      try { dataUrl = await visible(); } catch (e2) {
+        if (!refusedForGrant(e2)) throw e2;
+        grants?.refused(tab.id);
+        throw new Error(needsClick(deps.browser, deps.family, { shortcut }));
+      }
     }
     dataUrl = (await showingNow()) && dataUrl;
+    grants?.grant(tab, 'seen');
     return { dataUrl, how: 'visible', note: null, full: false };
   }
   if (plan === 'tab') {
-    if (!full) return { dataUrl: await api.tabs.captureTab(tab.id, { format: 'png' }), how: 'tab', note: captureNote({ how: 'tab', showing }), full: false };
+    if (!full) return { dataUrl: await api.tabs.captureTab(tab.id, fmt), how: 'tab', note: captureNote({ how: 'tab', showing }), full: false };
     const d = await deps.pageCall(tab.id, () => ({
       w: document.documentElement.clientWidth || innerWidth,
       h: Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0, innerHeight),

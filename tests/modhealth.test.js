@@ -41,13 +41,18 @@ test('new errors: once per fingerprint and version; a new version starts fresh; 
   assert.strictEqual(fresh.length, 1);
 });
 
-test('may be broken: matched on a page, then nothing on three loads of it in a row; a match clears it', async () => {
+test('may be broken: matched on a page (on two loads), then nothing on three loads of it in a row; a match clears it', async () => {
   const H = await import('../extension/modhealth.js');
+  assert.strictEqual(H.MATCH_LOADS, 2);
   const health = {};
   const mod = { id: 'x.com/s', hash: 'h' };
   const page = 'https://x.com/home';
   // (never matched there: not its page)
   for (let i = 0; i < 5; i++) assert.strictEqual(H.recordMatches(health, mod, 'https://x.com/other', false), null);
+  // (matched there on one load only: not yet its page, as a look while a single-page site changed over might be)
+  assert.strictEqual(H.recordMatches(health, mod, 'https://x.com/once', true), null);
+  for (let i = 0; i < 6; i++) assert.strictEqual(H.recordMatches(health, mod, 'https://x.com/once', false), null);
+  assert.strictEqual(H.recordMatches(health, mod, page, true), null);
   assert.strictEqual(H.recordMatches(health, mod, page, true), null);
   assert.strictEqual(H.recordMatches(health, mod, page, false), null);
   assert.strictEqual(H.recordMatches(health, mod, page, false), null);
@@ -71,6 +76,9 @@ test('a style mod\'s selectors: hide, filter, replace\'s in, and its CSS rules; 
   const r = require('../helper/lib/rules');
   assert.deepStrictEqual(r.selectorsOf({ css: '#title { color: red } .a:hover, .b::before{x:1} @media (x){ .c {y:1} } body{} @keyframes k { from {a:1} 50% {a:2} }', hide: ['.ad'], filter: [{ items: 'article' }], replace: [{ in: 'body' }, { in: '#main' }] }),
     ['.ad', 'article', '#main', '#title', '.a', '.b', '.c']);
+  // (a rule's list split at its own commas only: not inside :is(), :not(), :has(), [attr="a,b"] or quotes)
+  assert.deepStrictEqual(r.selectorsOf({ css: 'ytd-browse:is([page-subtype="home"], [page-subtype="subscriptions"]):not([hidden]) #contents, a[title="x, y"], b:not(.c, .d) > e:hover { x: 1 }' }),
+    ['ytd-browse:is([page-subtype="home"], [page-subtype="subscriptions"]):not([hidden]) #contents', 'a[title="x, y"]', 'b:not(.c, .d) > e']);
 });
 
 test('a click the clickjacking guard stopped: kept as the mod\'s error, marked clickjack, the same fingerprint on any control', async () => {
@@ -106,10 +114,12 @@ test('comes and goes: a streak with nothing, then a match, and that page is neve
   assert.deepStrictEqual(H.openErrors(health, mod), []);
   // (another page of the same mod: still checked)
   H.recordMatches(health, mod, 'https://www.google.com/webhp', true);
+  H.recordMatches(health, mod, 'https://www.google.com/webhp', true);
   for (let i = 0; i < 2; i++) assert.strictEqual(H.recordMatches(health, mod, 'https://www.google.com/webhp', false), null);
   assert.ok(H.recordMatches(health, mod, 'https://www.google.com/webhp', false), 'another page is flagged as before');
   // a raised flag, then a match: comes and goes too
   const other = { id: 'google.com/other', hash: 'o1' };
+  H.recordMatches(health, other, page, true);
   H.recordMatches(health, other, page, true);
   assert.ok(miss(3, other));
   H.recordMatches(health, other, page, true);
@@ -117,6 +127,7 @@ test('comes and goes: a streak with nothing, then a match, and that page is neve
   assert.strictEqual(miss(10, other), null);
   // a new version of the mod: checked again
   const v2 = { id: 'google.com/promos', hash: 'h2' };
+  H.recordMatches(health, v2, page, true);
   H.recordMatches(health, v2, page, true);
   const f = miss(3, v2);
   assert.deepStrictEqual([f?.fp, f?.quiet], [`google.com/promos|quiet|${page}`, true]);
@@ -130,6 +141,7 @@ test('a genuinely broken mod is still flagged after three loads; a hide-only one
   const page = 'https://x.com/home';
   const broken = { id: 'x.com/restyle', hash: 'b' };
   H.recordMatches(health, broken, page, true, 0);
+  H.recordMatches(health, broken, page, true, 0);
   assert.strictEqual(H.recordMatches(health, broken, page, false, 1), null);
   assert.strictEqual(H.recordMatches(health, broken, page, false, 2), null);
   assert.ok(H.recordMatches(health, broken, page, false, 3)?.quiet);
@@ -137,10 +149,12 @@ test('a genuinely broken mod is still flagged after three loads; a hide-only one
   const hider = { id: 'x.com/hide-promo', hash: 'p' };
   const opts = { hideOnly: true };
   H.recordMatches(health, hider, page, true, 0, opts);
+  H.recordMatches(health, hider, page, true, 0, opts);
   const t0 = 1000;
   for (let i = 0; i < 12; i++) assert.strictEqual(H.recordMatches(health, hider, page, false, t0 + i * 60000, opts), null, `load ${i + 1}, within the hour`);
   // ...and three days isn't enough without ten loads
   const hider2 = { id: 'x.com/hide-banner', hash: 'q' };
+  H.recordMatches(health, hider2, page, true, 0, opts);
   H.recordMatches(health, hider2, page, true, 0, opts);
   for (let i = 0; i < 9; i++) assert.strictEqual(H.recordMatches(health, hider2, page, false, t0 + i * DAY, opts), null, `load ${i + 1}, a day apart`);
   assert.ok(H.recordMatches(health, hider2, page, false, t0 + 9 * DAY, opts)?.quiet, 'the tenth load, nine days on');
@@ -161,7 +175,7 @@ test('not broken (trif not-broken): the flag goes and the page comes and goes; w
   const mod = { id: 'phone~google.com/hide-google-promos', hash: 'h' };
   const a = 'https://www.google.com/';
   const b = 'https://www.google.com/search';
-  for (const pg of [a, b]) { H.recordMatches(health, mod, pg, true); for (let i = 0; i < 3; i++) H.recordMatches(health, mod, pg, false); }
+  for (const pg of [a, b]) { H.recordMatches(health, mod, pg, true); H.recordMatches(health, mod, pg, true); for (let i = 0; i < 3; i++) H.recordMatches(health, mod, pg, false); }
   assert.strictEqual(H.openErrors(health, mod).length, 2);
   assert.deepStrictEqual(H.markNotBroken(health, mod, a), [`${mod.id}|quiet|${a}`]);
   assert.deepStrictEqual(H.openErrors(health, mod).map((e) => e.page), [b]);
@@ -177,6 +191,7 @@ test('not broken (trif not-broken): the flag goes and the page comes and goes; w
   for (let i = 0; i < 5; i++) assert.strictEqual(H.recordMatches(health, mod, c, false), null);
   // (a new version: fresh)
   const v2 = { ...mod, hash: 'h2' };
+  H.recordMatches(health, v2, a, true);
   H.recordMatches(health, v2, a, true);
   for (let i = 0; i < 2; i++) H.recordMatches(health, v2, a, false);
   assert.ok(H.recordMatches(health, v2, a, false));
@@ -209,4 +224,42 @@ test('a style mod that only hides: a hide list, and CSS rules that only set disp
   const style = (json) => buildMod({ site: 'phone~google.com', file: '/w/sites/phone~google.com/p.js', code: `// ==WebMod==\n// @name P\n// @match https://www.google.com/*\n// @style\n// ==/WebMod==\n${json}\n` }).mod;
   assert.strictEqual(style('{ "hide": ["promo-middle-slot"] }').hideOnly, true);
   assert.strictEqual(style('{ "hide": ["promo-middle-slot"], "css": "#x { color: red }" }').hideOnly, undefined);
+});
+
+test('a load\'s verdicts: found only on its settled look; not found only if no look found it', async () => {
+  const H = await import('../extension/modhealth.js');
+  const earlier = new Map([['a', true], ['b', false], ['c', true], ['d', false]]);
+  const settled = new Map([['a', true], ['b', true], ['c', false], ['d', false], ['e', false]]);
+  // (c: found on the 3-second look and not at 9 s, say the page changing over then: neither)
+  assert.deepStrictEqual(H.loadVerdicts(earlier, settled), [['a', true], ['b', true], ['d', false], ['e', false]]);
+  // (an earlier look alone is no match: there's no settled look in it)
+  assert.deepStrictEqual(H.loadVerdicts(earlier, new Map()), []);
+});
+
+test('weak evidence from before 11-20 is forgotten: pages without hits (not those that come and go), and the flags raised on it, with their marks', async () => {
+  const H = await import('../extension/modhealth.js');
+  const fp = (p) => `youtube.com/tiled-home|quiet|${p}`;
+  const W = 'https://www.youtube.com/watch', HOME = 'https://www.youtube.com/', R = 'https://www.youtube.com/results';
+  const health = {
+    'youtube.com/tiled-home': {
+      hash: 'h', logs: [],
+      // (as stored before: one match on any look made /watch "its" page)
+      pages: { [W]: { matched: true, misses: 4, at: 1 }, [HOME]: { matched: true, misses: 0, at: 1 }, [R]: { matched: true, misses: 0, at: 1, comesAndGoes: true } },
+      errors: { [fp(W)]: { message: 'nothing it looks for is on the page any more', quiet: true, page: W, count: 1 }, 'youtube.com/tiled-home|3|boom': { message: 'boom', count: 1 } },
+      carded: { [fp(W)]: true }, dismissed: { [fp(W)]: true }, fixed: {},
+    },
+    'x.com/s': { hash: 'x', logs: [], carded: {}, dismissed: {}, fixed: {},
+      pages: { 'https://x.com/home': { matched: true, hits: 2, misses: 3, at: 1 } },
+      errors: { 'x.com/s|quiet|https://x.com/home': { quiet: true, page: 'https://x.com/home', count: 1 } } },
+  };
+  assert.deepStrictEqual(H.dropWeakEvidence(health), [{ mod: 'youtube.com/tiled-home', fp: fp(W) }]);
+  const e = health['youtube.com/tiled-home'];
+  assert.deepStrictEqual(Object.keys(e.pages), [R]);
+  assert.deepStrictEqual(Object.keys(e.errors), ['youtube.com/tiled-home|3|boom'], 'its other errors kept');
+  assert.deepStrictEqual([e.carded, e.dismissed], [{}, {}]);
+  assert.strictEqual(Object.keys(health['x.com/s'].errors).length, 1, 'a flag with the evidence stays');
+  assert.deepStrictEqual(H.dropWeakEvidence(health), [], 'once');
+  // (from then on /watch needs two loads with a match before it can be flagged)
+  const mod = { id: 'youtube.com/tiled-home', hash: 'h' };
+  for (let i = 0; i < 5; i++) assert.strictEqual(H.recordMatches(health, mod, W, false), null);
 });

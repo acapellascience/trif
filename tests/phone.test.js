@@ -2,7 +2,7 @@
 // The phone view's parts that need no browser (extension/phone.js, phone-page.js; docs/MOBILE-EDIT.md): its
 // rules, its window's bounds and fit, the page script's profile matching phone.js's, resolveTab finding the
 // phone's tab, tab locks leaving its rules alone, what the agent is told, and the @device header. The real
-// thing in a browser: tests/phone-browser.test.js.
+// thing in a browser: tests/phone-browser.test.js, phone-window-browser.test.js, phone-helper-browser.test.js.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -30,25 +30,25 @@ test('phoneBounds: the phone\'s page area when the screen has room, shorter when
   const { phoneBounds, PHONE } = await load('phone.js');
   const frame = { width: 0, height: 62 };
   const big = { left: 0, top: 25, width: 2560, height: 1415 };
-  assert.deepEqual(phoneBounds({ frame, screen: big, home: { left: 100, top: 60 } }), { width: 390, height: 750 + 62, left: 100, top: 25 });
+  assert.deepEqual(phoneBounds({ frame, screen: big, home: { left: 100, top: 60 } }), { width: 402, height: 780 + 62, left: 100, top: 25 });
   // a 13" MacBook Air with the Dock: 1470 x 956, 30 for the menu bar, 70 for the Dock
   const air = { left: 0, top: 30, width: 1470, height: 856 };
-  assert.deepEqual(phoneBounds({ frame, screen: air, home: { left: 0, top: 30 } }), { width: 390, height: 812, left: 0, top: 30 });
+  assert.deepEqual(phoneBounds({ frame, screen: air, home: { left: 0, top: 30 } }), { width: 402, height: 842, left: 0, top: 30 });
   const short = { left: 0, top: 30, width: 1280, height: 640 };
   assert.equal(phoneBounds({ frame, screen: short }).height, 640, 'as tall as fits');
   const tiny = { left: 0, top: 30, width: 1280, height: 400 };
   assert.equal(phoneBounds({ frame, screen: tiny }).height, PHONE.minHeight + 62, 'never under the minimum');
   // the user's window far right: the phone stays on the screen
-  assert.equal(phoneBounds({ frame, screen: air, home: { left: 1400, top: 30 } }).left, 1470 - 390);
+  assert.equal(phoneBounds({ frame, screen: air, home: { left: 1400, top: 30 } }).left, 1470 - 402);
   // no screen known: the user's window's corner, or nothing
-  assert.deepEqual(phoneBounds({ frame, home: { left: 5, top: 6 } }), { width: 390, height: 812, left: 5, top: 6 });
-  assert.deepEqual(phoneBounds({}), { width: 390, height: 750 });
+  assert.deepEqual(phoneBounds({ frame, home: { left: 5, top: 6 } }), { width: 402, height: 842, left: 5, top: 6 });
+  assert.deepEqual(phoneBounds({}), { width: 402, height: 780 });
 });
 
 // A browser for fitPhoneWindow: a window whose page is the window less its frame, except that after the tab
 // moves in, and after each resize, the page still says its old size for `lag` looks (CI, a busy runner: the
 // window sized from one such look left a 776 x 813 page).
-function fakeWindow({ frame, win, stale, lag, refuse = false, minWidth = 0 }) {
+function fakeWindow({ frame, win, stale, lag, refuse = false, minWidth = 0, x = null, sidePanel = null }) {
   const w = { ...win };
   let page = { ...stale };
   let since = 0;
@@ -61,9 +61,10 @@ function fakeWindow({ frame, win, stale, lag, refuse = false, minWidth = 0 }) {
     scripting: {
       executeScript: async () => {
         if (since++ >= lag) page = { w: w.width - frame.width, h: w.height - frame.height };
-        return [{ result: { ...page } }];
+        return [{ result: x == null ? { ...page } : { ...page, x } }];
       },
     },
+    ...(sidePanel ? { sidePanel } : {}),
   };
   return { chrome, w, updates };
 }
@@ -76,8 +77,8 @@ test('fitPhoneWindow: the page area is the phone\'s, also when the page still sa
   for (const lag of [0, 1, 3, 6]) {
     const b = fakeWindow({ frame, win, stale: { w: 894, h: 657 }, lag });
     const size = await fitPhoneWindow({ chrome: b.chrome, tabId: 1, windowId: 2, screen, pause: 1 });
-    assert.deepEqual(size, { w: 390, h: 750 }, `lag ${lag}`);
-    assert.deepEqual([b.w.width, b.w.height], [390, 834], `lag ${lag}: the window`);
+    assert.deepEqual(size, { w: 402, h: 780 }, `lag ${lag}`);
+    assert.deepEqual([b.w.width, b.w.height], [402, 864], `lag ${lag}: the window`);
     if (lag === 0) assert.equal(b.updates.length, 1, 'one resize when the page has the window\'s size right away');
   }
   // a window the browser won't resize: no endless asking, the page as it is
@@ -90,20 +91,53 @@ test('fitPhoneWindow: the page area is the phone\'s, also when the page still sa
 });
 
 // The window route (11-18): an ordinary window with TRIF's side panel beside the page. Its "frame" is the panel
-// and the toolbar: measured the same way, so the page comes out at 390 whatever the panel's width. Corrected
+// and the toolbar: measured the same way, so the page comes out at the phone's width whatever the panel's width. Corrected
 // later (the panel or the window resized) in width alone, where the window is; as narrow as the browser lets it.
+// Tim, 11-22: dragging the panel's edge toward the page and then seeing the window grow out the other side, the
+// panel shooting off, felt wrong. With the panel on the page's right the window's right edge stays put and it grows
+// or shrinks on the page's side; with it on the left (Chrome's setting, Firefox's sidebar), the left edge.
+test('fitPhoneWindow widthOnly: the window grows on the page\'s side, the panel staying where it was dragged', async () => {
+  const { fitPhoneWindow } = await load('phone.js');
+  const moved = { left: 300, top: 80, width: 776, height: 700 };
+  const fit = (b) => fitPhoneWindow({ chrome: b.chrome, tabId: 1, windowId: 2, pause: 1, widthOnly: true });
+  // Chrome, panel on the right (no getLayout: Chrome's default side): the left edge moves out by the 76 px
+  let b = fakeWindow({ frame: { width: 450, height: 87 }, win: moved, stale: { w: 326, h: 613 }, lag: 0, sidePanel: {} });
+  assert.deepEqual(await fit(b), { w: 402, h: 613 });
+  assert.deepEqual(b.updates, [{ width: 852, left: 224 }]);
+  assert.equal(b.w.left + b.w.width, 300 + 776, 'the right edge, the panel\'s, where it was');
+  // ... and in when the panel is made narrower
+  b = fakeWindow({ frame: { width: 336, height: 87 }, win: moved, stale: { w: 440, h: 613 }, lag: 0, sidePanel: { getLayout: async () => ({ side: 'right' }) } });
+  assert.deepEqual(await fit(b), { w: 402, h: 613 });
+  assert.deepEqual([b.w.left, b.w.width], [338, 738]);
+  // Chrome's side panel moved to the left in its settings: the left edge stays, as before
+  b = fakeWindow({ frame: { width: 450, height: 87 }, win: moved, stale: { w: 326, h: 613 }, lag: 0, sidePanel: { getLayout: async () => ({ side: 'left' }) } });
+  await fit(b);
+  assert.deepEqual(b.updates, [{ width: 852 }]);
+  // Firefox (no sidePanel): the side from where the page starts in its window
+  b = fakeWindow({ frame: { width: 450, height: 87 }, win: moved, stale: { w: 326, h: 613 }, lag: 0, x: 0 });
+  await fit(b);
+  assert.deepEqual(b.updates, [{ width: 852, left: 224 }], 'sidebar on the right');
+  b = fakeWindow({ frame: { width: 450, height: 87 }, win: moved, stale: { w: 326, h: 613 }, lag: 0, x: 450 });
+  await fit(b);
+  assert.deepEqual(b.updates, [{ width: 852 }], 'sidebar on the left');
+  // Chrome's minimum (792 with its side panel): a narrower width it won't take mustn't move the window either
+  b = fakeWindow({ frame: { width: 386, height: 87 }, win: { left: 100, top: 25, width: 792, height: 837 }, stale: { w: 406, h: 750 }, lag: 0, minWidth: 792, sidePanel: {} });
+  assert.deepEqual(await fit(b), { w: 406, h: 750 });
+  assert.deepEqual([b.w.left, b.w.width], [100, 792]);
+});
+
 test('fitPhoneWindow in an ordinary window: the side panel measured as part of the frame; widthOnly; the browser\'s minimum', async () => {
   const { fitPhoneWindow } = await load('phone.js');
   const screen = { left: 0, top: 25, width: 1470, height: 931 };
   const panel = { width: 386, height: 87 };
   let b = fakeWindow({ frame: panel, win: { left: 0, top: 25, width: 1280, height: 720 }, stale: { w: 894, h: 633 }, lag: 1 });
-  assert.deepEqual(await fitPhoneWindow({ chrome: b.chrome, tabId: 1, windowId: 2, screen, pause: 1 }), { w: 390, h: 750 });
-  assert.deepEqual([b.w.width, b.w.height], [776, 837]);
+  assert.deepEqual(await fitPhoneWindow({ chrome: b.chrome, tabId: 1, windowId: 2, screen, pause: 1 }), { w: 402, h: 780 });
+  assert.deepEqual([b.w.width, b.w.height], [788, 867]);
   // (the person dragged the panel wider: the page is narrower; the window moved and made taller is left so)
   const moved = { left: 300, top: 80, width: 776, height: 700 };
   b = fakeWindow({ frame: { width: 450, height: 87 }, win: moved, stale: { w: 326, h: 613 }, lag: 0 });
-  assert.deepEqual(await fitPhoneWindow({ chrome: b.chrome, tabId: 1, windowId: 2, pause: 1, widthOnly: true }), { w: 390, h: 613 });
-  assert.deepEqual(b.updates, [{ width: 840 }], 'the width alone');
+  assert.deepEqual(await fitPhoneWindow({ chrome: b.chrome, tabId: 1, windowId: 2, pause: 1, widthOnly: true }), { w: 402, h: 613 });
+  assert.deepEqual(b.updates, [{ width: 852 }], 'the width alone');
   assert.deepEqual([b.w.left, b.w.top, b.w.height], [300, 80, 700]);
   // (Chrome won't make it narrower than 792 with its side panel, headless 156: the page is 406, and it stops asking)
   b = fakeWindow({ frame: panel, win: { left: 0, top: 25, width: 1000, height: 837 }, stale: { w: 614, h: 750 }, lag: 0, minWidth: 792 });

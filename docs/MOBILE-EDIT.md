@@ -7,6 +7,10 @@ mobile site on the Mac, and then sent to the phone. The phone side is TRIF's iPh
 
 Short version:
 
+- **Since 11-22 the phone is an iPhone 17's size: a 402 px page (402 × 874 screen, page area 402 × 780).** TRIF
+  doesn't know the person's phone, and 402 is today's most common width (Tim: "it'll be fine for nearly everything").
+  The 390 figures below are from when it was an iPhone 12–14's; the measurements hold the same way.
+
 - **Since 11-18 (branch phone-view2): an ordinary window.** The tab moves into an ordinary browser window sized
   so its page is 390 px wide beside TRIF's side panel (Chrome) or sidebar (Firefox): the browser's own address
   bar, back and forward, TRIF's toolbar button, and TRIF's real panel. Browsers without a side panel (Arc) keep
@@ -104,9 +108,11 @@ window** whose page area is the phone's, with TRIF's side panel or sidebar besid
   Chrome 156, 500 px without the side panel, and 792 px with it, which leaves a **406 px page** beside its 386 px
   side panel (the window is clamped there: asked for 776, it stays 792). Firefox 161: 500 px without its sidebar;
   with it, the window went to 735 px with the page at exactly **390**. So in Chrome the page may be 16 px wider than
-  an iPhone 15's 390 (an iPhone 15 Pro Max is 430): the phone view's banner then says "This page is 406 px wide,
-  wider than an iPhone's 390: the browser won't make this window narrower." (draft). Tim's real Chrome may differ:
-  one look needed. Not done: zooming the tab to make 406 CSS px look like 390 (a per-tab zoom resets at every
+  an iPhone 12–14's 390 (other iPhones run from 375 to 440): the phone view's banner then says "This page is 406 px wide,
+  wider than an iPhone's 390. Make this panel wider (drag its edge) and the page narrows to fit." (approved
+  11-22; Tim's Chrome does the same). Dragging the panel wider works: the page shrinks, and the refit grows the window
+  on the page's side (the panel's outer edge stays put: `panelSide`, Chrome's sidePanel.getLayout or Firefox's
+  mozInnerScreenX), so the panel doesn't jump the other way. Not done: zooming the tab to make 406 CSS px look like 390 (a per-tab zoom resets at every
   navigation, section 2's "Zoom"). With the side panel closed the page is as wide as the window can go (500 in
   headless): nothing says so, since the banner is in the panel that's closed.
 - **The address bar is the browser's**, so the panel's stand-in navigation bar is gone here (it stays in the popup
@@ -223,7 +229,7 @@ the mod's approval two seconds later (the same address) wasn't, so the worker's 
 in-place window (both kinds of phone window did it). Now TRIF's own reloads of a phone tab (`trif reload`, `trif
 verify`, a mod switched, approved or tried, the popup route's reload button: `phones.reload`) are hard ones,
 past the worker; and the 15 s limit is only for a heal that didn't work (a page that comes back marked ends it),
-so the page's own reloads and a person's are healed each time. `tests/phone-browser.test.js` has a site with a worker that fetches every request and one
+so the page's own reloads and a person's are healed each time. `tests/phone-browser.test.js` and `tests/phone-helper-browser.test.js` have a site with a worker that fetches every request and one
 that serves a kept copy of the page (an app shell), visited first, as X is.
 
 Other hosts: X's API is `api.x.com`, under `*.x.com`, which the site's Connect gives. Pictures, scripts and video
@@ -462,7 +468,11 @@ would copy the file to `~/Library/Mobile Documents/com~apple~CloudDocs/TRIF/`.
   pages that tell a phone the usual ways (`tests/phone-pages.js`: the server from the user agent and hints, an
   `m.` redirect, the page's own checks, a frame, a press), the panel's `phone.open`: everything in sections 3
   and 4 above, the tab moved with `activeTab` (captureVisibleTab works), another tab of the same page untouched,
-  then Back to desktop and closing the window undoing it all. `PHONE_SHOTS=<dir>` saves screenshots.
+  then Back to desktop and closing the window undoing it all. `PHONE_SHOTS=<dir>` saves screenshots. Since 11-21
+  it is three files, each under `npm test`'s 180 s on CI: `tests/phone-browser.test.js` (the view, the mods, the
+  panel), `tests/phone-window-browser.test.js` (the window route as a person uses it, a lone tab's window, a side
+  panel's first paint) and `tests/phone-helper-browser.test.js` (with the real helper: a sensitive site's phone
+  mod, the reloads after a phone mod's edit).
 - `tests/phone-shots.js` (by hand): the same phone view on public sites that serve a mobile layout logged out,
   next to the desktop one, and the panel window. `tests/phone-firefox.js` (by hand): the local pages in Firefox.
 

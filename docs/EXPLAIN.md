@@ -266,6 +266,21 @@ Only enable free mods that you trust.
   - No added risk with any other power (combination table); a mod that wants a player from anywhere else is a free mod, and say what loads from where.
   - Quiet: doesn't make the mod wait for the user's OK on its own (like controls and mods); a warned combination it makes, in the mod or among its site's boxed mods, does.
 
+### load
+
+`powers/load`, approved draft for Tim, 2026-11-21: docs/LOAD-POWER-STRINGS.md
+
+- **Label**: load
+- **Line**: It can load data from {addresses}, without your cookies, and can't put what's on this page into those addresses.
+- **Explanation**: It can load data from {addresses}, without your cookies, and can't put what's on this page into those addresses. TRIF fetches each one itself, outside the page, so the page's own security rules don't get in the way, and with no cookies the mod can't act as you on that site. An address carries only the header's own values, a small number, or a value that site sent back (a next-page token), never text from the page. That site still sees which of them the mod loads, and when.
+- **For agents**:
+  - `await trif.load(url, {as})` resolves `{ok, status, type: 'json'|'text', data}` (JSON parsed, else text); throws for an address the header doesn't allow. TRIF's background fetches it (GET, no body, only Accept, `credentials: 'omit'`, no referrer), so the page's CSP (connect-src) doesn't apply.
+  - Header: `// @powers load https://tweetstack.app/api/feed?cursor={next_cursor}&limit=[20|50]&page={1-50}`. A path segment or a query value: the header's literal, `[one|two]` words, `{min-max}` whole numbers (at most 1000 apart), or `{key}`: the value under that key in that server's latest JSON answer to this mod on this page. Only the parameters named, each once, all optional; path slots whole segments. https only (http for localhost, 127.0.0.1, *.localhost, *.test); no #, no user name; up to 10 addresses.
+  - Caps: 2 MB a response, 15 s, 3 at once and 30 a minute per mod in a tab; text/* or JSON only (pictures: not this power). Redirects only within the origin.
+  - Errors: `load: "{a}" isn't an address TRIF takes…`, `load: {x} needs https://…`, `load: {0-5000} … isn't a range TRIF takes…`; runtime `trif.load: {url} isn't one of the addresses this mod's header lists (…)`, `… its {name} ("…") isn't what {host} last sent back as {key} …`, `"{p}" isn't a parameter {address} names`, `TRIF doesn't have your browser's access to {host} yet…`, `{host} sent it on to another site…`, `at most 30 loads a minute…`.
+  - The browser's access to each site it loads from is the usual per-site one: asked for when the user allows the mod (and from the row's "needs access" tag). Safari: the mod waits (no Allow); the phone apps don't have it yet.
+  - Page-wide: refused while another boxed mod has a read power this one doesn't (it could choose what to load by what the other read).
+
 ### rewrite-requests
 
 `powers/rewrite-requests`, approved 2026-11-11 (Claude, delegated by Tim)
@@ -670,6 +685,17 @@ Only enable free mods that you trust.
 - **For agents**:
   - site-storage (or @migrate, which counts as site-storage) + a read.
   - Page-wide: site-storage writes are refused while another boxed mod has a read this one doesn't.
+
+### Reads into addresses
+
+`warnings/read-into-address`, approved draft for Tim, 2026-11-21: docs/LOAD-POWER-STRINGS.md
+
+- **Label** (drafted): Reads into addresses
+- **Line**: Together, it could put what it reads into an address it loads.
+- **Explanation**: Together, it could put what it reads into an address it loads. TRIF builds every address from the header and values that site sent back, so nothing it reads goes in as text. But which address it loads, with which allowed value, and when, could still pass a little of what it read to that site.
+- **For agents**:
+  - load + a read.
+  - Page-wide: trif.load is refused while another boxed mod has a read this one doesn't.
 
 ### Clicks with changes
 

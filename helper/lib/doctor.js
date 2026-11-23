@@ -13,6 +13,7 @@ const { browserFamily, browserLabel } = require('./browsers');
 const { scanMods, planMods, MAX_MOD_BYTES, MAX_MODS_BYTES } = require('./mods');
 const { isExecutable } = require('./setup');
 const { isWindows, panelRunsOff } = require('./platform');
+const { staleGuides } = require('./guides');
 const { firefoxAddonUrl } = require('./update');
 
 const EXT_URL = `chrome://extensions/?id=${P.EXTENSION_ID}`;
@@ -245,6 +246,16 @@ async function doctor(opts = {}) {
         if (problem) add(problem.status, problem.title, problem.fix || setupFix);
       }
     }
+  }
+
+  // The guides side-panel runs read: the helper the wrapper runs keeps them in step with its
+  // helper/workspace/ when it starts and before each run (guides.js), so out of date means it hasn't since.
+  if (fs.existsSync(ws.home) && !envVar('RUN_BOX')) {
+    const stale = staleGuides(ws.home, path.join(installRoot, 'helper'));
+    if (stale.length) {
+      add('warn', `workspace guides out of date with ${path.join(installRoot, 'helper', 'workspace')}: ${stale.map((g) => `${g.name} (${g.why})`).join(', ')}`,
+        `restart your browser (the helper refreshes them when it starts, and before each side-panel run), or ${setupFix}`);
+    } else add('ok', 'workspace guides up to date');
   }
 
   // The browsers' setup lives outside the workspace (~/Library…), which a side-panel agent run's sandbox

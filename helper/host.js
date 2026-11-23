@@ -19,7 +19,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const { envVar } = require('./lib/env');
-const { workspace, VERSION, examplesDir } = require('./lib/paths');
+const { workspace, VERSION, examplesDir, HELPER_DIR } = require('./lib/paths');
 const pipes = require('./lib/win/pipes');
 const { createLogger } = require('./lib/log');
 const { encode, Decoder, MAX_TO_EXTENSION } = require('./lib/framing');
@@ -125,6 +125,9 @@ require('./lib/agentkeys').migrateKeys(ws.home).then((k) => {
   if (k.moved.length || k.left.length) { ws.config = workspace(ws.home).config; agents.forgetLoginStatus(); }
 }, (e) => logger.warn(`couldn't move API keys out of config.json: ${e.message}`));
 for (const e of privateMigration.errors) logger.warn(`couldn't move the private files out of the workspace: ${e}`);
+// The guides side-panel runs read (AGENTS.md, TECHNIQUES.md, BOXED.md, CLAUDE.md): in step with this copy's
+// helper/workspace/, which a git checkout changes without running setup (lib/guides.js; again before each run).
+try { require('./lib/guides').syncGuides(ws, HELPER_DIR, { logger }); } catch (e) { logger.warn(`guides: ${e.message}`); }
 if (ws.privateError) logger.warn(ws.privateError);
 if (ws.configError) logger.warn(ws.configError);
 
@@ -646,7 +649,8 @@ const AGENT_COMMANDS = new Set(['mod.historyCode', 'mod.historyDiff', 'mod.histo
 // whose background takes it from the panel page alone. Runs can't reach that connection: their
 // sandboxes have no network and can't write the private folder, where the consent is kept.
 // (agent.inject: a message the user sent from the panel while its run works, written into that run.)
-const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'agent.inject', 'downloads.status', 'downloads.setWatch', 'downloads.take', 'downloads.done', 'downloads.ignore', ...PHONE_COMMANDS]);
+// (inview.shot: the picture of what's in view as the person sent a message, extension/inview.js, lib/inview.js.)
+const PANEL_COMMANDS = new Set(['agent.withoutSandbox', 'agent.logout', 'agent.inject', 'inview.shot', 'downloads.status', 'downloads.setWatch', 'downloads.take', 'downloads.done', 'downloads.ignore', ...PHONE_COMMANDS]);
 
 // The phone link (lib/phonelink/link.js; docs/PHONE-LINK.md). Every helper has the store; the listener, the
 // announcer and the phones' runs are in the helper that owns helper.sock alone (becomePrimary), and nothing
@@ -1482,6 +1486,7 @@ function onExtensionRequest(msg) {
 function panelCommand(cmd, args) {
   if (PHONE_COMMANDS.includes(cmd)) { linkWatched = true; return phoneCommand(cmd, args); }
   if (cmd === 'agent.inject') return runs.inject(typeof args.runId === 'string' ? args.runId : '', { text: args.text, id: args.id });
+  if (cmd === 'inview.shot') return require('./lib/inview').saveInViewShot(workspace(ws.home), { scope: args.scope, dataUrl: args.dataUrl });
   if (cmd === 'agent.logout') {
     const agent = typeof args.agent === 'string' ? args.agent : '';
     return agents.logout(agent, workspace(ws.home)).then((r) => { logger.info(`${agent} logged out (Settings in the side panel)`); return r; });
@@ -1748,6 +1753,7 @@ function onClientLine(sock, line) {
   if (PANEL_COMMANDS.has(cmd)) {
     const error = cmd.startsWith('phone.') ? 'only TRIF\'s side panel can show or change the phone link (Settings)'
       : cmd === 'agent.inject' ? 'only TRIF\'s side panel sends messages into a run while it works'
+      : cmd === 'inview.shot' ? 'only TRIF\'s side panel saves what\'s in view as the user sends a message'
       : cmd.startsWith('downloads.') ? 'only a click in TRIF\'s side panel can do this (Settings: Offer to add mod files I download)'
         : 'only a click in TRIF\'s side panel can change this (Settings, under the agent)';
     return reply(sock, { id, ok: false, error });

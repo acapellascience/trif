@@ -32,6 +32,8 @@ const GLOBAL_TIPS = {
   MutationObserver: 'use trif.observe(selector, fn, { attributes }) or trif.changes(selector, fn)',
   ResizeObserver: 'use el.onResize(fn)', IntersectionObserver: 'use el.onVisible(fn, { threshold, rootMargin })',
   matchMedia: 'use page.matchMedia(query)', devicePixelRatio: 'use page.devicePixelRatio', getComputedStyle: 'use el.style(property)',
+  fetch: 'to load data from another server, use trif.load(url) with the load power (the header lists the addresses: BOXED.md "Powers")',
+  XMLHttpRequest: 'to load data from another server, use trif.load(url) with the load power (the header lists the addresses: BOXED.md "Powers")',
   innerWidth: 'use page.width', innerHeight: 'use page.height', location: 'use page.url (and trif.onUrl)', document: 'use page (page.find, page.body, page.create)',
   AudioContext: 'use trif.audio() (the sound power)', OfflineAudioContext: 'use trif.audio().render(seconds, build)', DOMPoint: 'el.isPointInFill(x, y) takes numbers',
   ImageData: 'getImageData and putImageData take and give { width, height, data }',
@@ -56,7 +58,7 @@ const ELEMENT_MEMBERS = {
 };
 const DECLARE = new Set(['const', 'let', 'var', 'function', 'class']);
 
-function sandboxLint(code, { powers = [] } = {}) {
+function sandboxLint(code, { powers = [], loadAddresses = [] } = {}) {
   const has = new Set(powers);
   const text = String(code || '');
   const found = new Map(); // what -> {what, why, lines:Set}
@@ -155,7 +157,13 @@ function sandboxLint(code, { powers = [] } = {}) {
       const mediaLike = (recv && recv.t === 'id' && /video|audio|media|player|clip|song|track/i.test(recv.v)) || ts.slice(Math.max(0, k - 8), k).some((x) => x.t === 'str' && /\b(video|audio)\b/i.test(x.v));
       if ((/^(play|pause)$/.test(t.v) && noArgs && mediaLike) || /^(setMuted|setVolume|seek)$/.test(t.v)) powerUse(`.${t.v}()`, 'media', t.line);
       if (t.v === 'setValue' && !has.has('controls')) powerUse('.setValue()', 'write-drafts', t.line);
-      if ((t.v === 'goTo' || t.v === 'channel') && ts[k - 2] && ts[k - 2].v === 'trif') powerUse(`trif.${t.v}`, t.v === 'goTo' ? 'go-to' : 'mods', t.line);
+      if ((t.v === 'goTo' || t.v === 'channel' || t.v === 'load') && ts[k - 2] && ts[k - 2].v === 'trif') powerUse(`trif.${t.v}`, t.v === 'goTo' ? 'go-to' : t.v === 'load' ? 'load' : 'mods', t.line);
+      // (load: an address written out in the code that isn't one of the header's: refused when it runs)
+      if (t.v === 'load' && ts[k - 2] && ts[k - 2].v === 'trif' && has.has('load') && arg(0) && arg(0).t === 'str' && /^https?:\/\//i.test(arg(0).v)) {
+        const at = (u) => { const m = /^(https?:\/\/[^/?#]+)(\/[^?#]*)?/i.exec(u); return m ? `${m[1].toLowerCase()}${m[2] || '/'}` : ''; };
+        const want = at(arg(0).v);
+        if (want && !loadAddresses.some((a) => at(a) === want)) add(`trif.load('${arg(0).v.slice(0, 60)}')`, `that address isn't one the header lists (${loadAddresses.join(', ') || 'none'}): TRIF loads only those, with their own values`, t.line);
+      }
     }
     if (member) {
       const base = ts[k - 2];
@@ -198,7 +206,7 @@ function boxable(code) {
   return { boxable: true, swaps };
 }
 // (page globals a DOM-only free mod uses that the box has in another form: GLOBAL_TIPS, minus the ones needing a power)
-const BOX_GLOBALS = Object.fromEntries(Object.entries(GLOBAL_TIPS).filter(([k]) => !/AudioContext|DOMPoint|ImageData/.test(k)));
+const BOX_GLOBALS = Object.fromEntries(Object.entries(GLOBAL_TIPS).filter(([k]) => !/AudioContext|DOMPoint|ImageData|^fetch$|^XMLHttpRequest$/.test(k)));
 // (powers are a question of their own: the lint is read as if the mod had them, so only the page's world counts here)
 const POWER_FREE = { sound: 1, controls: 1, click: 1, media: 1, 'write-drafts': 1, 'go-to': 1, mods: 1 };
 

@@ -15,7 +15,8 @@ Two suites:
   A few use a real browser: `tests/sandbox-browser.test.js` (the sandbox runtime under
   real SES), `tests/css-browser.test.js` (the CSS check against a browser's parsing), `mobile/test/smoke.js`
   (the phone probes), `tests/skill-browser.test.js` (the TRIF skill's page scripts: skill/trif/scripts/page) and
-  `tests/cdp-page.test.js` (their helper). They drive headless Chrome for Testing
+  `tests/cdp-page.test.js` (their helper), `tests/dictation-browser.test.js` (the message box's microphone with a
+  stand-in recogniser and Chrome's fake microphone: real speech is Tim's to try). They drive headless Chrome for Testing
   over CDP (`tests/cdp-page.js`, no Playwright), one browser at a time with a memory guard, and run only with
   `TRIF_BROWSER_TESTS=1` (CI sets it) and Chrome for Testing installed as below; otherwise they skip.
 - **End-to-end browser suite** (opt-in, real browsers): `node tests/e2e/run.js`. Run it before each

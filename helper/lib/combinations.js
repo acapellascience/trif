@@ -14,7 +14,7 @@
 
 // The order the table is written in (boxpowers.js NAMES; tests/combinations.test.js checks they match).
 const POWERS = ['read-drafts', 'keys', 'site-data', 'page-data', 'site-storage', 'local-fonts', 'image-variants', 'sound', 'controls', 'mods', 'preload', 'media',
-  'search-box', 'go-to', 'embeds', 'rewrite-requests', 'block-events', 'page-events', 'click', 'write-drafts', 'edit-uploads'];
+  'search-box', 'go-to', 'embeds', 'load', 'rewrite-requests', 'block-events', 'page-events', 'click', 'write-drafts', 'edit-uploads'];
 // (the twelve of 0.2: their combinations are the literal table below; the rest, added in 0.3, follow RULES)
 const POWERS_02 = ['read-drafts', 'keys', 'site-data', 'page-data', 'sound', 'controls', 'mods', 'media', 'search-box', 'go-to', 'click', 'write-drafts'];
 // Reads: see more than the page shows (image-variants: the pixels of the pictures it loads; edit-uploads: the
@@ -30,19 +30,22 @@ const WARNINGS = {
   'read-into-picture': { rank: 5, fact: 'could put what it reads into a picture you post' },
   'read-into-page-code': { rank: 6, fact: 'could hand what it reads to this page\'s own code, which may post or send it' },
   'read-into-storage': { rank: 7, fact: 'could keep what it reads where this site\'s own code, and your other boxed mods, can find it later' },
-  'go-and-click': { rank: 8, fact: 'could take you to a page and click things there for you' },
-  'go-and-signal': { rank: 9, fact: 'could take you to a page and set off that page\'s own actions there' },
-  'click-and-rewrite': { rank: 10, fact: 'could click things for you and change what the site receives from those clicks' },
-  'signal-and-rewrite': { rank: 11, fact: 'could set off this page\'s own actions and change what the site receives from them' },
-  'read-decides-click': { rank: 12, fact: 'could let what it reads decide what it clicks for you' },
-  'block-and-click': { rank: 13, fact: 'could keep your clicks from reaching the page and click in their place' },
-  'block-and-signal': { rank: 14, fact: 'could keep your clicks from reaching the page and set off the page\'s own actions in their place' },
-  'block-and-go': { rank: 15, fact: 'could keep your clicks from reaching the page and take you to another page in their place' },
-  'read-decides-blocks': { rank: 16, fact: 'could let what it reads decide which of your actions this page sees, and the page\'s code may send that on' },
-  'read-through-media': { rank: 17, fact: 'could pass what it reads to the site a video or sound comes from, by how it plays it' },
-  'read-through-pictures': { rank: 18, fact: 'could pass what it reads to the sites this page\'s pictures come from, by which ones it loads' },
-  'read-through-videos': { rank: 19, fact: 'could pass what it reads to the site a video comes from, by which video it offers you' },
-  'read-into-sound': { rank: 20, fact: 'could turn what it reads into sounds that a device nearby could pick up' },
+  // (load: what it reads can't go into an address as text (extension/loadpower.js), but which of the header's
+  // addresses it loads, with which of their values, and when, the server sees: Tim's words, 11-21)
+  'read-into-address': { rank: 8, fact: 'could put what it reads into an address it loads' },
+  'go-and-click': { rank: 9, fact: 'could take you to a page and click things there for you' },
+  'go-and-signal': { rank: 10, fact: 'could take you to a page and set off that page\'s own actions there' },
+  'click-and-rewrite': { rank: 11, fact: 'could click things for you and change what the site receives from those clicks' },
+  'signal-and-rewrite': { rank: 12, fact: 'could set off this page\'s own actions and change what the site receives from them' },
+  'read-decides-click': { rank: 13, fact: 'could let what it reads decide what it clicks for you' },
+  'block-and-click': { rank: 14, fact: 'could keep your clicks from reaching the page and click in their place' },
+  'block-and-signal': { rank: 15, fact: 'could keep your clicks from reaching the page and set off the page\'s own actions in their place' },
+  'block-and-go': { rank: 16, fact: 'could keep your clicks from reaching the page and take you to another page in their place' },
+  'read-decides-blocks': { rank: 17, fact: 'could let what it reads decide which of your actions this page sees, and the page\'s code may send that on' },
+  'read-through-media': { rank: 18, fact: 'could pass what it reads to the site a video or sound comes from, by how it plays it' },
+  'read-through-pictures': { rank: 19, fact: 'could pass what it reads to the sites this page\'s pictures come from, by which ones it loads' },
+  'read-through-videos': { rank: 20, fact: 'could pass what it reads to the site a video comes from, by which video it offers you' },
+  'read-into-sound': { rank: 21, fact: 'could turn what it reads into sounds that a device nearby could pick up' },
 };
 // (Tim's words, for a mod with more than three powers, in place of the lines above)
 const MANY = 'Mods with many powers could act in surprising ways. Treat them with caution.';
@@ -351,7 +354,7 @@ const keyOf = (list) => POWERS.filter((p) => list.includes(p)).join('+');
 const WAY_OUT = {
   'write-drafts': 'read-into-post', click: 'read-decides-click', media: 'read-through-media', sound: 'read-into-sound',
   'edit-uploads': 'read-into-picture', 'page-events': 'read-into-page-code', 'image-variants': 'read-through-pictures', preload: 'read-through-pictures',
-  'site-storage': 'read-into-storage', 'block-events': 'read-decides-blocks', embeds: 'read-through-videos',
+  'site-storage': 'read-into-storage', 'block-events': 'read-decides-blocks', embeds: 'read-through-videos', load: 'read-into-address',
 };
 // (rewrite-requests with an act: the act's own request carries the header's change, with no one asking;
 // go-to with block-events: your click kept from the page, and a move of the mod's in its place; go-to with
@@ -371,6 +374,7 @@ const REASONS = {
   'search-box': 'the search box only takes what you type, and the mod can\'t fill or read it',
   'rewrite-requests': 'its change to what the site receives is fixed in the header and made by TRIF, so nothing the mod reads or does rides on it',
   embeds: 'it plays only a video a link on the page names, after you click, so nothing the mod reads rides on it',
+  load: 'what it loads comes only from the header\'s addresses, read only and without your cookies, and the other power reads nothing more than the page shows to put into them',
   'block-events': 'keeping some of what you do from the page only lets the page learn less, and your typing always reaches its fields',
   preload: 'it only makes the page load its own pictures sooner, as it would when you scroll to them',
   'go-to': 'it only goes to this site\'s own pages (the header\'s, with the header\'s words in a query, or links the page shows), and that site can already see what it reads',
@@ -387,6 +391,7 @@ const pairRule = (a, b) => {
   if (k === 'image-variants+preload') return REASONS.pictures;
   for (const [r, o] of [[a, b], [b, a]]) if (READS.includes(r) && WAY_OUT[o] && r !== o) return { warn: WAY_OUT[o] };
   for (const p of ['controls', 'mods', 'search-box', 'rewrite-requests', 'embeds', 'block-events', 'preload']) if (a === p || b === p) return REASONS[p];
+  if (a === 'load' || b === 'load') return REASONS.load;
   if (READS.includes(a) && READS.includes(b)) return REASONS.reads;
   if (READS.includes(a) || READS.includes(b)) return REASONS['go-to'];
   if (WRITES.includes(a) || WRITES.includes(b)) return REASONS.write;
@@ -463,7 +468,9 @@ function toMarkdown() {
   L.push('`block-events` keeps from it), what the site keeps (`site-storage`: the site\'s own code reads it, and so can');
   L.push('a boxed mod on a later page), how the page\'s media plays (the host of a video sees its requests: `media`),');
   L.push('which of the page\'s pictures load (their hosts see that: `image-variants`, `preload`), which video it offers');
-  L.push('you (the player\'s host sees it once you click: `embeds`) and sound in the room (`sound`).');
+  L.push('you (the player\'s host sees it once you click: `embeds`), which of the header\'s addresses it loads from another');
+  L.push('server, and when (`load`: TRIF builds each address from the header and values that server sent, so nothing the');
+  L.push('mod reads goes into one as text, but the server sees the choice) and sound in the room (`sound`).');
   L.push('`rewrite-requests` changes what the site receives, but only as its header says, by TRIF: nothing the mod');
   L.push('reads rides on it, but beside an act (`click`, `page-events`) it changes what that act sends. Everything a');
   L.push('boxed mod reaches otherwise stays on the site it came from, which already has it. Across mods on one page');

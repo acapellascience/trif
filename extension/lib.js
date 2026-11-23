@@ -192,6 +192,11 @@ export function sandboxRuntimeScript(matches, excludes = []) {
 // a page script with the same API (sandbox.js sandboxPageCode), in the "Page scripts" group (modGroup), as
 // that's how it runs. A new version waits again.
 
+/** The text a boxed mod with the load power shows in a browser without the sandbox, where it waits. */
+export function sandboxLoadReason(browser = BROWSER) {
+  return `${browser} can't load data from other sites for a boxed mod yet (the load power), so this mod waits until a version of TRIF here can`;
+}
+
 /** The text a sandboxed mod's hold shows in a browser without the sandbox. */
 export function sandboxHoldReason(browser = BROWSER) {
   return `${browser} can't run boxed mods, so here it would run as a free mod, with everything the page has`;
@@ -214,6 +219,13 @@ export function sandboxFallback(mods, { canSandbox = true, allowed = {}, browser
     if (!m || !m.sandboxed || canSandbox) return m;
     // (held by the helper anyway: its own Allow first)
     if (m.held) return { ...m, unsandboxed: true };
+    // (the load power: TRIF loads for it outside the page, from its background, and only its sandbox world can ask
+    // that safely; as a page script the page could ask in its place. So such a mod waits here, with no Allow,
+    // whatever was allowed before: sandboxLoadReason)
+    if (Array.isArray(m.powers) && m.powers.includes('load')) {
+      const reason = sandboxLoadReason(browser);
+      return { ...m, unsandboxed: true, held: { by: 'sandbox', cant: true, site: modSiteName(m), reason, facts: [reason], claim: String(m.risk?.why || m.description || '').slice(0, 300), hash: m.hash } };
+    }
     // (allowed for its code: a change to its style section alone doesn't ask again, helper/lib/stylesection.js)
     if (allowed[m.id] && (allowed[m.id] === m.hash || (typeof m.codeHash === 'string' && allowed[m.id] === `code:${m.codeHash}`))) return { ...m, unsandboxed: true };
     const facts = [sandboxHoldReason(browser), ...(Array.isArray(m.pageFacts) ? m.pageFacts.map((f) => `as a free mod, it ${f}`) : [])];

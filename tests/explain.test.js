@@ -58,7 +58,7 @@ test('the powers: every one in boxpowers.js, in its order, plus @migrate; names 
   const ARGS = {
     'site-storage': ['local:prefs'], 'image-variants': ['pbs.twimg.com name=orig'], 'search-box': ['https://x.com/search?q={q}'], 'go-to': ['/home'],
     embeds: ['www.youtube.com/embed/'], 'rewrite-requests': ['HomeTimeline variables.sort=Top→Recent'], 'block-events': ['keydown'], 'page-events': ['my:event'],
-    click: ['Like: button.like'],
+    click: ['Like: button.like'], load: ['https://tweetstack.app/api/feed?cursor={next_cursor}'],
   };
   for (const t of powers) {
     if (t.id === 'migrate') {

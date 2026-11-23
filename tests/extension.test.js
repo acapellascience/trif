@@ -938,7 +938,7 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
     userScripts: Object.assign(mockUserScripts(), userScripts), // (extras: configureWorld, execute, for the sandbox world)
     tabs: {
       query: async () => structuredClone(tabs), create: async (o) => { created.push(o); return { id: 99, ...o }; },
-      update: async () => ({}), get: async (id) => structuredClone(tabs.find((t) => t.id === id) || {}), onUpdated,
+      update: async () => ({}), get: async (id) => structuredClone(tabs.find((t) => t.id === id) || {}), onUpdated, onRemoved: chromeEvent(),
       reload: async (id) => { reloaded.push(id); setImmediate(() => onUpdated.emit(id, { status: 'complete' })); },
     },
     windows: { update: async () => ({}), getLastFocused: async () => ({ id: 1 }), ...windows },
@@ -952,6 +952,8 @@ async function loadBackground({ storage = {}, tabs = [], migrate = false, safari
     }),
     scripting,
     action: { onClicked: chromeEvent() },
+    // (TRIF's "Let TRIF see this tab" shortcut; `shortcut` '' as when the user has none)
+    commands: { shortcut: 'Alt+Shift+S', onCommand: chromeEvent(), async getAll() { return [{ name: '_execute_action', shortcut: '' }, { name: 'see-tab', shortcut: chromeMock.commands.shortcut }]; } },
     ...(permissions ? { permissions: perms } : {}),
   };
   globalThis.chrome = chromeMock;
@@ -3443,6 +3445,76 @@ test('background: sites setup turns on are disconnected until connected, then on
   } finally { bg.restore(); }
 });
 
+test('background: without every site, a screenshot refused for want of the click waits for it with a note in the panel; the click (or the shortcut) lets it go and leaves the panel open', async () => {
+  globalThis.__trifGrantWaitMs = 400;
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://www.google.com/' }, { id: 6, windowId: 1, index: 1, active: false, url: 'https://www.google.com/b' }];
+  const bg = await loadBackground({ storage: { sitesOn: ['google.com'] }, granted: PER_SITE('google.com'), tabs, windows: { get: async () => ({ id: 1, state: 'normal' }), getAll: async () => [] } });
+  try {
+    await settle(20);
+    const granted = new Set();
+    bg.chrome.tabs.query = async (q) => structuredClone(tabs.filter((t) => (q.active === undefined || t.active === q.active) && (q.windowId === undefined || t.windowId === q.windowId)));
+    bg.chrome.tabs.captureVisibleTab = async () => { const front = tabs.find((t) => t.active); if (!granted.has(front.id)) throw new Error("Either the '<all_urls>' or 'activeTab' permission is required."); return 'data:image/png;base64,AAAA'; };
+    // The browser's grant follows the click (or the shortcut), as the real one does.
+    const click = (tab) => { granted.add(tab.id); bg.chrome.action.onClicked.emit(tab); };
+    const press = (tab) => { granted.add(tab.id); bg.chrome.commands.onCommand.emit('see-tab', tab); };
+    const call = (args) => { const id = `h-${Math.random()}`; bg.native.emit({ type: 'request', id, cmd: 'screenshot', args }); return id; };
+    const answer = async (id) => { for (let i = 0; i < 300; i++) { const r = bg.native.sent.find((m) => m.type === 'response' && m.id === id); if (r) return r; await sleep(5); } throw new Error('no response'); };
+    // No panel open in that window: refused at once, as before (nothing to wait in).
+    let r = await bg.native.call('screenshot', { tab: 5, scope: 'google.com' });
+    assert.match(r.error, /only after the user clicks TRIF's button on it \(or press Alt\+Shift\+S with this tab in front\) \(TRIF has access/);
+    assert.ok(!bg.native.sent.some((m) => m.type === 'requestWaiting'));
+    // The side panel open in window 1: the screenshot waits, the helper's timer is made longer, the panel shows the note.
+    const panel = bg.connectPanel();
+    panel.onMessage.emit({ type: 'panel.window', windowId: 1 });
+    let id = call({ tab: 5, scope: 'google.com' });
+    await settle(20);
+    assert.deepStrictEqual(bg.native.sent.filter((m) => m.type === 'requestWaiting').map((m) => [m.id, m.ms]), [[id, 2400]]);
+    const st = (await panel.ask({ type: 'status' })).result.seeTab;
+    assert.deepStrictEqual(st.map(({ tabId, windowId, site, shortcut }) => ({ tabId, windowId, site, shortcut })), [{ tabId: 5, windowId: 1, site: 'google.com', shortcut: 'Alt+Shift+S' }]);
+    assert.ok(panel.sent.some((m) => m.type === 'statusChanged'));
+    // Another tab's click doesn't count; this one's does, at once, and the panel stays open.
+    granted.add(6); bg.chrome.action.onClicked.emit({ ...tabs[1] });
+    assert.deepStrictEqual(bg.panelCalls, [['close', { windowId: 1 }]], 'a click with nothing waiting on its tab: as before');
+    bg.panelCalls.length = 0;
+    click({ ...tabs[0] });
+    r = await answer(id);
+    assert.strictEqual(r.ok, true, r.error);
+    assert.strictEqual(r.result.how, 'visible');
+    assert.deepStrictEqual(bg.panelCalls, [], 'the click that let TRIF see the tab left the panel open');
+    assert.deepStrictEqual((await panel.ask({ type: 'status' })).result.seeTab, [], 'the note is gone');
+    // Captured now without waiting (the grant lasts on that origin).
+    assert.strictEqual((await bg.native.call('screenshot', { tab: 5, scope: 'google.com' })).ok, true);
+    // The tab goes to another origin: the browser takes the grant back; the shortcut gives it again (panel open: stays open).
+    granted.delete(5);
+    bg.chrome.tabs.onUpdated.emit(5, { url: 'https://mail.google.com/' }, { ...tabs[0], url: 'https://mail.google.com/' });
+    id = call({ tab: 5, scope: 'google.com' });
+    await settle(20);
+    assert.strictEqual((await panel.ask({ type: 'status' })).result.seeTab.length, 1);
+    press({ ...tabs[0] });
+    r = await answer(id);
+    assert.strictEqual(r.ok, true, r.error);
+    assert.deepStrictEqual(bg.panelCalls, []);
+    // No click in time: the error says the panel asked; the note goes.
+    granted.delete(5);
+    id = call({ tab: 5, scope: 'google.com' });
+    r = await answer(id);
+    assert.match(r.error, /and they didn't: TRIF's panel showed them a note asking for that click/);
+    assert.deepStrictEqual((await panel.ask({ type: 'status' })).result.seeTab, []);
+    // The tab closes while it waits: the error at once.
+    id = call({ tab: 5, scope: 'google.com' });
+    await settle(20);
+    bg.chrome.tabs.onRemoved.emit(5);
+    r = await answer(id);
+    assert.match(r.error, /Ask the user to go to this tab/);
+    assert.doesNotMatch(r.error, /they didn't/);
+    // The shortcut with the panel closed opens it (Chrome: from the shortcut itself).
+    panel.onDisconnect.emit();
+    bg.panelCalls.length = 0;
+    press({ ...tabs[0] });
+    assert.deepStrictEqual(bg.panelCalls, [['open', { windowId: 1 }]]);
+  } finally { delete globalThis.__trifGrantWaitMs; bg.restore(); }
+});
+
 test('background (Safari): TRIF doesn\'t check site access (Safari asks per site itself)', async () => {
   const bg = await loadBackground({ safari: true, storage: { mods: [mod('shop.com/a')], sitesOn: ['shop.com'] }, granted: [] });
   try {
@@ -3898,7 +3970,7 @@ test('background: mods that break: a new error gets a card in the site\'s chat o
     await load(); await load();
     assert.strictEqual(cards().length, 1);
     await load();
-    assert.deepStrictEqual(cards().map((c) => c.text)[1], 'Styler may be broken on example.com: nothing it looks for is on the page any more. Want me to fix it?');
+    assert.deepStrictEqual(cards().map((c) => c.text)[1], 'Styler may be broken on example.com/feed: nothing it looks for is on the page any more. Want me to fix it?');
     // Just flag it: the row's badge, no card
     await panel.ask({ type: 'modError.onBreak', value: 'flag' });
     page.errors = [{ ...boom(4), message: 'another failure' }];
@@ -3934,7 +4006,7 @@ test('background: trif not-broken clears a "may be broken" flag and its card (a 
     await settle(20);
     page.matched = { 'example.com/styler': true, 'example.com/promo': true, 'example.com/boxhide': true };
     page.hidesOnly = ['example.com/boxhide'];
-    await load();
+    await load(); await load();
     page.matched = { 'example.com/styler': false, 'example.com/promo': false, 'example.com/boxhide': false };
     await load(); await load(); await load(); await load();
     // the styler: flagged after three; the hide-only one: not yet (ten loads over three days)
@@ -3970,6 +4042,66 @@ test('background: trif not-broken clears a "may be broken" flag and its card (a 
     for (let i = 0; i < 6; i++) await load();
     assert.strictEqual(cards().length, 1);
     assert.ok((await health())['example.com/promo'].pages['https://example.com/feed'].misses >= 10);
+  } finally { delete globalThis.__trifHealthDelays; bg.restore(); }
+});
+
+test('background: mods that break on a single-page site: a look while it changes over, or an older load\'s look, isn\'t taken for the page; a pushState is a load of its own; old flags on weak evidence go, their cards Not broken.', async () => {
+  globalThis.__trifHealthDelays = [40, 120];
+  const tabs = [{ id: 5, windowId: 1, index: 0, active: true, url: 'https://example.com/feed' }];
+  const W = 'https://example.com/watch';
+  // (what the page shows: its feed on /feed; while it changes over, the feed still, though the address is /watch)
+  let changingOver = false, looks = 0, feedThere = true;
+  const executeScript = async ({ func }) => {
+    if (func.name === 'healthOfPage') { looks += 1; return [{ result: { errors: [], logs: [], matched: { 'example.com/styler': feedThere && (new URL(tabs[0].url).pathname === '/feed' || changingOver) } } }]; }
+    return [{ result: null }];
+  };
+  const mods = [mod('example.com/styler', { name: 'Styler', matches: ['*://example.com/*'], rules: true, selectors: ['#feed'], hash: 's1' })];
+  // (stored before the fix: a flag on /watch from one match there, and its card in the chat)
+  const oldFp = `example.com/styler|quiet|${W}`;
+  const storage = {
+    sitesOn: ['example.com'], mods,
+    modHealth: { 'example.com/styler': { hash: 's1', logs: [], fixed: {}, carded: { [oldFp]: true }, dismissed: {},
+      pages: { [W]: { matched: true, misses: 3, at: 1 } }, errors: { [oldFp]: { message: 'nothing it looks for is on the page any more', quiet: true, page: W, count: 1, first: 1, last: 1, line: 0, stack: '' } } } },
+    'chat:example.com': { messages: [{ role: 'trif', kind: 'modError', mod: 'example.com/styler', name: 'Styler', fp: oldFp, site: 'example.com', quiet: true, line: 0, text: 'Styler may be broken on example.com: nothing it looks for is on the page any more. Want me to fix it?', time: 1 }] },
+  };
+  const bg = await loadBackground({ storage, tabs, scripting: { executeScript } });
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const load = async (url) => { tabs[0].url = url; bg.chrome.tabs.onUpdated.emit(5, { status: 'complete' }, structuredClone(tabs[0])); await wait(160); await settle(20); };
+  const cards = () => (bg.store['chat:example.com']?.messages || []).filter((m) => m.kind === 'modError');
+  const pages = async () => { await wait(600); return bg.store.modHealth['example.com/styler'].pages; };
+  try {
+    bg.native.emit({ type: 'mods', mods });
+    await settle(20);
+    // the old flag, on one match: gone, its card Not broken.
+    await wait(50);
+    assert.deepStrictEqual(cards().map((c) => c.done), ['notBroken']);
+    assert.strictEqual(bg.store.modHealth['example.com/styler'].errors[oldFp], undefined);
+    // its page: two loads of /feed
+    await load('https://example.com/feed'); await load('https://example.com/feed?x=1');
+    assert.strictEqual((await pages())['https://example.com/feed'].hits, 2);
+    // a load of /feed, then 60 ms on (before its settled look) the site moves to /watch itself (pushState: an
+    // address, no load), the feed still shown for a while; then it settles on /watch, the feed hidden
+    tabs[0].url = 'https://example.com/feed';
+    bg.chrome.tabs.onUpdated.emit(5, { status: 'complete' }, structuredClone(tabs[0]));
+    await wait(60);
+    changingOver = true;
+    tabs[0].url = W;
+    bg.chrome.tabs.onUpdated.emit(5, { url: W }, structuredClone(tabs[0]));
+    await wait(80); // (the older load's settled look, at 120 ms, and the new one's first, at 100: both see the feed)
+    changingOver = false;
+    await wait(120); await settle(20);
+    assert.ok(looks >= 7, `looks: ${looks}`);
+    let p = await pages();
+    assert.ok(!p[W]?.matched, `not "matched" on /watch: ${JSON.stringify(p[W])}`);
+    // /watch's own loads: nothing it looks for, never a flag there
+    for (let i = 0; i < 5; i++) await load(`${W}?v=${i}`);
+    p = await pages();
+    assert.ok(!p[W]?.matched);
+    assert.deepStrictEqual(cards().length, 1, 'no new card');
+    // broken where it applied: three loads of /feed without it, then the card, with the page
+    feedThere = false;
+    for (let i = 0; i < 3; i++) await load(`https://example.com/feed?n=${i}`);
+    assert.deepStrictEqual(cards().map((c) => c.text)[1], 'Styler may be broken on example.com/feed: nothing it looks for is on the page any more. Want me to fix it?');
   } finally { delete globalThis.__trifHealthDelays; bg.restore(); }
 });
 

@@ -11,7 +11,7 @@
 // sidebar opens only from a click, in the window clicked in), so the window first fits a page with no sidebar,
 // and the person's click on TRIF's button there opens it. That click is stood in for by Firefox's own
 // SidebarController.show in that window (what sidebarAction.toggle runs); the page's resize then has TRIF fit
-// the window again, to 390 beside the sidebar. A screenshot argument also saves the whole phone window, the
+// the window again, to 402 beside the sidebar. A screenshot argument also saves the whole phone window, the
 // browser's toolbar and address bar included (drawSnapshot of the browser window), and the page alone.
 // (Checked 2026-11-16 with Firefox 159: everything but the capture, which needs activeTab from a toolbar click.)
 const fs = require('fs');
@@ -60,13 +60,13 @@ const dropLock = () => { try { if (Number(fs.readFileSync(path.join(LOCK, 'pid')
     const SB = 'webmods_webmods_ext-sidebar-action';
     out.sidebarShown = await ff.chrome(`async (sb) => { const w = Services.wm.getMostRecentWindow('navigator:browser'); await w.SidebarController.show(sb); return w.SidebarController.isOpen; }`, [SB]);
     let fitted = null;
-    for (let i = 0; i < 40; i++) { await sleep(250); const z = await sizes(); if (z.sidebar && z.page[0] === 390) { fitted = z; break; } }
+    for (let i = 0; i < 40; i++) { await sleep(250); const z = await sizes(); if (z.sidebar && z.page[0] === 402) { fitted = z; break; } }
     out.withSidebar = fitted || { notFitted: await sizes() };
     out.state = await ask({ type: 'phone.state', tabId });
     // the person widens the window: corrected back
     out.widened = (await ff.eval(panel, `async (w) => (await chrome.windows.update(w, { width: 1100 })).width`, [win]));
     let back = null;
-    for (let i = 0; i < 40; i++) { await sleep(250); const z = await sizes(); if (z.page[0] === 390 && z.window[0] < 1100) { back = z; break; } }
+    for (let i = 0; i < 40; i++) { await sleep(250); const z = await sizes(); if (z.page[0] === 402 && z.window[0] < 1100) { back = z; break; } }
     out.afterWiden = back || { notCorrected: await sizes() };
     out.windows = await ff.eval(panel, `async () => (await chrome.windows.getAll({ populate: true })).map((w) => ({ id: w.id, type: w.type, w: w.width, h: w.height, tabs: w.tabs.map((t) => t.url.slice(0, 60)) }))`);
     const ctx = await ff.findPage((u) => u.startsWith(pages.url('/detect')));

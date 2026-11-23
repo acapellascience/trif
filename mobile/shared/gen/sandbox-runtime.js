@@ -527,6 +527,7 @@ globalThis.__trifStartSandbox = function () {
     'block-events': ['choosing which of the user\'s actions the page sees', 'what one reads could decide which of the user\'s actions the page\'s code sees, and it may send that on'],
     embeds: ['offering the page\'s videos', 'what one reads could reach a video\'s host through which video is offered'],
     sound: ['playing sound', 'what one reads could become sounds a device nearby could pick up'],
+    load: ['loading data from other sites', 'what one reads could decide which address the other loads, and when, which that site sees'],
   };
   const inPlay = new Set(); // (the powers of the boxed mods that have run on this page, @migrate as site-storage)
   const uploadReaders = new Set(); // (boxed mods handed a picture the user attached on this page: edit-uploads reads it)
@@ -1848,6 +1849,31 @@ globalThis.__trifStartSandbox = function () {
       });
       return wrap(b, self);
     };
+    // load: data from the header's addresses (`// @powers load https://example.com/api/feed?page={1-50}`), which
+    // TRIF's background fetches outside the page, so the page's Content Security Policy doesn't apply: GET only,
+    // no body, headers or cookies of the mod's. The rules (only the header's addresses; values only the header's,
+    // small numbers, or what that server sent back; the caps) are extension/loadpower.js's, and the background,
+    // with its own copy of the header, is the one that decides (background.js loadForMod): this only asks.
+    // As a page script (Safari) it isn't there: lib.js sandboxFallback keeps such a mod waiting.
+    const load = async (url, o) => {
+      needs('load');
+      notLeaving();
+      str(url, 'an address', 4000);
+      let as = null;
+      if (o !== undefined) {
+        if (!o || typeof o !== 'object' || Array.isArray(o)) fail('trif.load\'s options are { as: \'json\' } or { as: \'text\' }');
+        for (const k of Object.keys(o)) if (k !== 'as') fail(`trif.load takes only { as }: it always loads with GET, with no body, headers or cookies of the mod's (${String(k).slice(0, 40)} isn't an option)`);
+        as = o.as === undefined ? null : o.as;
+        if (as !== null && as !== 'json' && as !== 'text') fail('trif.load\'s `as` is \'json\' or \'text\'');
+      }
+      partnersOk(self, 'load');
+      if (!SANDBOX || !send) fail('trif.load only works in TRIF\'s sandbox (Chrome and Firefox): this browser can\'t load outside the page for a boxed mod');
+      let r;
+      try { r = await send({ trifSandbox: 'load', mod: modId, key: 'load', url, as }); } catch (e) { fail(`trif.load: ${String(e && e.message ? e.message : e).slice(0, 300)}`); }
+      if (!r || !r.ok) fail(r && r.error && r.error !== 'unknown' ? String(r.error).slice(0, 600) : 'trif.load isn\'t in this version of TRIF here');
+      const a = r.res || {};
+      return harden({ ok: !!a.ok, status: Number(a.status) || 0, type: a.type === 'json' ? 'json' : 'text', data: harden(a.data === undefined ? null : a.data) });
+    };
     // local-fonts: the fonts installed here, after the browser's own prompt (call it from the user's click)
     const localFonts = async () => {
       needs('local-fonts');
@@ -1901,7 +1927,7 @@ globalThis.__trifStartSandbox = function () {
     const trifApi = {
       ...(grant.style && typeof grant.style === 'object' ? { style: Object.freeze(styleValues) } : {}),
       css, observe, text, settings, audio: audioApi, changes, wrap: wrapTextIn, onUrl, ready: readyP, loaded: loadedP,
-      block, signal, storage, imageVariant, onUpload, embed, localFonts, reload,
+      block, signal, storage, imageVariant, onUpload, embed, localFonts, reload, load,
       // site-data: filter the site's JSON responses whose address matches `glob` (* for anything)
       filterResponse: (glob, fn) => {
         needs('site-data');
@@ -2881,6 +2907,6 @@ globalThis.__trifStartSandbox = function () {
   if (Array.isArray(queued)) { G.__trifSandboxQueue = null; for (const [id, source, powers] of queued) run(id, source, powers); }
   // (and the mods injected with this runtime, one after another: started once this task is done)
   setTimeout(() => { allStarted = true; startedDone(); }, 0);
-})('sandbox', null, null, null, {"actPartners":{"write-drafts":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads"],"click":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads","rewrite-requests","block-events"],"media":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads"],"go-to":["site-storage","block-events","page-events","click"],"page-events":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads","rewrite-requests","block-events"],"edit-uploads":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants"],"image-variants":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","edit-uploads"],"preload":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","edit-uploads"],"site-storage":["read-drafts","keys","site-data","page-data","local-fonts","image-variants","edit-uploads","go-to"],"block-events":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads"],"embeds":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads"],"sound":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads"]},"alsoRefused":{"click":["write-drafts","edit-uploads","go-to"],"page-events":["write-drafts","edit-uploads","go-to"]},"channelOnly":["sound"]});
+})('sandbox', null, null, null, {"actPartners":{"write-drafts":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads"],"click":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads","rewrite-requests","block-events"],"media":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads"],"go-to":["site-storage","block-events","page-events","click"],"page-events":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads","rewrite-requests","block-events"],"edit-uploads":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants"],"image-variants":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","edit-uploads"],"preload":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","edit-uploads"],"site-storage":["read-drafts","keys","site-data","page-data","local-fonts","image-variants","edit-uploads","go-to"],"block-events":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads"],"embeds":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads"],"sound":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads"],"load":["read-drafts","keys","site-data","page-data","site-storage","local-fonts","image-variants","edit-uploads"]},"alsoRefused":{"click":["write-drafts","edit-uploads","go-to"],"page-events":["write-drafts","edit-uploads","go-to"]},"channelOnly":["sound"]});
 //# sourceURL=trif-sandbox://runtime.js
 };

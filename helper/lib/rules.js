@@ -279,10 +279,31 @@ function rulesCode(spec, id) {
     `(${rulesRuntime.toString()})(${JSON.stringify(spec)}, ${JSON.stringify(String(id || ''))});\n`;
 }
 
+// (a selector list's own items: split at its commas, not those inside (), [] or quotes)
+function topLevelList(list) {
+  const out = [];
+  let depth = 0, quote = '', from = 0;
+  for (let i = 0; i < list.length; i++) {
+    const c = list[i];
+    if (quote) { if (c === '\\') i++; else if (c === quote) quote = ''; continue; }
+    if (c === '\\') i++;
+    else if (c === '"' || c === "'") quote = c;
+    else if (c === '(' || c === '[') depth++;
+    else if ((c === ')' || c === ']') && depth > 0) depth--;
+    else if (c === ',' && depth === 0) { out.push(list.slice(from, i)); from = i + 1; }
+  }
+  out.push(list.slice(from));
+  return out;
+}
+
 /**
  * What a style mod looks for on the page (extension/modhealth.js: a mod whose selectors stop matching may be
  * broken): its hide and filter selectors, replace's `in`, and the selectors of its CSS rules; not the ones
- * every page has (html, body, :root, *). At most 40.
+ * every page has (html, body, :root, *). At most 40. A rule's selector list is split at its own commas only,
+ * not those inside :is(), :not(), :has() or quotes: split there, `a:is(b, c):not([hidden]) d` became
+ * `a:is(b`, which the browser closes for itself and finds whenever an `a` b is anywhere, hidden or not
+ * (a single-page site's page kept in the page hidden: YouTube's Home grid on /watch), and a piece that's no
+ * selector at all.
  */
 function selectorsOf(rules) {
   const out = new Set();
@@ -292,7 +313,7 @@ function selectorsOf(rules) {
   for (const r of rules.replace || []) if (r.in && r.in !== 'body') add(r.in);
   const css = String(rules.css || '').replace(/\/\*[\s\S]*?\*\//g, '');
   for (const m of css.matchAll(/(?:^|[{};])\s*([^{}@;]+)\{/g)) {
-    for (const sel of m[1].split(',')) { const t = sel.trim(); if (t && !/^(from|to|\d+(\.\d+)?%)$/i.test(t)) add(t.replace(/::?(before|after|placeholder|selection|marker|first-line|first-letter|hover|focus|active|visited|focus-visible|focus-within)\b(\([^)]*\))?/gi, '') || t); }
+    for (const sel of topLevelList(m[1])) { const t = sel.trim(); if (t && !/^(from|to|\d+(\.\d+)?%)$/i.test(t)) add(t.replace(/::?(before|after|placeholder|selection|marker|first-line|first-letter|hover|focus|active|visited|focus-visible|focus-within)\b(\([^)]*\))?/gi, '') || t); }
   }
   return [...out].slice(0, 40);
 }

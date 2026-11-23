@@ -1,6 +1,6 @@
 'use strict';
 // Local pages that tell a phone from a desktop in the ways sites do (docs/MOBILE-EDIT.md "How sites tell"), for
-// tests/phone-browser.test.js and scripts/phone-shots.js: the server's own answer from the user agent and client
+// tests/phone-browser.test.js (and phone-window-, phone-helper-browser.test.js) and scripts/phone-shots.js: the server's own answer from the user agent and client
 // hints (as Instagram's and Google's servers do), a redirect to a mobile address (the m. sites), and the
 // page's own JavaScript and CSS checks. Each page shows its verdicts in big type, for the screenshots.
 

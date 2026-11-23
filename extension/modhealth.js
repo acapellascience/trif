@@ -10,6 +10,10 @@
 // only hides things (hideOnly: a style mod whose rules all hide, rules.js hidesOnly; a boxed mod that only
 // calls trif.hide) is flagged only after HIDE_QUIET_LOADS loads in a row over HIDE_QUIET_DAYS days: what it
 // hides is often something a site shows only sometimes (a promo, a banner), and nothing is wrong meanwhile.
+// The evidence a page is one of the mod's: what it looks for found there on MATCH_LOADS loads, each at its
+// settled look (background.js checkTab, loadVerdicts), on the page shown (not a single-page site's other pages
+// kept in it hidden); only then can that page be flagged. (Before 11-20 a page was the mod's after one match
+// on any look; dropWeakEvidence clears what such weak evidence left.)
 // A page where what the mod looks for went away and came back (a streak of QUIET_STREAK loads or more with
 // nothing, or a flag, then a match) "comes and goes" there: no flag on that page again for that version. So
 // does one a fix run found nothing broken on (markNotBroken: `trif not-broken`).
@@ -17,10 +21,11 @@
 // Pure functions over a plain object kept in chrome.storage.local `modHealth`:
 //   { [modId]: { hash, errors: { [fp]: {message, stack, line, count, first, last, quiet?, page?} },
 //                dismissed: { [fp]: true }, carded: { [fp]: true }, fixed: { [fp]: true },
-//                pages: { [page]: { matched: bool, misses: n, at, since?, comesAndGoes? } }, logs: [..] } }
-// (since: when the current streak of loads with nothing began)
+//                pages: { [page]: { matched: bool, hits?, misses: n, at, since?, comesAndGoes? } }, logs: [..] } }
+// (hits: the loads it was found on, up to MATCH_LOADS; since: when the current streak of loads with nothing began)
 
 export const QUIET_LOADS = 3;
+export const MATCH_LOADS = 2;
 export const HIDE_QUIET_LOADS = 10;
 export const HIDE_QUIET_DAYS = 3;
 const QUIET_STREAK = 2; // (one load with nothing is often a page still building: two, then a match, is a pattern)
@@ -103,6 +108,19 @@ export function recordErrors(health, mods, errors, now = Date.now()) {
 const quietFp = (modId, page) => `${modId}|quiet|${page}`;
 
 /**
+ * One load's verdicts for "may be broken" (background.js checkTab): `earlier`, modId -> whether an earlier
+ * look of the load found what the mod looks for (the 3-second one, the panel's); `settled`, the same for its
+ * settled look (9 s on). Returns [[modId, found]]: found only if the settled look found it (an earlier look
+ * may have seen the page changing over: the address already the next page's, the last one still shown);
+ * not found only if no look did (found earlier and not now: neither, it may be something that comes and goes).
+ */
+export function loadVerdicts(earlier, settled) {
+  const out = [];
+  for (const [id, ok] of settled) { if (ok) out.push([id, true]); else if (!earlier.get(id)) out.push([id, false]); }
+  return out;
+}
+
+/**
  * One load of `page` (an address without its query) for a mod with selectors: did any of them match?
  * Returns the "may be broken" flag when this load makes QUIET_LOADS in a row with nothing (a hide-only mod:
  * HIDE_QUIET_LOADS, over HIDE_QUIET_DAYS days), on a page where the mod matched before and that doesn't
@@ -118,6 +136,7 @@ export function recordMatches(health, mod, page, matched, now = Date.now(), { hi
   if (matched) {
     if (p.matched && ((p.misses || 0) >= QUIET_STREAK || e.errors[fp])) p.comesAndGoes = true;
     p.matched = true;
+    p.hits = Math.min(MATCH_LOADS, (p.hits || 0) + 1);
     p.misses = 0;
     delete p.since;
     delete e.errors[fp];
@@ -126,11 +145,34 @@ export function recordMatches(health, mod, page, matched, now = Date.now(), { hi
   if (!p.matched) return null; // (never matched here: not this mod's page, or not yet)
   p.misses = (p.misses || 0) + 1;
   if (p.since === undefined) p.since = now;
-  if (p.comesAndGoes || e.errors[fp]) return null;
+  if (p.comesAndGoes || e.errors[fp] || (p.hits || 0) < MATCH_LOADS) return null; // (found here once: not yet its page)
   const enough = hideOnly ? p.misses >= HIDE_QUIET_LOADS && now - p.since >= HIDE_QUIET_DAYS * DAY : p.misses >= QUIET_LOADS;
   if (!enough) return null;
   e.errors[fp] = { message: 'nothing it looks for is on the page any more', stack: '', line: 0, count: 1, first: now, last: now, quiet: true, page };
   return { mod: mod.id, fp, message: e.errors[fp].message, stack: '', line: 0, quiet: true, page };
+}
+
+/**
+ * What was kept with weaker evidence than MATCH_LOADS settled loads, as everything before 11-20 was (one match
+ * on any look made a page the mod's: on a single-page site often a look at another page, or at a piece of a
+ * selector split inside its :is()), goes: a page's record without `hits` (unless it comes and goes: that's a
+ * user's or a fix run's word), and a "may be broken" flag on a page without the evidence, with its card's mark
+ * and its Ignore, so a flag with real evidence later is a new one. Returns the flags that went: [{mod, fp}].
+ * (background.js, on start)
+ */
+export function dropWeakEvidence(health) {
+  const gone = [];
+  for (const [mod, e] of Object.entries(health || {})) {
+    if (!e || typeof e !== 'object') continue;
+    for (const [pg, p] of Object.entries(e.pages && typeof e.pages === 'object' ? e.pages : {})) if (!p || (p.hits === undefined && !p.comesAndGoes)) delete e.pages[pg];
+    for (const [fp, x] of Object.entries(e.errors && typeof e.errors === 'object' ? e.errors : {})) {
+      if (!x?.quiet || (e.pages?.[x.page]?.hits || 0) >= MATCH_LOADS) continue;
+      delete e.errors[fp];
+      for (const k of ['carded', 'dismissed', 'fixed']) if (e[k] && typeof e[k] === 'object') delete e[k][fp];
+      gone.push({ mod, fp });
+    }
+  }
+  return gone;
 }
 
 /**

@@ -15,15 +15,18 @@ import {
   PANEL_OPEN_WAIT_MS, PANEL_LATE_MS, panelWindowUrl, panelWindowTarget, panelWindowBounds, panelWindowClick, panelQuery, isRobotless,
   QUEUE_MAX, CHAT_TEXT_MAX, normalizeQueue, queuedMessage, queueAfterRun,
 } from './lib.js';
-import { recordErrors, recordMatches, markNotBroken, openErrors, dismiss as dismissError, keepLogs, fixPrompt } from './modhealth.js';
+import { recordErrors, recordMatches, loadVerdicts, dropWeakEvidence, markNotBroken, openErrors, dismiss as dismissError, keepLogs, fixPrompt } from './modhealth.js';
 import { SANDBOX_WORLD, SANDBOX_CSP, SETTINGS_MAX, SETTINGS_SITE_MAX, BOX_RUN_POWERS, sandboxModCode } from './sandbox.js';
 import { runtimeCode } from './runtime.js';
 import { sweepPage } from './sweep.js';
 import { captureScreenshot, stitchShots, isCopyWindow } from './screenshot.js';
+import { createCaptureGrants, GRANT_WAIT_MS, shortcutText } from './capturegrant.js';
+import { captureInView, withInView } from './inview.js';
 import { createTabLocks, leakGuard } from './tablock.js';
 import { facePaths, toolbarFace } from './faces.js';
 import { agentCheck, agentSiteOf, normalizeAgentSites, agentLevel, COMMAND_NEEDS, modsSiteOf, normalizeModsReadable, modsVisibility } from './agentsites.js';
 import { createPhones, isPhoneRule, PHONE, navTarget, phoneRoute } from './phone.js';
+import { parseLoadAddresses, matchLoad, harvest, returnedKeys, loadOptions, fetchLoad, loadStart, loadDone, LoadError } from './loadpower.js';
 
 const HOST = 'com.webmods.helper';
 const VERSION = chrome.runtime.getManifest().version;
@@ -267,6 +270,14 @@ const ready = chrome.storage.local.get(null).then(async (s) => {
   state.agentSites = normalizeAgentSites(s.agentSites);
   state.modsReadable = normalizeModsReadable(s.modsReadable);
   state.health = s.modHealth && typeof s.modHealth === 'object' ? s.modHealth : {};
+  // ("may be broken" judged on weak evidence, as before 11-20: forgotten, and flags raised on it gone)
+  const weak = dropWeakEvidence(state.health);
+  if (weak.length) {
+    log('info', `mods that break: ${weak.length} "may be broken" flag(s) on weak evidence cleared`);
+    save({ modHealth: state.health }).catch(() => {});
+    // (their cards in the site's chat: Not broken., as after trif not-broken, once TRIF is ready)
+    setTimeout(() => ready.then(() => markWeakCards(weak)).catch((e) => log('warn', errMsg(e))), 0);
+  }
   state.onBreak = ['ask', 'auto', 'flag'].includes(s.onBreak) ? s.onBreak : 'ask';
   state.robotless = isRobotless(s.settings);
   state.fixes = s.modFixes && typeof s.modFixes === 'object' ? s.modFixes : {};
@@ -354,7 +365,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 // Mods that break: a loaded page is read for its mods' errors and whether their selectors match (checkTab)
-chrome.tabs.onUpdated?.addListener((tabId, info) => { if (info.status === 'complete') ready.then(() => scheduleHealth(tabId)).catch(() => {}); });
+// (a load, and a single-page site's own move to another page, history.pushState, which may come without one:
+// each starts a load of its own, judged on its own address)
+chrome.tabs.onUpdated?.addListener((tabId, info, tab) => {
+  const moved = info.url && info.url.split('#')[0] !== tabLoads.get(tabId)?.url;
+  if (info.status === 'complete' || moved) ready.then(() => scheduleHealth(tabId, tab?.url || info.url || '')).catch(() => {});
+});
 chrome.tabs.onRemoved?.addListener((tabId) => { tabLoads.delete(tabId); });
 // ("Agent on this site": written here, or by another of TRIF's pages; the state follows storage)
 chrome.storage.onChanged?.addListener((changes, area) => {
@@ -377,14 +393,31 @@ chrome.runtime.onConnect.addListener((port) => {
 if (FIREFOX) {
   // Firefox has a sidebar instead of the side panel; the toolbar button toggles it (toggle() must run
   // synchronously in the click handler).
-  chrome.action.onClicked.addListener(() => { (globalThis.browser ?? chrome).sidebarAction.toggle(); });
+  // (the click gives TRIF activeTab on that tab, for screenshots: noteGrant; while a screenshot waits for it, the
+  // click opens the sidebar rather than closing it)
+  chrome.action.onClicked.addListener((tab) => {
+    const sidebar = (globalThis.browser ?? chrome).sidebarAction;
+    if (noteGrant(tab, 'click')) sidebar.open(); else sidebar.toggle();
+  });
 } else if (!PERSISTENT_HOST) {
   // Chrome and the other Chromium browsers (Safari's panel window is safari.js's): the toolbar button opens
   // the side panel from here rather than by itself (openPanelOnActionClick), because only a click that
   // reaches the extension gives it activeTab on that tab, which is what lets `trif screenshot` capture it
   // without access to every site (screenshot.js). Where no side panel shows up, a panel window instead
   // (see "the panel in a window" below).
-  chrome.action.onClicked.addListener(onToolbarClick);
+  chrome.action.onClicked.addListener((tab) => onToolbarClick(tab));
+}
+// TRIF's shortcut, "Let TRIF see this tab" (the manifest's see-tab command, Alt+Shift+S): like the toolbar button
+// it gives TRIF activeTab on the tab in front (with the focus in the page or in the panel), and opens the panel if
+// it isn't open in that window; it never closes it. Not in Safari (no such command there: it has every site).
+if (!PERSISTENT_HOST) {
+  chrome.commands?.onCommand?.addListener((name, tab) => {
+    if (name !== SEE_TAB) return;
+    // (Firefox: the sidebar opens from the shortcut itself, before anything is awaited)
+    if (FIREFOX) { try { (globalThis.browser ?? chrome).sidebarAction.open(); } catch { /* opens on the next click */ } }
+    if (!tab) { chrome.tabs.query({ active: true, lastFocusedWindow: true }).then(([t]) => noteGrant(t, 'shortcut'), () => {}); return; }
+    if (FIREFOX) noteGrant(tab, 'shortcut'); else onToolbarClick(tab, { how: 'shortcut' });
+  });
 }
 // Optional permissions: Firefox's userScripts (the setup page or the panel asks for it), and in every
 // browser the sites the user lets TRIF work on, which they can also take back in the browser's settings.
@@ -772,6 +805,8 @@ function onSandboxMessage(msg, sender, sendResponse) {
       return { ok: true };
     }
     if (!site || !mod || !key || key.length > 100 || !state.mods.some((m) => m.id === mod && m.sandboxed)) return { ok: false, error: 'not a boxed mod here' };
+    // (the load power: TRIF fetches the header's address here, outside the page: loadForMod)
+    if (msg.trifSandbox === 'load') return loadForMod(mod, msg, sender);
     // (go-to's reload: at most once in 10 seconds in a tab, whatever reloads in between)
     if (msg.trifSandbox === 'reload') {
       const tab = sender.tab && sender.tab.id;
@@ -818,6 +853,60 @@ function onSandboxMessage(msg, sender, sendResponse) {
   if (FIREFOX) return answer;
   answer.then(sendResponse);
   return true;
+}
+
+// ---- the load power (extension/loadpower.js has the rules; docs/POWERS.md, BOXED.md "Powers"): a boxed mod's
+// trif.load(url), asked for by TRIF's code in the sandbox world (onSandboxMessage: only that world can send),
+// fetched here, outside the page, so the page's Content Security Policy doesn't apply. The address is checked
+// against this background's own copy of the mod's header (state.mods, from the helper), never the message's;
+// the values a server sent back ({next_cursor}) are kept here too, per tab, frame and mod, for the document they
+// came to (a new document starts again). GET, no body, only Accept, no cookies (`credentials: 'omit'`), no
+// referrer; redirects only within the origin; 2 MB, 15 s, 3 at once and 30 a minute per mod in a tab; text or
+// JSON. The browser's access to the address's site is the usual per-site one, asked for when the user allows
+// the mod (sidepanel.js decideApproval) or from the mod's row (its "needs access" tag).
+const loadState = new Map(); // "<tab> <frame> <mod>" -> {doc, returned: Map, times: [], inFlight}
+chrome.tabs.onRemoved?.addListener((tabId) => { for (const k of loadState.keys()) if (k.startsWith(`${tabId} `)) loadState.delete(k); });
+/** The sites a mod's load power reaches (for the browser's access): [site], each as scopeFor has it. */
+function loadSites(m) {
+  const out = [];
+  if (!m || !m.sandboxed || !(m.powers || []).includes('load')) return out;
+  let parsed = [];
+  try { parsed = parseLoadAddresses(m.powerArgs && m.powerArgs.load); } catch { return out; }
+  for (const p of parsed) { const s = scopeFor(p.hostname.replace(/^\[|\]$/g, '')) || p.hostname; if (!out.includes(s)) out.push(s); }
+  return out;
+}
+async function loadForMod(modId, msg, sender) {
+  const m = state.mods.find((x) => x.id === modId && x.sandboxed);
+  if (!m || m.held || m.unsandboxed || !(m.powers || []).includes('load')) return { ok: false, error: 'that needs the load power (// @powers load <addresses> in the mod\'s header, which the user approves)' };
+  const tab = sender.tab && sender.tab.id;
+  if (typeof tab !== 'number') return { ok: false, error: 'trif.load works in a tab' };
+  if (tabLocks.isLocked(tab)) return { ok: false, error: 'trif.load is off in a tab where an agent\'s code ran (the tab is paused): it\'s back when the page reloads' };
+  let parsed, as;
+  try { parsed = parseLoadAddresses(m.powerArgs && m.powerArgs.load); as = loadOptions(msg.as === null || msg.as === undefined ? undefined : { as: msg.as }); } catch (e) { return { ok: false, error: `trif.load: ${errMsg(e)}` }; }
+  const k = `${tab} ${sender.frameId || 0} ${modId}`;
+  const doc = String(sender.documentId || '');
+  let st = loadState.get(k);
+  if (!st || st.doc !== doc) { st = { doc, returned: new Map(), times: [], inFlight: 0 }; loadState.set(k, st); }
+  const hit = matchLoad(typeof msg.url === 'string' ? msg.url : null, parsed, st.returned);
+  if (!hit.ok) return { ok: false, error: `trif.load: ${hit.error}` };
+  const u = new URL(hit.url);
+  const host = u.hostname;
+  // (Safari never gets here: a mod with load waits there, lib.js sandboxFallback)
+  if (SITE_ACCESS && !(await chrome.permissions.contains({ origins: [`${u.protocol}//${host}/*`] }).catch(() => false))) {
+    return { ok: false, error: `trif.load: TRIF doesn't have your browser's access to ${host} yet, so it can't load from there: click "needs access" on the mod's row in TRIF's panel` };
+  }
+  const busy = loadStart(st);
+  if (busy) return { ok: false, error: `trif.load: ${busy}` };
+  try {
+    const out = await fetchLoad((url, init) => fetch(url, init), hit, as);
+    // (the values the addresses take back, from a JSON answer that worked: for the next address)
+    if (out.type === 'json' && out.ok) harvest(out.data, returnedKeys(parsed).get(hit.origin), hit.origin, st.returned);
+    return { ok: true, res: { ok: out.ok, status: out.status, type: out.type, data: out.data } };
+  } catch (e) {
+    return { ok: false, error: `trif.load: ${e instanceof LoadError ? e.message : errMsg(e).slice(0, 300)}` };
+  } finally {
+    loadDone(st);
+  }
 }
 
 function reportApplied(res) {
@@ -1435,11 +1524,15 @@ const commands = {
   // TRIF never switches tabs or focuses windows to capture one: several agents can be working at once
   // while the user browses. A tab that isn't showing is captured by Firefox as it is; Chrome, only with
   // `copy`, captures a fresh copy in a window of its own (extension/screenshot.js), and says so in `note`.
-  async screenshot(args) {
+  // Without access to every site, the tab in front refused for want of the user's click: the panel asks for it and
+  // the screenshot waits (waitForGrant).
+  async screenshot(args, reqId = null) {
     const tab = await scopedTab(args);
     const timeout = Number(args.timeout) > 4000 ? Number(args.timeout) - 3000 : 45000;
     return captureScreenshot(chrome, tab, { full: !!args.full, copy: !!args.copy, force: !!args.force, timeout }, {
       browser: BROWSER, family: FAMILY, allUrls: state.access.allUrls,
+      grants: captureGrants, shortcut: seeTabShortcut,
+      waitForGrant: (t, { shortcut }) => waitForGrant(t, { site: args.scope ? normalizeSite(args.scope) : siteOfHost(hostOf(t.url || '')), shortcut, reqId }),
       pageCall: (tabId, func, a = []) => pageCall(tabId, 'ISOLATED', func, a),
       stitch: stitchShots,
       onProbe: rememberProbe,
@@ -1707,7 +1800,7 @@ async function runCommand(cmd, args, reqId = null) {
   // which is all the page commands check; `phoneRun` says where it came from)
   if (args && isPhoneSite(args.scope)) { args.scope = phoneBase(args.scope); args.phoneRun = true; }
   await agentGate(cmd, args, reqId);
-  return fn(args);
+  return fn(args, reqId);
 }
 
 // ---- Mods that break (modhealth.js) -------------------------------------------------------------------
@@ -1717,23 +1810,39 @@ async function runCommand(cmd, args, reqId = null) {
 // trif.hide, a free mod's trif.expect). A new error, or a mod whose selectors stopped matching on a page
 // where they matched, gets a badge on its row and the toolbar, and (Settings' "When a mod breaks") a card in
 // the site's chat, "Want me to fix it?", or a fix run of its own.
-const tabLoads = new Map(); // tabId -> { since, matched: Map(modId -> bool), hideOnly: Map(modId -> bool), counted, url }
+const tabLoads = new Map(); // tabId -> { since, matched: Map(modId -> bool), hideOnly: Map(modId -> bool), counted, url, gen }
+let healthGen = 0;
 let healthSave = null;
 
 // (when after a load: tests set shorter ones)
 const HEALTH_DELAYS = Array.isArray(globalThis.__trifHealthDelays) ? globalThis.__trifHealthDelays : [3000, 9000];
-function scheduleHealth(tabId) {
-  tabLoads.set(tabId, { since: 0, matched: new Map(), hideOnly: new Map(), counted: false, url: '' });
+function scheduleHealth(tabId, url = '') {
+  // (a newer load's looks replace an older one's still to come: its settled look, 9 s after it, would otherwise
+  // judge the newer load seconds after it began, the page perhaps still changing over)
+  const gen = ++healthGen;
+  tabLoads.set(tabId, { since: tabLoads.get(tabId)?.since || 0, matched: new Map(), hideOnly: new Map(), counted: false, url: String(url || '').split('#')[0], gen });
   setTimeout(() => checkTab(tabId, false).catch((e) => log('warn', `mod errors: ${errMsg(e)}`)), HEALTH_DELAYS[0]);
-  setTimeout(() => checkTab(tabId, true).catch((e) => log('warn', `mod errors: ${errMsg(e)}`)), HEALTH_DELAYS[1]);
+  setTimeout(() => checkTab(tabId, gen).catch((e) => log('warn', `mod errors: ${errMsg(e)}`)), HEALTH_DELAYS[1]);
 }
 
 // (in the page, MAIN or TRIF's sandbox world: the mods' errors and logs since `since`, and for each mod with
-// selectors, whether any is on the page now. Self-contained: the browser sends it to the page as text.)
+// selectors, whether any is on the page now, on the page shown: not inside a part of it that isn't shown, as a
+// single-page site's other pages kept in it hidden (YouTube's Home grid while a video plays); what the mod
+// hides itself counts. Self-contained: the browser sends it to the page as text.)
 function healthOfPage(since, styleSel, sandbox) {
   const w = sandbox ? globalThis.__trifSandbox : window.__webmods;
   if (!w) return null;
-  const any = (l) => (Array.isArray(l) ? l : []).some((sel) => { try { return !!document.querySelector(sel); } catch { return false; } });
+  const shown = (el) => {
+    try {
+      let p = el.parentElement;
+      while (p && getComputedStyle(p).display === 'contents') p = p.parentElement;
+      if (!p) return true;
+      return typeof p.checkVisibility === 'function' ? p.checkVisibility() : p.getClientRects().length > 0;
+    } catch { return true; }
+  };
+  const any = (l) => (Array.isArray(l) ? l : []).some((sel) => {
+    try { let n = 0; for (const el of document.querySelectorAll(sel)) { if (shown(el)) return true; if (++n >= 50) break; } return false; } catch { return false; }
+  });
   const matched = {};
   for (const id of Object.keys(styleSel || {})) matched[id] = any(styleSel[id]);
   const watched = w.watched || {};
@@ -1751,20 +1860,21 @@ function healthOfPage(since, styleSel, sandbox) {
 const runsInTab = (m, tabId) => isPhoneMod(m) === (tabId !== undefined && tabId !== null && phones.isPhone(tabId));
 const runningOn = (url, tabId) => state.mods.filter((m) => { if (!isEnabled(m.id) || m.held || !runsInTab(m, tabId)) return false; const lm = limitToSites(m, onSites(), sens()); return !!lm && modAppliesTo(withOffSites(lm, offSitesFor(m, state.offSites, state.groupsOff)), url); });
 
-async function checkTab(tabId, final = false) {
+async function checkTab(tabId, settledGen = false) {
   if (!checkUserScripts()) return;
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const url = tab?.url || '';
   if (!/^https?:/.test(url) || !siteOnFor(url, onSites(), sens())) return;
   const running = runningOn(url, tabId);
   if (!running.length) return;
-  // (a load from scheduleHealth counts for "may be broken"; one the panel's look finds, or a page that changed
-  // its address by itself, only for errors)
+  // (a load from scheduleHealth counts for "may be broken", judged by its settled look, 9 s on, if the page kept
+  // its address; one the panel's look finds, or a page that changed its address by itself, only for errors)
   const here = url.split('#')[0];
   let load = tabLoads.get(tabId);
   if (!load) { load = { since: 0, matched: new Map(), hideOnly: new Map(), counted: true, url: here }; tabLoads.set(tabId, load); }
   if (!load.url) load.url = here;
   else if (load.url !== here) { load = { since: load.since, matched: new Map(), hideOnly: new Map(), counted: true, url: here }; tabLoads.set(tabId, load); }
+  const final = settledGen !== false && load.gen === settledGen;
   const style = Object.fromEntries(running.filter((m) => m.rules && Array.isArray(m.selectors) && m.selectors.length).map((m) => [m.id, m.selectors]));
   const got = [];
   try { got.push(await rawPageCall(tabId, 'MAIN', healthOfPage, [load.since, style, false])); } catch { /* not readable now */ }
@@ -1783,10 +1893,11 @@ async function checkTab(tabId, final = false) {
   const fresh = recordErrors(state.health, mods, errors);
   for (const m of running) keepLogs(state.health, m, logs.filter((l) => l.mod === m.id).slice(-10));
   load.since = Math.max(load.since, ...errors.map((e) => e.time || 0), ...logs.map((e) => e.time || 0));
+  const look = new Map(); // (this look's: modId -> found)
   for (const g of got) {
     for (const [id, ok] of Object.entries(g?.matched || {})) {
       if (!mods.has(id)) continue;
-      load.matched.set(id, !!load.matched.get(id) || ok);
+      look.set(id, !!look.get(id) || ok);
       // (a mod that only hides things: a style mod whose rules all hide, rules.js hidesOnly; a boxed mod that
       // only calls trif.hide. modhealth.js waits much longer before it says one may be broken)
       const m = mods.get(id);
@@ -1794,13 +1905,15 @@ async function checkTab(tabId, final = false) {
       load.hideOnly.set(id, (load.hideOnly.get(id) ?? true) && hides);
     }
   }
-  // (one load counts once, on the later look: a page that builds itself slowly gets the time it needs)
+  // (one load counts once, on its settled look: a page that builds itself slowly gets the time it needs, and a
+  // look while a single-page site changes over isn't taken for the page: modhealth.js loadVerdicts)
   if (final && !load.counted) {
     load.counted = true;
     for (const m of running) { const f = state.fixes[m.id]; if (f && f.fixedHash === m.hash) { f.loads = (f.loads || 0) + 1; save({ modFixes: state.fixes }).catch(() => {}); } }
     const page = url.split(/[?#]/)[0];
-    for (const [id, ok] of load.matched) { if (!mods.has(id)) continue; const f = recordMatches(state.health, mods.get(id), page, ok, Date.now(), { hideOnly: load.hideOnly.get(id) === true }); if (f) fresh.push(f); }
+    for (const [id, ok] of loadVerdicts(load.matched, look)) { if (!mods.has(id)) continue; const f = recordMatches(state.health, mods.get(id), page, ok, Date.now(), { hideOnly: load.hideOnly.get(id) === true }); if (f) fresh.push(f); }
   }
+  for (const [id, ok] of look) load.matched.set(id, !!load.matched.get(id) || ok);
   if (errors.length || logs.length || final) saveHealthSoon();
   await badgeFor(tab);
   for (const f of fresh) await announceBreak(f, tab).catch((e) => log('warn', `mod errors: ${errMsg(e)}`));
@@ -1825,7 +1938,15 @@ async function badgeFor(tab) {
 
 // (awaiting Tim: docs/CLICKJACK-STRINGS.md)
 const clickjackText = (name) => `TRIF stopped a click: ${name} had hidden what you clicked, so you couldn't see what it was. The page didn't get the click. If you didn't expect this, turn ${name} off.`;
-const breakText = (name, site, quiet) => (quiet ? `${name} may be broken on ${site}: nothing it looks for is on the page any more. Want me to fix it?` : `${name} has a new error on ${site}. Want me to fix it?`);
+const breakText = (name, site, quiet, page) => (quiet ? `${name} may be broken on ${pageLabel(site, page)}: nothing it looks for is on the page any more. Want me to fix it?` : `${name} has a new error on ${site}. Want me to fix it?`);
+// (the page a "may be broken" flag is for, short: the site and the address's path, "youtube.com/watch"; the
+// site alone for its home page; a long path cut, as "…")
+function pageLabel(site, page) {
+  let path = '';
+  try { path = new URL(String(page || '')).pathname; } catch { /* the site alone */ }
+  if (!path || path === '/') return site;
+  return `${site}${path.length > 40 ? `${path.slice(0, 39)}…` : path}`;
+}
 
 /** A new error or flag: the chat's card (once per fingerprint), or with "Fix it automatically", a fix run. */
 async function announceBreak(f, tab) {
@@ -1860,7 +1981,7 @@ async function announceBreak(f, tab) {
   const afterFix = !!(fx && fx.fixedHash === mod.hash && (fx.loads || 0) <= 3);
   await updateChat(site, (chat) => {
     chat.messages.push({ role: 'trif', kind: 'modError', mod: mod.id, name, fp: f.fp, site, ...(f.quiet ? { quiet: true } : {}), ...(afterFix ? { afterFix: true } : {}), line: f.line || 0,
-      text: afterFix ? `${name}'s fix ${f.quiet ? 'may not work' : 'has a new error'} on ${site}. Undo the fix, or want me to try again?` : breakText(name, site, f.quiet), time: Date.now() });
+      text: afterFix ? `${name}'s fix ${f.quiet ? 'may not work' : 'has a new error'} on ${site}. Undo the fix, or want me to try again?` : breakText(name, site, f.quiet, f.page), time: Date.now() });
   });
 }
 
@@ -1928,6 +2049,18 @@ async function askToRun(site, args, reqId = null) {
 }
 
 // (a card done with: its buttons go; `how` says why, for the line it leaves)
+async function markWeakCards(gone) {
+  const bySite = new Map();
+  for (const { mod, fp } of gone) { const site = String(mod).split('/')[0]; if (!bySite.has(site)) bySite.set(site, new Set()); bySite.get(site).add(`${mod}\n${fp}`); }
+  for (const [site, keys] of bySite) {
+    await updateChat(site, (chat) => {
+      let changed = false;
+      for (const m of chat.messages) if (m.kind === 'modError' && keys.has(`${m.mod}\n${m.fp}`) && (!m.done || m.done === 'fixing')) { m.done = 'notBroken'; changed = true; }
+      return changed ? undefined : false;
+    });
+  }
+}
+
 async function markCards(modId, fps, how, over = []) {
   const sites = new Set();
   for (const t of await chrome.tabs.query({}).catch(() => [])) { const s = siteForUrl(t.url || ''); if (s) sites.add(s); }
@@ -2297,6 +2430,8 @@ async function uiStatus() {
       matches: m.matches || [], excludes: m.excludes || [], registered: !!live.get(m.id)?.registered, enabled: live.get(m.id)?.enabled ?? isEnabled(m.id),
       error: errors.get(m.id) === USER_SCRIPTS_OFF ? null : errors.get(m.id) || null,
       held: m.held || null, pending: m.pending || null, review: m.held || m.pending ? null : m.review || null, risk: m.risk || null,
+      // (the load power's sites, for the browser's access: asked for at Allow, and from the row while missing)
+      ...(loadSites(m).length ? { loadSites: loadSites(m), loadMissing: SITE_ACCESS ? loadSites(m).filter((x) => !hasSiteAccess(s.access || state.access, x)) : [] } : {}),
       from: fromOtherBrowser(m, state.installId) ? (m.origin.browser || 'another browser') : null,
       source: m.source || null, sourceChanged: !!m.sourceChanged, version: m.version || null, update: m.update || null, rules: !!m.rules, sandboxed: !!m.sandboxed, unsandboxed: !!m.unsandboxed, powers: Array.isArray(m.powers) ? m.powers : [], powerInfo: m.powerInfo || null, siteReach: Array.isArray(m.siteReach) ? m.siteReach : null, found: Array.isArray(m.found) ? m.found : [],
       newOff: state.newOff[m.id] && !(live.get(m.id)?.enabled ?? isEnabled(m.id)) ? state.newOff[m.id] : null,
@@ -2312,12 +2447,76 @@ async function uiStatus() {
     // (sensitive sites: the ones of their own TRIF knows of, and the hosts the upgrade asks about)
     sensitive: { splits: sens().splits, pending: state.sensitivePending },
     agentAsks: [...state.agentAsks.entries()].map(([id, a]) => ({ id, site: a.site })),
+    // (screenshots waiting for the user's click on their tab: the panel's note, capturegrant.js)
+    seeTab: captureGrants.waiting().map(({ tabId, windowId, site, shortcut, until }) => ({ tabId, windowId, site, shortcut, until })),
     runs: [...state.runs.values()].map((r) => ({ runId: r.runId, site: r.site })),
     lockedTabs: tabLocks.list(),
     groupsOff: state.groupsOff,
     // Storage stopped working: the panel can't read switches from it, so they come from here.
     ...(storageHealth.broken ? { storageBroken: true, disabled: state.disabled, offSites: state.offSites } : {}),
   };
+}
+
+// ---- letting TRIF see a tab: screenshots without access to every site (capturegrant.js) ---------------------
+// The browser gives TRIF activeTab on a tab when the user clicks the toolbar button there or presses TRIF's
+// shortcut (SEE_TAB); TRIF keeps a record of it, by the browser's rules for taking it back, in session storage
+// (which the browser empties as it restarts, as it does the grants).
+
+const SEE_TAB = 'see-tab';
+const GRANTS_KEY = 'captureGrants';
+// (how long a screenshot waits for the click: tests set a shorter one)
+const GRANT_WAIT = Number(globalThis.__trifGrantWaitMs) > 0 ? Number(globalThis.__trifGrantWaitMs) : GRANT_WAIT_MS;
+const MAC = /Mac/.test(globalThis.navigator?.userAgent || '');
+const captureGrants = createCaptureGrants({
+  family: FAMILY,
+  save: (dump) => { chrome.storage.session?.set({ [GRANTS_KEY]: dump })?.catch?.(() => {}); },
+});
+const grantsLoaded = (async () => {
+  try { captureGrants.load((await chrome.storage.session.get(GRANTS_KEY))[GRANTS_KEY]); } catch { /* no session storage: from now on */ }
+})();
+chrome.tabs.onUpdated?.addListener((tabId, info, tab) => { grantsLoaded.then(() => captureGrants.updated(tabId, info, tab)); });
+chrome.tabs.onRemoved?.addListener((tabId) => {
+  const waited = captureGrants.isWaiting(tabId);
+  grantsLoaded.then(() => captureGrants.removed(tabId));
+  if (waited) notifyPanels();
+});
+
+/** The click or the shortcut on `tab` (synchronous: the click decides from it). Returns how many screenshots it lets go on. */
+function noteGrant(tab, how) {
+  const n = captureGrants.grant(tab, how);
+  if (n) notifyPanels();
+  return n;
+}
+
+/**
+ * Whether TRIF can take a screenshot of `tab` now as far as it knows: it has every site, or the user's click on
+ * that tab, by the record (a hint: the browser decides). For what would rather skip the picture than ask.
+ */
+function hasCaptureGrant(tab) {
+  if (!tab || !Number.isInteger(tab.id)) return false;
+  return state.access.allUrls !== false || captureGrants.has(tab.id, tab.url || tab.pendingUrl || '');
+}
+
+/** TRIF's shortcut as the user's keyboard says it ('⌥⇧S' on a Mac), or '' when the user has none (removed, or taken). */
+async function seeTabShortcut() {
+  try { return shortcutText((await chrome.commands.getAll()).find((c) => c.name === SEE_TAB)?.shortcut || '', MAC); } catch { return ''; }
+}
+
+/**
+ * A screenshot of `tab` (in front in its window) refused for want of the click: with TRIF's panel open in that
+ * window, its note asks the user to click the robot, and this waits up to GRANT_WAIT (60 s) for it. Returns
+ * {granted, waited}; with no panel there to ask in, {granted: false, waited: 0} at once.
+ */
+async function waitForGrant(tab, { site = '', shortcut = '', reqId = null } = {}) {
+  const panelThere = [...state.panelWindows.values()].some((p) => p.windowId === tab.windowId);
+  if (!panelThere) return { granted: false, waited: 0 };
+  // (the helper's timer for this request: longer by the wait, helper/host.js onRequestWaiting)
+  if (reqId) { try { post({ type: 'requestWaiting', id: reqId, ms: GRANT_WAIT + 2000 }); } catch { /* the reply says */ } }
+  const p = captureGrants.wait(tab, { ms: GRANT_WAIT, site, shortcut });
+  notifyPanels();
+  const result = await p;
+  notifyPanels();
+  return { granted: result === 'granted', waited: result === 'timeout' ? GRANT_WAIT : 0 };
 }
 
 // ---- the toolbar button, and the panel in a window ---------------------------------------------
@@ -2340,12 +2539,16 @@ const lateWindows = new Map();  // browser window -> {id: the panel window opene
 const panelWindowOpening = new Set(); // browser windows a panel window is being opened for (a double click opens one)
 const focusedAt = new Map();    // window id -> when it was last focused (watched while panel windows are open)
 
-function onToolbarClick(tab) {
+// The click (or TRIF's shortcut, `how`) gives TRIF activeTab on the tab (noteGrant). While a screenshot waits for
+// that, or from the shortcut, it opens the panel and never closes it: the panel's note asked for the click.
+function onToolbarClick(tab, { how = 'click' } = {}) {
   const windowId = tab?.windowId;
   if (!Number.isInteger(windowId)) return;
   const at = Date.now();
+  const keep = noteGrant(tab, how) > 0 || how === 'shortcut';
   // Both side panel calls must come from the click itself, so nothing is awaited before them.
   if (sidePanelIn(windowId) && chrome.sidePanel?.close) {
+    if (keep) return;
     chrome.sidePanel.close({ windowId }).catch((e) => console.warn('[TRIF] the side panel didn\'t close', e));
     return;
   }
@@ -2354,15 +2557,15 @@ function onToolbarClick(tab) {
     try { opening = Promise.resolve(chrome.sidePanel.open({ windowId })); } catch (e) { opening = Promise.reject(e); }
     opening.catch((e) => { if (!state.panelInWindow) console.warn('[TRIF] the side panel didn\'t open', e); });
   }
-  ready.then(() => panelOrWindow(windowId, opening, at)).catch((e) => console.warn('[TRIF] the panel didn\'t open', e));
+  ready.then(() => panelOrWindow(windowId, opening, at, keep)).catch((e) => console.warn('[TRIF] the panel didn\'t open', e));
 }
 
-async function panelOrWindow(windowId, opening, at) {
-  // A panel window open for it already: the click brings it back, or closes it.
+async function panelOrWindow(windowId, opening, at, keep = false) {
+  // A panel window open for it already: the click brings it back, or closes it (`keep`: only brings it back).
   const existing = await findPanelWindow(windowId);
   if (existing) {
     const browser = await chrome.windows.get(windowId).catch(() => null);
-    if (panelWindowClick({ panel: existing, browser, focusedAt: Object.fromEntries(focusedAt), now: at }) === 'focus') {
+    if (keep || panelWindowClick({ panel: existing, browser, focusedAt: Object.fromEntries(focusedAt), now: at }) === 'focus') {
       await chrome.windows.update(existing.id, { focused: true });
     } else {
       await chrome.windows.remove(existing.id);
@@ -2555,11 +2758,14 @@ async function onPanelMessage(msg, { fromPanel = false, sender = null } = {}) {
     case 'agent.openModel.removeKey': return helperRequest('agent.openModel.removeKey', {}, 60000);
     case 'instructions.get': return helperRequest('instructions.get', {}, 10000);
     case 'instructions.set': return helperRequest('instructions.set', { text: String(msg.text ?? '') }, 10000);
-    case 'agent.start': return startAgent(msg);
+    // (`withView`: a message the person sent, with what's in view as they sent it: inview.js; the panel's alone)
+    case 'agent.start': return startAgent({ ...msg, withView: fromPanel && msg.withView === true });
+    // (the note a message would carry now: for the tests, and for looking at it)
+    case 'inview.capture': if (!fromPanel) throw new Error('only from TRIF\'s panel'); return inViewFor(msg.tabId, normalizeSite(msg.site));
     case 'agent.stop': return stopAgent(msg.runId);
     // Messages typed while the agent works (lib.js "messages sent while the agent works"): the panel's own,
     // from a click or Enter in its message box. Nothing else (a page, a mod, a run) may queue anything.
-    case 'chat.queue': if (!fromPanel) throw new Error('only from TRIF\'s panel'); return queueMessage(msg);
+    case 'chat.queue': if (!fromPanel) throw new Error('only from TRIF\'s panel'); return queueMessage({ ...msg, withView: msg.withView === true });
     case 'chat.unqueue': if (!fromPanel) throw new Error('only from TRIF\'s panel'); return unqueue(msg.site, String(msg.id ?? ''));
     case 'chat.sendNow': if (!fromPanel) throw new Error('only from TRIF\'s panel'); return sendNow(msg.site, String(msg.id ?? ''));
     case 'agent.login': return startLogin(msg);
@@ -2836,6 +3042,7 @@ async function onPanelMessage(msg, { fromPanel = false, sender = null } = {}) {
       // in this browser, to run as a page script, this version only. Panel only.
       const sbx = state.mods.find((m) => m.id === msg.id && m.held && m.held.by === 'sandbox');
       if (sbx) {
+        if (sbx.held.cant) throw new Error(sbx.held.reason);
         if (typeof msg.hash === 'string' && msg.hash !== sbx.held.hash) throw new Error(`${sbx.id} changed again since you looked at it: look at what's waiting now`);
         // (by its code's version when it has a style section: an edit of that alone doesn't ask again)
         state.unsandboxedOk = { ...state.unsandboxedOk, [sbx.id]: sbx.held.codeHash ? `code:${sbx.held.codeHash}` : sbx.held.hash };
@@ -2979,10 +3186,14 @@ function answerCard(site, time, choice) {
   });
 }
 
-async function startAgent(msg, { fromQueue = null } = {}) {
+async function startAgent(msg, { fromQueue = null, inView = null } = {}) {
   // (the phone view's chat: its site's phone twin, phone~x.com, a chat of its own whose run writes the phone twin's
   // folder only and reads the site's desktop mods: phone.js, helper/lib/scope.js)
   const chatSite = normalizeSite(msg.site);
+  // What's in view, from the moment of Send (inview.js): taken while the message goes into the chat, and put after
+  // it in what the agent gets. (`inView`: messages that waited, their notes taken as each was sent.)
+  const viewTab = Number.isInteger(msg.tabId) ? msg.tabId : undefined;
+  const viewP = inView ? Promise.resolve(inView) : msg.withView && String(msg.prompt ?? '').trim() ? inViewFor(viewTab, chatSite).then((r) => (r ? [{ ...r, text: String(msg.prompt) }] : [])) : null;
   const phoneChat = isPhoneSite(chatSite);
   const site = phoneBase(chatSite);
   const prompt = String(msg.prompt ?? '').trim();
@@ -3004,12 +3215,14 @@ async function startAgent(msg, { fromQueue = null } = {}) {
     chat.run = { runId: null, startedAt };
     chat.last = null;
   });
+  const notes = viewP ? await viewP.catch(() => []) : [];
+  if (notes.length) await markInView(chatSite, (m) => m.role === 'user' && m.time === startedAt, notes).catch(() => {});
   // (the run's scope: the site this host is in, a sensitive one of its own too; and the sites of their own
   // TRIF knows of, so the helper gives the run the right folder: helper/lib/scope.js scopeOf)
   // (a chat in the phone view: the agent is told the tab is one, phone.js)
-  // (width: the page's as measured, which an ordinary window can keep a little over the phone's 390: phone.js)
+  // (width: the page's as measured, which an ordinary window can keep a little over the phone's 402: phone.js)
   const phone = phoneChat ? { device: PHONE.name, width: (tabId !== undefined && Number.isFinite(phones.get(tabId)?.width) ? phones.get(tabId).width : PHONE.viewport.width), ...(tabId !== undefined && phones.isPhone(tabId) ? {} : { away: true }) } : undefined;
-  const args = { site, scope: phoneChat ? PHONE_PREFIX + siteOfHost(site) : siteOfHost(site), splits: sens().splits, url: String(msg.url ?? ''), tabId, ...(phone ? { phone } : {}), prompt: withAttached(prompt, chatSite), agent, agentLevel: agentLevelOf(String(msg.url ?? '') || site),
+  const args = { site, scope: phoneChat ? PHONE_PREFIX + siteOfHost(site) : siteOfHost(site), splits: sens().splits, url: String(msg.url ?? ''), tabId, ...(phone ? { phone } : {}), prompt: withInView(withAttached(prompt, chatSite), notes), agent, agentLevel: agentLevelOf(String(msg.url ?? '') || site),
     // (which other sites' mods the chat may read: the user's choices and the sensitive list; the helper has the rule)
     visibility: modsVisibility({ choices: state.modsReadable, sensitive: state.sensitiveSites }), ...(msg.fix && typeof msg.fix === 'object' ? { fix: true } : {}) };
   if (msg.sessionId) args.sessionId = String(msg.sessionId);
@@ -3052,6 +3265,77 @@ async function startAgent(msg, { fromQueue = null } = {}) {
   return { runId };
 }
 
+// ---- what's in view as a message is sent (inview.js) ----------------------------------------------------------
+
+const inViewWaiting = new Map(); // a waiting message's id -> the promise of its note, until it's kept with it
+
+/**
+ * The note for the panel's tab now (inview.js captureInView), or null: the tab isn't on the chat's site, TRIF is
+ * off there, or "Agent on this site" is Off. Never throws. In the phone view, the phone view's tab.
+ */
+async function inViewFor(tabId, chatSite) {
+  try {
+    if (!Number.isInteger(tabId) || !chatSite) return null;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    const url = tab ? tab.url || '' : '';
+    const host = hostOf(url);
+    const site = siteOfHost(phoneBase(chatSite));
+    if (!host || !hostInScope(host, site) || !siteOnFor(url, onSites(), sens())) return null;
+    const level = agentLevel(host, agentSettings()).level;
+    // (a sensitive site is never pictured, whatever "Agent on this site" says)
+    const sensitive = !!sensitiveHit(host, state.sensitiveSites, state.sensitivePending.map((p) => p.host));
+    const phone = phones.isPhone(tabId) ? { device: PHONE.name, width: Number.isFinite(phones.get(tabId)?.width) ? phones.get(tabId).width : PHONE.viewport.width } : null;
+    const scope = isPhoneSite(chatSite) ? PHONE_PREFIX + site : site;
+    return await captureInView({
+      tab, level, sensitive, phone,
+      pageCall: (func, args) => pageCall(tabId, 'ISOLATED', func, args, { scope: site }),
+      // (the visible viewport only: never the copy window, nor a tab that isn't showing)
+      capture: async () => {
+        try {
+          return (await captureScreenshot(chrome, tab, { full: false, copy: false, format: 'jpeg', quality: 80 }, {
+            browser: BROWSER, family: FAMILY, allUrls: state.access.allUrls, pageCall: (id, func, a = []) => pageCall(id, 'ISOLATED', func, a),
+            // (no waitForGrant: at Send nothing waits for the click; the record of grants learns from it: capturegrant.js)
+            grants: captureGrants,
+            checkShown: (u) => { if (!hostInScope(hostOf(u), site)) throw new Error('another site was showing in that window'); },
+          })).dataUrl;
+        } catch (e) {
+          const m = errMsg(e);
+          if (/clicks TRIF's button|activeTab|all_urls/i.test(m)) throw new Error(`${BROWSER} lets TRIF picture a tab only after the user clicks TRIF's toolbar button on it (since the browser started, on this site), and TRIF has only this site's access, not every site's; the rest of this note is read from the page itself`);
+          if (/isn't showing|stopped being the one showing/i.test(m)) throw new Error('the tab wasn\'t the one showing in its window as the message was sent');
+          throw e;
+        }
+      },
+      saveShot: async (dataUrl) => (await helperRequest('inview.shot', { scope, dataUrl }, 10000)).file,
+    });
+  } catch (e) {
+    log('warn', `couldn't note what's in view: ${errMsg(e)}`);
+    return null;
+  }
+}
+
+/** Messages that waited: their notes, in order ([{note, pictured, text}]), each as taken when it was sent. */
+async function notesOf(items) {
+  const out = [];
+  for (const x of items || []) {
+    let v = x.inView;
+    if (!v && inViewWaiting.has(x.id)) v = await inViewWaiting.get(x.id).catch(() => null);
+    if (v && typeof v.note === 'string' && v.note) out.push({ note: v.note, pictured: !!v.pictured, text: x.text });
+  }
+  return out;
+}
+
+/** What the chat keeps on the message about its note (the panel's "with what's in view"): {inView: 'shot' | 'outline'}. */
+const inViewMark = (notes) => (notes && notes.length ? { inView: notes.some((n) => n.pictured) ? 'shot' : 'outline' } : {});
+function markInView(chatSite, which, notes) {
+  const mark = inViewMark(notes);
+  if (!mark.inView) return Promise.resolve();
+  return updateChat(chatSite, (chat) => {
+    const m = [...chat.messages].reverse().find(which);
+    if (!m) return false;
+    m.inView = mark.inView;
+  });
+}
+
 /** The message as the agent gets it: with where the files it attaches are ("[attached: files/<name>]"). */
 function withAttached(prompt, chatSite) {
   // (the phone view's chat: its phone twin's files, sites/phone~x.com/files/, where its panel adds them)
@@ -3083,6 +3367,16 @@ async function queueMessage(msg) {
   if (!text) throw new Error('empty message');
   if (text.length > CHAT_TEXT_MAX) throw new Error(`that message is too long (over ${CHAT_TEXT_MAX} characters)`);
   const item = { id: queueId(), text, time: Date.now(), opts: queueOpts(msg) };
+  // (what's in view as it was sent: taken now, kept with it once it's there, inview.js)
+  if (msg.withView) {
+    const p = inViewFor(item.opts.tabId, chatSite);
+    inViewWaiting.set(item.id, p);
+    p.then((r) => (r ? updateChat(chatSite, (chat) => {
+      const x = normalizeQueue(chat.queue).find((y) => y.id === item.id);
+      if (!x) return false;
+      x.inView = { note: r.note, pictured: r.pictured };
+    }) : null)).catch(() => {}).finally(() => { setTimeout(() => inViewWaiting.delete(item.id), 60000); });
+  }
   let idle = false;
   await updateChat(chatSite, (chat) => {
     const q = normalizeQueue(chat.queue);
@@ -3128,7 +3422,7 @@ async function sendQueue(chatSite, { ids = null } = {}) {
   }
   const sessionId = chat.sessionId && (!chat.agent || !o.agent || chat.agent === o.agent) ? chat.sessionId : undefined;
   try {
-    return await startAgent({ site: chatSite, tabId: o.tabId, url, prompt: m.text, sessionId, agent: o.agent, model: o.model, effort: o.effort, ...(o.openModel ? { openModel: o.openModel } : {}) }, { fromQueue: m.ids });
+    return await startAgent({ site: chatSite, tabId: o.tabId, url, prompt: m.text, sessionId, agent: o.agent, model: o.model, effort: o.effort, ...(o.openModel ? { openModel: o.openModel } : {}) }, { fromQueue: m.ids, inView: notesOf(m.items) });
   } catch (e) {
     // (already working: another send won; anything else is in the chat already, or says why here)
     if (!/^already working/.test(errMsg(e))) {
@@ -3159,14 +3453,15 @@ async function sendNow(site, id) {
   const runId = chat.run.runId;
   const run = runId ? state.runs.get(runId) : null;
   let r = { injected: false, why: 'starting' };
+  const notes = run && !run.stopping ? await notesOf([item]) : [];
   if (run && !run.stopping) {
-    try { r = (await helperRequest('agent.inject', { runId, text: withAttached(item.text, chatSite), id }, 10000)) || r; } catch (e) { r = { injected: false, why: errMsg(e) }; }
+    try { r = (await helperRequest('agent.inject', { runId, text: withInView(withAttached(item.text, chatSite), notes), id }, 10000)) || r; } catch (e) { r = { injected: false, why: errMsg(e) }; }
   }
   if (r.injected) {
     (run.pushed || (run.pushed = new Map())).set(id, item);
     await updateChat(chatSite, (c) => {
       c.queue = normalizeQueue(c.queue).filter((x) => x.id !== id);
-      c.messages.push({ role: 'user', text: item.text, time: Date.now(), pushed: id });
+      c.messages.push({ role: 'user', text: item.text, time: Date.now(), pushed: id, ...inViewMark(notes) });
     });
     return { how: 'pushed' };
   }

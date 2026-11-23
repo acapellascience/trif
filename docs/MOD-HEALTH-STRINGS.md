@@ -13,6 +13,16 @@ fixes and Undo fix, exact. **Approved by Tim, 2026-11-11.**
 - "May be broken": a style mod's selectors (its rules), a boxed mod's `trif.observe` and `trif.hide`, a
   free mod's `trif.expect`: none on a page (its address without the query) on 3 loads in a row, where they
   were before. Counted once per load, at the 9-second look.
+- (11-20, Tim: "mods that only really apply to one page throwing errors for other pages") **Only pages where
+  the mod really applied**: a page is one of the mod's once what it looks for was found there on 2 loads, each at
+  the load's settled 9-second look, on the page shown (not inside a part of the page that isn't shown, as a
+  single-page site's other pages it keeps hidden: YouTube's Home grid while a video plays; what the mod hides
+  itself counts). A look while the page changes over (the 3-second one, the panel's, an older load's) never makes
+  a page the mod's; a single-page site's own move to another page (pushState) is a load of that page. A style
+  mod's selectors are its rules' own (a list split at its own commas, not those inside `:is()`/`:not()`: split
+  there, YouTube's `ytd-browse:is([page-subtype="home"], …):not([hidden]) …` became `ytd-browse:is([page-subtype="home"]`,
+  found on every page after Home). Flags raised before on weaker evidence were cleared on the first start of this
+  version, their cards marked **Not broken.**
 - (11-20, with Tim) **Comes and goes**: on a page where what a mod looks for went away and came back (2 or more
   loads in a row with nothing, or a raised flag, then a match), or one a fix run found nothing broken on
   (`trif not-broken`), it comes and goes: no "may be broken" there again for that version of the mod (a new
@@ -42,7 +52,10 @@ fixes and Undo fix, exact. **Approved by Tim, 2026-11-11.**
 ## The chat's card
 
 - **{Mod name} has a new error on {site}. Want me to fix it?**
-- **{Mod name} may be broken on {site}: nothing it looks for is on the page any more. Want me to fix it?**
+- **{Mod name} may be broken on {page}: nothing it looks for is on the page any more. Want me to fix it?**
+  (DRAFT 11-20, awaiting Tim: was **on {site}**.) {page}: the site and the address's path, **youtube.com/watch**;
+  the site alone for its home page (**youtube.com**); a path over 40 characters cut, with **…**. The other
+  strings with {site} (the new-error card, after a fix, Fix it automatically's line) are unchanged.
 - After a fix: **{Mod name}'s fix has a new error on {site}. Undo the fix, or want me to try again?** ·
   **{Mod name}'s fix may not work on {site}. Undo the fix, or want me to try again?**
 - Buttons: **Fix it** · **Show error** · **Ignore** (title: **Don't flag this again for this version of the

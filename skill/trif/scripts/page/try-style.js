@@ -30,7 +30,7 @@
   for (const r of rules.replace || []) if (r.in && r.in !== 'body') add(r.in);
   const css = String(rules.css || '').replace(/\/\*[\s\S]*?\*\//g, '');
   for (const m of css.matchAll(/(?:^|[{};])\s*([^{}@;]+)\{/g)) {
-    for (const sel of m[1].split(',')) { const t = sel.trim(); if (t && !/^(from|to|\d+(\.\d+)?%)$/i.test(t)) add(t.replace(/::?(before|after|placeholder|selection|marker|first-line|first-letter|hover|focus|active|visited|focus-visible|focus-within)\b(\([^)]*\))?/gi, '') || t); }
+    for (const sel of topLevelList(m[1])) { const t = sel.trim(); if (t && !/^(from|to|\d+(\.\d+)?%)$/i.test(t)) add(t.replace(/::?(before|after|placeholder|selection|marker|first-line|first-letter|hover|focus|active|visited|focus-visible|focus-within)\b(\([^)]*\))?/gi, '') || t); }
   }
   return [...out].slice(0, 40);
 };

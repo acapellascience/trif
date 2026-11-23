@@ -20,6 +20,10 @@ Only when a mod needs the page itself. Read references/checks.md too: what TRIF 
   new ones to the user, so catch what you expect.
 - `window.trif?.expect(selector)` once at the start: TRIF flags the mod as maybe broken if that stops
   appearing.
+- What your code loads or sends from the page follows its Content Security Policy (`fetch`, XHR, sockets,
+  images, iframes): x.com blocks a `fetch` to any other server. For another server's data, a boxed mod with
+  the `load` power (BOXED.md). A block is a console message (a blocked `fetch` rejects with a TypeError);
+  listen for `securitypolicyviolation` to see it.
 - Sites with Trusted Types throw on `innerHTML = '…'`: build with `createElement` and `textContent`.
 
 ## Techniques, most robust first

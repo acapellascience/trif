@@ -27,7 +27,8 @@ export const PAGE_WIDE = {
     "site-storage": ["read-drafts", "keys", "site-data", "page-data", "local-fonts", "image-variants", "edit-uploads", "go-to"],
     "block-events": ["read-drafts", "keys", "site-data", "page-data", "site-storage", "local-fonts", "image-variants", "edit-uploads"],
     "embeds": ["read-drafts", "keys", "site-data", "page-data", "site-storage", "local-fonts", "image-variants", "edit-uploads"],
-    "sound": ["read-drafts", "keys", "site-data", "page-data", "site-storage", "local-fonts", "image-variants", "edit-uploads"]
+    "sound": ["read-drafts", "keys", "site-data", "page-data", "site-storage", "local-fonts", "image-variants", "edit-uploads"],
+    "load": ["read-drafts", "keys", "site-data", "page-data", "site-storage", "local-fonts", "image-variants", "edit-uploads"]
   },
   "alsoRefused": {"click": ["write-drafts", "edit-uploads", "go-to"], "page-events": ["write-drafts", "edit-uploads", "go-to"]},
   "channelOnly": ["sound"]

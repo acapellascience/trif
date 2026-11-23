@@ -22,6 +22,12 @@
       "32": "icons/robot-32.png"
     }
   },
+  "commands": {
+    "see-tab": {
+      "suggested_key": { "default": "Alt+Shift+S" },
+      "description": "Let TRIF see this tab"
+    }
+  },
   "side_panel": {
     "default_path": "sidepanel.html"
   },

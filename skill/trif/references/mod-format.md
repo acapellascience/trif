@@ -16,7 +16,6 @@ One file per customization: a header, then the mod.
 // @name        Hide reposts
 // @description Removes reposts from the X home timeline
 // @match       https://x.com/*
-// @match       https://twitter.com/*
 // @risk        1 hides promoted posts, so their ad impressions never report
 // ==/WebMod==
 (() => {
@@ -27,7 +26,8 @@ One file per customization: a header, then the mod.
 - **One mod per customization**, `sites/<site>/<mod>.js`, named for what it does. Its id is `<site>/<mod>`.
   Separate mods can be switched off separately.
 - Header defaults: `@match` = the folder's site and its subdomains; `@run-at document-start`; `@name` = file
-  name. `@match`/`@exclude` repeat (Chrome match patterns).
+  name. `@match`/`@exclude` repeat (Chrome match patterns). Another domain's `@match` only if it really
+  serves pages (amazon.ca): twitter.com only redirects to x.com, so a line for it never runs.
 - `@id <id>`: the mod's stable id, which TRIF adds when it writes a mod (a panel edit or rename, an import, the
   phone). Keep it exactly as it is; never write one or copy it into a new mod (a copy is taken for the same mod).
   To rename a mod, change `@name` and leave the file name (the panel's Rename moves the file).

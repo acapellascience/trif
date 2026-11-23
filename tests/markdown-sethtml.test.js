@@ -1,4 +1,4 @@
-// setMarkdown: a Sanitizer that drops everything without throwing (Safari's TRIF, Tim 11-20: an empty What's new)
+// setMarkdown: a Sanitizer that drops everything without throwing (Tim's TRIF on the Mac, 11-20: an empty What's new)
 // falls back to renderMarkdown's own (safe) HTML; one that keeps the content is used as is.
 const assert = require('node:assert/strict');
 const { test, before } = require('node:test');

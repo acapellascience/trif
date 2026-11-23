@@ -31,6 +31,9 @@ const MENU = {
   'search-box': { hold: (site, args) => `adds a search box that searches ${args && args[0] ? hostOf(args[0].replace('{link}', 'l')) : site}${args && args[0] && args[0].includes('{link}') ? ' (in the place a link on the page names)' : ''}`, built: true, args: 'one' },
   'go-to': { hold: (site, args) => goToWords(site, args), built: true },
   embeds: { hold: (site, args) => `can play videos this page links to, inside the page (from ${(args || []).map((a) => a.split('/')[0].replace(/^www\./, '')).join(', ')})`, built: true, soft: true },
+  // (0.3.x: data from another server, fetched by TRIF outside the page, from the header's addresses only:
+  // extension/loadpower.js has the rules, background.js loadForMod applies them)
+  load: { hold: (site, args) => `can load data from ${loadWords(args)}, without your cookies, and can't put what's on this page into those addresses`, built: true },
   'rewrite-requests': { hold: (site, args) => `changes what ${site} receives from this page: ${(args || []).map(rewriteWords).join('; ')}`, built: true },
   'block-events': { hold: (site, args) => `can keep this site from seeing some of what you do here (${blockWords(args)}), so the site doesn't react to it`, built: true },
   'page-events': { hold: (site, args) => `can send this page's own code these signals: ${(args || []).join(', ')}`, built: true },
@@ -67,6 +70,19 @@ const goToWords = (site, args) => {
   const list = (args || []).filter((a) => a !== 'reload');
   const reload = (args || []).includes('reload') ? 'can reload this page; it ' : '';
   return `${reload}${list.length ? `can take you to these pages on ${site}: ${list.map((p) => p.replace(/\[([^\]]+)\]/, (m, v) => `one of ${v.split('|').join(', ')}`)).join(', ')}, or to a link the page shows` : `can take you to a link a page on ${site} shows`}`;
+};
+// (the load power's addresses for people: each host, with its paths as the header writes them)
+const loadWords = (args) => {
+  const by = new Map();
+  for (const a of args || []) {
+    const m = /^https?:\/\/([^/?#]+)(\/[^?#]*)?/.exec(String(a));
+    if (!m) continue;
+    const host = m[1].toLowerCase().replace(/:\d+$/, '').replace(/^www\./, ''); // (the site, as people know it: no port)
+    if (!by.has(host)) by.set(host, []);
+    const p = m[2] || '/';
+    if (!by.get(host).includes(p)) by.get(host).push(p);
+  }
+  return [...by].map(([h, ps]) => `${h} (${ps.join(', ')})`).join(', ') || 'the addresses its header lists';
 };
 const NAMES = Object.keys(MENU);
 
@@ -161,6 +177,64 @@ function checkGlobal(n) {
   if (!/^[A-Za-z_$][\w$]{0,60}$/.test(n) || BROWSER_NAMES.test(n) || /^on/.test(n) || /^(webkit|moz|ms)/i.test(n)) throw new PowersError(`site-data: "${n}" isn't a data global TRIF filters (a name like ytInitialData; never a browser name)`);
   return n;
 }
+// (load: the addresses it may load, each checked as extension/loadpower.js parseLoadAddress checks it, which the
+// background applies with its own copy; tests/loadpower.test.js keeps the two the same. https only, but for this
+// computer; no #, no user name; a path segment or a query value is literal, [one|two], {1-50} or {a_key}: the value
+// the server sent back under that key)
+const LOAD_SLOT_NAME = /^[A-Za-z_][A-Za-z0-9_-]{0,40}$/;
+const LOAD_WORD = /^[A-Za-z0-9_.-]{1,40}$/;
+const LOAD_PATH = /^[A-Za-z0-9_.~!$'()=:@%-]{1,200}$/;
+const LOAD_QUERY = /^[A-Za-z0-9_.~!$'()*:@-]{0,200}$/;
+const loadLocal = (h) => h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h.endsWith('.localhost') || h.endsWith('.test');
+function loadSlot(t, where) {
+  let m = /^\{(\d{1,7})-(\d{1,7})\}$/.exec(t);
+  if (m) {
+    const min = Number(m[1]), max = Number(m[2]);
+    if (min > max || max > 1000000 || max - min > 1000) throw new PowersError(`load: {${m[1]}-${m[2]}} in ${where} isn't a range TRIF takes (whole numbers up to 1000000, at most 1000 apart: a number the mod picks from a wide range could carry what it read)`);
+    return true;
+  }
+  m = /^\{([^{}]*)\}$/.exec(t);
+  if (m) { if (!LOAD_SLOT_NAME.test(m[1])) throw new PowersError(`load: {${m[1]}} in ${where} isn't a key's name (letters, digits, _ and -) or a range ({1-50})`); return true; }
+  m = /^\[([^\]]*)\]$/.exec(t);
+  if (m) {
+    const vs = m[1].split('|');
+    if (vs.length > 20 || !vs.every((v) => LOAD_WORD.test(v)) || new Set(vs).size !== vs.length) throw new PowersError(`load: [${m[1]}] in ${where} isn't a list of plain words ([top|latest]: up to 20, letters, digits, _ . -)`);
+    return true;
+  }
+  if (/[{}[\]|]/.test(t)) throw new PowersError(`load: "${t}" in ${where}: a value is the header's own text, [one|other], {1-50} or {a_key}, whole`);
+  return false;
+}
+function checkLoad(t) {
+  if (t.length > 500) throw new PowersError('load: an address is at most 500 characters');
+  const m = /^(https?):\/\/([A-Za-z0-9.-]+|\[::1\])(?::(\d{1,5}))?(\/[^?#\s]*)?(?:\?([^#\s]*))?$/.exec(t);
+  if (!m) throw new PowersError(`load: "${t}" isn't an address TRIF takes: https://host/path, with a query of the header's own (no #, no user name or password, no spaces)`);
+  const host = m[2].toLowerCase();
+  if (host !== '[::1]' && (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host) || (!host.includes('.') && host !== 'localhost'))) throw new PowersError(`load: "${m[2]}" isn't a host name`);
+  if (m[1].toLowerCase() === 'http' && !loadLocal(host)) throw new PowersError(`load: ${host} needs https:// (plain http is only for this computer: localhost, 127.0.0.1, *.localhost, *.test)`);
+  if (m[3] && (Number(m[3]) < 1 || Number(m[3]) > 65535)) throw new PowersError(`load: port ${m[3]} isn't a port`);
+  const where = `${host}${m[4] || '/'}`;
+  (m[4] || '/').split('/').slice(1).forEach((s, i, all) => {
+    if (s === '' && i === all.length - 1) return;
+    if (s === '' || s === '.' || s === '..' || /^%2e/i.test(s)) throw new PowersError(`load: "${t}": the path has an empty, . or .. part`);
+    if (loadSlot(s, where)) return;
+    if (s.includes('*')) throw new PowersError(`load: "${s}" in ${t}: no wildcards; list each address, with [words], {1-50} or {a_key} for a part that changes`);
+    if (!LOAD_PATH.test(s) || /%(?![0-9A-Fa-f]{2})/.test(s)) throw new PowersError(`load: "${s}" in the path of ${t} has characters TRIF doesn't take in an address's path`);
+  });
+  if (m[5]) {
+    const names = [];
+    for (const pair of m[5].split('&')) {
+      const i = pair.indexOf('=');
+      const name = i < 0 ? pair : pair.slice(0, i), value = i < 0 ? '' : pair.slice(i + 1);
+      if (!/^[A-Za-z0-9_.-]{1,60}$/.test(name)) throw new PowersError(`load: "${name}" in ${t} isn't a parameter's name (letters, digits, _ . -)`);
+      if (names.includes(name)) throw new PowersError(`load: ${name} is in ${t} twice`);
+      names.push(name);
+      if (!loadSlot(value, `${name}=`) && !LOAD_QUERY.test(value)) throw new PowersError(`load: "${value}" (${name} in ${t}) has characters TRIF doesn't take in a fixed value (letters, digits and _ . ~ ! $ ' ( ) * : @ -)`);
+    }
+    if (names.length > 12) throw new PowersError(`load: ${t} names more than 12 parameters`);
+  }
+  return t;
+}
+
 /**
  * `// @migrate localStorage rrRave.zoom` lines: what a boxed mod's free version kept in the site's storage,
  * brought into its own settings once (extension/sandbox.js), listed on the hold. Returns ["local:rrRave.zoom", …].
@@ -231,9 +305,15 @@ function parsePowersWithArgs(values, mod = {}) {
       else if (name === 'rewrite-requests') args[name] = [...(args[name] || []), checkRewrite(rest)];
       else if (name === 'image-variants') args[name] = [...(args[name] || []), checkVariant(rest)];
       else if (name === 'embeds') args[name] = [...new Set([...(args[name] || []), ...rest.map(checkEmbed)])];
+      else if (name === 'load') {
+        const all = [...(args[name] || []), ...rest.map(checkLoad)];
+        if (new Set(all).size !== all.length) throw new PowersError('load: an address is listed twice');
+        if (all.length > 10) throw new PowersError('load: at most 10 addresses');
+        args[name] = all;
+      }
       else if (name === 'site-data') { if (rest.length) args[name] = [...new Set([...(args[name] || []), ...rest.map(checkGlobal)])]; }
       else if (rest.length) throw new PowersError(`the ${name} power takes nothing after its name`);
-      if (['block-events', 'page-events', 'site-storage', 'embeds'].includes(name) && !(args[name] || []).length) throw new PowersError(`the ${name} power needs ${({ 'block-events': 'the events it keeps from the site: @powers block-events mouseover keydown click(button.cancel)', 'page-events': 'the signals it sends: @powers page-events my-app-reset', 'site-storage': 'the keys: @powers site-storage local:my-key session:other-key cookie:name', embeds: 'where its videos come from: @powers embeds www.youtube.com/embed' })[name]}`);
+      if (['block-events', 'page-events', 'site-storage', 'embeds', 'load'].includes(name) && !(args[name] || []).length) throw new PowersError(`the ${name} power needs ${({ 'block-events': 'the events it keeps from the site: @powers block-events mouseover keydown click(button.cancel)', 'page-events': 'the signals it sends: @powers page-events my-app-reset', 'site-storage': 'the keys: @powers site-storage local:my-key session:other-key cookie:name', embeds: 'where its videos come from: @powers embeds www.youtube.com/embed', load: 'the addresses it loads: @powers load https://example.com/api/feed?page={1-50}' })[name]}`);
       out.add(name);
     }
   }
@@ -373,4 +453,4 @@ function isSoft(key) {
   return !!(m && MENU[m[1]] && MENU[m[1]].soft);
 }
 
-module.exports = { siteLines, MENU, NAMES, PowersError, parsePowers, parsePowersWithArgs, parseClicks, parseEvents, parseMigrate, EMBEDS, BLOCKABLE, powerNeeds, powerInfo, isSoft, siteOf, sameSite, READS, factLine, factLines };
+module.exports = { siteLines, MENU, NAMES, PowersError, parsePowers, parsePowersWithArgs, parseClicks, parseEvents, parseMigrate, EMBEDS, BLOCKABLE, powerNeeds, powerInfo, isSoft, siteOf, sameSite, READS, factLine, factLines, checkLoad };

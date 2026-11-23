@@ -51,7 +51,6 @@ unless the user asks from their terminal.
 // @name        Hide reposts
 // @description Removes reposts from the X home timeline
 // @match       https://x.com/*
-// @match       https://twitter.com/*
 // @risk        1 hides promoted posts, so their ad impressions never report
 // ==/WebMod==
 (() => {
@@ -62,7 +61,8 @@ unless the user asks from their terminal.
 - **One mod per customization**, `sites/<site>/<mod>.js`, named for what it does. Its id is `<site>/<mod>`.
   Separate mods can be switched off separately.
 - Header defaults: `@match` = the folder's site and its subdomains; `@run-at document-start`; `@name` = file
-  name. `@match`/`@exclude` repeat (Chrome match patterns).
+  name. `@match`/`@exclude` repeat (Chrome match patterns). Another domain's `@match` only if it really
+  serves pages (amazon.ca): twitter.com only redirects to x.com, so a line for it never runs.
 - `@id <id>`: the mod's stable id, which TRIF adds when it writes a mod (a panel edit or rename, an import, the
   phone). Keep it exactly as it is; never write one or copy it into a new mod (a copy is taken for the same mod).
   To rename a mod, change `@name` and leave the file name (the panel's Rename moves the file).
@@ -212,7 +212,7 @@ one. With TRIF in several browsers, `--browser <name>` picks one (a side-panel r
 | `trif run [TAB] [--box \| --page] '<code>'` | Run JS on the page, print the result (`-f file`, `-` for stdin). |
 | `trif text [TAB]` | Visible text. |
 | `trif sweep [TAB] --selector <css> \| --color <c> \| --text <re> [--scroll] [--json]` | Every instance of a kind of thing: count and where (incl. shadow roots, `::before`, stylesheet rules). `--scroll` scrolls the tab to load more (refused on the tab the user is looking at unless `--force`). |
-| `trif screenshot [TAB] [--full] [--copy] [-o f.png]` | PNG; prints the path. Chrome captures only the showing tab; `--copy` reloads it in a brief visible window with the user's cookies, so never on a sign-in, confirm or unsubscribe address. |
+| `trif screenshot [TAB] [--full] [--copy] [-o f.png]` | PNG; prints the path. Chrome captures only the showing tab; `--copy` reloads it in a brief visible window with the user's cookies, so never on a sign-in, confirm or unsubscribe address. Without access to every site: only the tab in front, after the user clicks TRIF's button (the panel asks; it waits 60 s). |
 | `trif reload [TAB] [--hard]` | Reload and wait. |
 | `trif record <site> on\|off`, `trif requests [TAB]`, `trif request [TAB] <i> [-o f]` | Record and read fetch/XHR traffic. |
 | `trif errors [TAB]` / `trif logs [TAB]` | Mods' errors and logs there (`--page`: the page's own errors). |
@@ -221,7 +221,7 @@ one. With TRIF in several browsers, `--browser <name>` picks one (a side-panel r
 | `trif verify <site>/<mod> [TAB]` | After a save: check, wait for the browser, reload, does it run (or why not), errors, logs. |
 | `trif disable` / `enable <site>/<mod> [--site s]` / `delete` / `restore` | Switches and the trash (below). |
 | `trif install-example <site>/<mod>` | Copy a ready-made example mod into the workspace. |
-| `trif explain [term]` | What a term in the panel means, with notes for you. Powers: `read-drafts`, `keys`, `site-data`, `page-data`, `site-storage`, `local-fonts`, `image-variants`, `sound`, `controls`, `mods`, `preload`, `media`, `search-box`, `go-to`, `embeds`, `rewrite-requests`, `block-events`, `page-events`, `click`, `write-drafts`, `edit-uploads` (and `@migrate`). |
+| `trif explain [term]` | What a term in the panel means, with notes for you. Powers: `read-drafts`, `keys`, `site-data`, `page-data`, `site-storage`, `local-fonts`, `image-variants`, `sound`, `controls`, `mods`, `preload`, `media`, `search-box`, `go-to`, `embeds`, `load`, `rewrite-requests`, `block-events`, `page-events`, `click`, `write-drafts`, `edit-uploads` (and `@migrate`). |
 
 Exit code 2: the helper isn't running; ask the user to open the browser, then `trif doctor`.
 
@@ -303,6 +303,9 @@ filtering responses and a mod's own `CustomEvent`s never wait.
 
 Started from the side panel, you work for one site (with its subdomains), and TRIF enforces it:
 - `trif` commands work only on that site's tabs; pass `--tab` with the id you were given.
+- **What the user is looking at**: their messages end with `--- In view when I sent this ---` (the tab, scroll,
+  a screenshot of what they saw, their selection and its element, what was on screen with selectors). When they
+  point at something ("this", "here"), start from the selection and that note, not a search of the page.
 - Mods you write are held as above; don't disguise code to avoid a hold (that gets it held as unreadable).
 - `trif run --page` locks the site in every tab until reload: no POST/PUT/DELETE, WebSockets or other sites;
   plain GETs to the site still pass. Reload before testing anything that needs the site to send.

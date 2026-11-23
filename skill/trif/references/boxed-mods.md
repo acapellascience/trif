@@ -82,6 +82,8 @@ Limits to know:
 One exception goes in the header, `// @powers sound, read-drafts`. TRIF holds the mod until the user
 approves that set once; an update that adds a power waits again. The quiet ones (`sound`, `controls`,
 `mods`, `preload`, `embeds`, `media`) don't make it wait alone. **Ask only for powers the mod uses.**
+Data from another server is `load` (TRIF fetches it outside the page, past its Content Security Policy);
+anything else on the network (posting, a socket) is a free mod's.
 
 - `sound`: `trif.audio()`: `tone()`, `play(dataUrl)`, oscillator/gain/filter/delay/panner/noise/buffer nodes,
   `render()` offline. Sounds only from embedded `data:audio`. Starts after the user clicks or types.
@@ -113,7 +115,47 @@ approves that set once; an update that adds a power waits again. The quiet ones 
 - `local-fonts`: `await trif.localFonts()` after a click.
 - `preload`: `el.loadSooner()` on lazy images.
 - `mods`: `trif.channel(name)` to talk to your other boxed mods on the page.
+- `load`: `await trif.load(url, {as})` → `{ok, status, type, data}`: data from another server, fetched by TRIF.
+  The header lists each address whole (`// @powers load https://tweetstack.app/api/feed?cursor={next_cursor}&limit=[20|50]`);
+  a changing part is a whole path segment or query value: one of its `[words]`, a number in its `{min-max}`, or
+  `{key}`, that server's last JSON answer's value. No text of yours, no `#`. GET only, no headers or cookies;
+  https; up to 2 MB, 15 s, 30 a minute; text or JSON. The browser asks once for access to each site. Beside a
+  read power the hold warns. Not in Safari or the phone apps yet.
 
 Some pairs warn the user on the hold (`trif check` says which). A mod's act can be refused while another
 boxed mod on the site has a power that would make a warned pair; the user approves the site's combined set
 once. Don't add unused powers to get around that.
+
+**A feed from another service, with `load`** (a tab of its own on x.com, say). The answers' shape here is made
+up: read the service's own documentation, and `trif.log` what comes back the first time.
+
+```js
+// ==WebMod==
+// @name        Archive feed
+// @description The Community Archive's feed, beside the timeline
+// @match       https://x.com/*
+// @boxed
+// @powers      load https://tweetstack.app/api/feed?cursor={next_cursor}&limit=[20|50]
+// ==/WebMod==
+const box = page.create('section');
+box.setAttr('id', 'trif-box-archive');
+const more = page.create('button');
+more.setText('More');
+let next = null; // (the cursor tweetstack.app last sent: the only one TRIF lets back into an address)
+const load = async () => {
+  const q = next ? `&cursor=${encodeURIComponent(next)}` : '';
+  const { ok, status, data } = await trif.load(`https://tweetstack.app/api/feed?limit=20${q}`);
+  if (!ok) return trif.warn('the archive answered', status);
+  for (const post of data.posts || []) {
+    const p = page.create('p');
+    p.setText(`${post.author}: ${post.text}`);
+    more.before(p);
+  }
+  next = data.next_cursor;
+  if (!next) more.hide();
+};
+more.on('click', () => load().catch((e) => trif.error(e.message)));
+box.append(more);
+trif.observe('[data-testid=primaryColumn]', (col) => { if (!page.find('#trif-box-archive')) col.prepend(box); });
+await load();
+```

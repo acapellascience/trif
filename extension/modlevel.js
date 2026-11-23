@@ -64,7 +64,7 @@ export const ICON_LABELS = {
   'site-data': 'Filters what the site sends', 'page-data': 'Reads the page\'s data', 'site-storage': 'Uses the site\'s storage',
   'local-fonts': 'Sees your fonts', 'image-variants': 'Loads other picture sizes', sound: 'Plays sounds', controls: 'Adds its own controls',
   mods: 'Talks to your other mods', preload: 'Loads pictures sooner', media: 'Plays and pauses media', 'search-box': 'Adds a search box',
-  'go-to': 'Takes you to pages', embeds: 'Plays linked videos', 'rewrite-requests': 'Changes the site\'s requests',
+  'go-to': 'Takes you to pages', embeds: 'Plays linked videos', load: 'Loads data from other sites', 'rewrite-requests': 'Changes the site\'s requests',
   'block-events': 'Hides your actions from the site', 'page-events': 'Signals the page', click: 'Clicks for you',
   'edit-uploads': 'Edits pictures you post', '@migrate': 'Brings over old settings', noticeable: 'Noticeable to the site',
   'changes-requests': 'Changes what the site receives',

@@ -19,7 +19,6 @@
 
 & {
   $ErrorActionPreference = 'Stop'
-  # (Windows PowerShell 5.1's progress bar makes Invoke-WebRequest many times slower.)
   $ProgressPreference = 'SilentlyContinue'
 
   $TrifVersion = '@@VERSION@@'
@@ -55,17 +54,24 @@
   }
 
   # Downloads $Url to $File and checks its SHA-256 is $Sha256; nothing downloaded is used otherwise.
-  # (https only, as the helper's updates; plain http only to this computer, for tests)
+  # (https only, as the helper's updates; plain http only to this computer, for tests.) .NET's own classes,
+  # not Invoke-WebRequest and Get-FileHash: a Windows PowerShell started from PowerShell 7 can be handed 7's
+  # module folders, where those two don't load (seen on GitHub's runners).
   function Save-Checked($Url, $File, $Sha256) {
     if ($Url -notmatch '^https://' -and $Url -notmatch '^http://(127\.0\.0\.1|localhost):\d+/') { Stop-Install "refusing to download $Url (https only)" }
+    $web = New-Object System.Net.WebClient
     try {
-      Invoke-WebRequest -Uri $Url -OutFile $File -UseBasicParsing -MaximumRedirection 5
+      $web.DownloadFile($Url, $File)
     } catch {
       Stop-Install "couldn't download ${Url}: $($_.Exception.Message)"
+    } finally {
+      $web.Dispose()
     }
-    $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $File).Hash.ToLowerInvariant()
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($File)
+    try { $got = -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) } finally { $stream.Dispose(); $sha.Dispose() }
     if ($got -ne $Sha256) {
-      Remove-Item -LiteralPath $File -Force -ErrorAction SilentlyContinue
+      [System.IO.File]::Delete($File)
       Stop-Install "the download of $(Split-Path -Leaf $Url) doesn't match its pinned checksum (got $got); not using it"
     }
   }

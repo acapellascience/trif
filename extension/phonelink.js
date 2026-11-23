@@ -19,7 +19,7 @@ export const TEXT = {
   line: 'Your iPhone asks this computer’s agent for mods.',
   explanation: 'Your iPhone asks this computer’s agent for mods. TRIF on your iPhone sends the page you’re on to your coding agent here, over your Wi-Fi, and gets a phone mod back to approve there. The agent works inside TRIF’s sandbox, as in this chat, and writes phone mods only. Nothing here answers the network until you connect a phone.',
   button: 'Connect a phone',
-  over: 'Scan this with your iPhone’s camera.',
+  over: 'Scan this with your phone’s camera.',
   under: 'Good for 5 minutes, for one phone.',
   cancel: 'Cancel',
   qrAlt: 'The code to scan',

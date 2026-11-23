@@ -71,7 +71,7 @@ test('connect a phone: the button turns the link on, opens the window and shows 
   await s.link.connect();
   assert.deepStrictEqual(s.types(), ['phoneLink.status', 'phoneLink.on', 'phoneLink.pair.start']);
   let v = s.link.view();
-  assert.deepStrictEqual(v.qr, { text: QR, over: 'Scan this with your iPhone’s camera.', under: 'Good for 5 minutes, for one phone.', cancel: 'Cancel' });
+  assert.deepStrictEqual(v.qr, { text: QR, over: 'Scan this with your phone’s camera.', under: 'Good for 5 minutes, for one phone.', cancel: 'Cancel' });
   assert.deepStrictEqual([v.button, v.elsewhere], [null, null]);
   assert.deepStrictEqual(v.toggle, { label: 'Let connected phones reach this computer', on: true, disabled: false });
   // The secret is in `pairing` alone: not in the status the section keeps

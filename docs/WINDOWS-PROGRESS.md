@@ -516,9 +516,15 @@ install) and Windows Firewall's own prompt (no setup rule, no administrator).
   [45120851670](https://github.com/acapellascience/trif/actions/runs/45120851670) green (both Node versions,
   `still-skipped`), windows-fence [45120851766](https://github.com/acapellascience/trif/actions/runs/45120851766)
   green, the macOS tests [45120851697](https://github.com/acapellascience/trif/actions/runs/45120851697) red only
-  on phone-link's own two (`skill-browser` try-style, `phone-browser`'s 750 px), as before. (Browsing again
-  right after the record was taken back still listed it: Windows' cache, not a record left behind; a phone
-  that asks then finds nothing at the port.) The older phone-link tests stay
+  on phone-link's own two (`skill-browser` try-style, `phone-browser`'s 750 px), as before. At `2969cad` (the
+  step required): windows [45121858945](https://github.com/acapellascience/trif/actions/runs/45121858945) green
+  after one rerun of Node 18 (a flake in `tests/extension.test.js`, "mods that break on a single-page site…",
+  untouched here, also seen once locally), windows-fence
+  [45121858941](https://github.com/acapellascience/trif/actions/runs/45121858941) green, the macOS tests
+  [45121858959](https://github.com/acapellascience/trif/actions/runs/45121858959) red on the same two. The
+  runner's firewall as doctor reads it: no rule for its node.exe, a Public network (`unasked`). Not known yet:
+  browsing again right after the record was taken back still listed it, which may be Windows' cache or the
+  record's goodbye not yet out; whether a phone still sees it then is for a real pairing to show. The older phone-link tests stay
   skipped on Windows (reason `phone-link`, reworded: their keyring and dns-sd stand-ins are the Mac's scripts).
 - **Only a real pairing shows**: the iPhone finding the record over Wi-Fi (Parallels on Bridged), the host name
   resolving without an address in the record, the firewall prompt and its rule, a phone run and sync through

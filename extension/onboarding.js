@@ -4,7 +4,7 @@
 // (which also re-checks the user scripts switch); the agent list and the login go over a `panel` port,
 // as in the side panel (login.js). Switches follow chrome.storage.local `disabled` live.
 
-import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, siteNames, hasSiteAccess, FIREFOX, SAFARI, BROWSER, PANEL, SETUP_COMMAND, setBrowser } from './lib.js';
+import { modSites, offOnSite, normalizeOffSites, normalizeSettings, scopeFor, siteNames, hasSiteAccess, FIREFOX, SAFARI, BROWSER, PANEL, SETUP_COMMAND, RESETUP_COMMAND, setBrowser } from './lib.js';
 import { modSwitch, syncSwitches, shownEnabled, switchError, enabledIn, onSwitchChange } from './modswitch.js';
 import { createLogin } from './login.js';
 import { setMarkdown } from './markdown.js';
@@ -139,7 +139,7 @@ function renderSteps() {
   steps.push({ el: helper, done: connected, state: 'connected' });
   if (!connected) {
     const d = helper.querySelector('.detail');
-    d.replaceChildren('Run ', code(SETUP_COMMAND), ` in a terminal (it needs Node 18 or newer), then quit and restart ${BROWSER}.`,
+    d.replaceChildren('Run ', code(SETUP_COMMAND), ` in a terminal, then quit and restart ${BROWSER}.`,
       // (The full path: `trif` alone works only once ~/.trif/bin is on PATH, and with no helper there's
       // nothing to ask whether it is.)
       el('br'), 'Already set up? Run ', code('~/.trif/bin/trif doctor'), ' to see what\'s wrong.',
@@ -217,7 +217,7 @@ function loginStep(connected) {
     if (!here.length && !openModelHere) {
       const p = el('p');
       p.append('TRIF needs a coding agent on this computer: ', link('Claude Code', 'https://claude.com/claude-code'), ' or ',
-        link('Codex', 'https://github.com/openai/codex'), '. Install one, then run ', code(SETUP_COMMAND), ' again from the same terminal.');
+        link('Codex', 'https://github.com/openai/codex'), '. Install one, then run ', code(RESETUP_COMMAND), ' from the same terminal.');
       return [p];
     }
     // One button each, the same: logging in to one makes it the agent TRIF uses.

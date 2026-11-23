@@ -40,7 +40,7 @@ function scratchEnv(home) {
   for (const k of Object.keys(env)) if (/^(TRIF|WEBMODS)_/.test(k) || /_API_KEY$/i.test(k)) delete env[k];
   return {
     ...env, HOME: home, TRIF_NO_LAUNCHCTL: '1', WEBMODS_NO_LAUNCHCTL: '1', TRIF_DEFAULT_AGENT_DIRS: '', WEBMODS_DEFAULT_AGENT_DIRS: '',
-    TRIF_UPDATE_DELAY: '2000000000', WEBMODS_UPDATE_DELAY: '2000000000',
+    TRIF_UPDATE_DELAY: '2000000000', WEBMODS_UPDATE_DELAY: '2000000000', TRIF_RUNTIME: 'off', // (not TRIF's own Node yet: step 9)
     TRIF_KEYCHAIN_BIN: path.join(home, 'no-keychain', 'security'), // never the real Keychain
     npm_config_update_notifier: 'false',
   };

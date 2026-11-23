@@ -18,9 +18,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # (shipped-history.json and the upgrade test read old versions and tags)
+      - name: The pinned Node version (TRIF's own Node, helper/runtime.json, is what users run)
+        id: pin
+        run: |
+          v=$(sed -n 's/^  "version": "\([0-9.]*\)",$/\1/p' helper/runtime.json)
+          test -n "$v" || { echo "no version in helper/runtime.json"; exit 1; }
+          echo "node=$v" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ steps.pin.outputs.node }}
           cache: npm
       - run: npm ci
       - name: Chrome for Testing, for the real-browser tests
@@ -34,3 +40,50 @@ jobs:
       - run: npm test
         env:
           TRIF_BROWSER_TESTS: 1
+
+  # The clean-machine and upgrade tests (tests/clean-machine.test.js, docs/NO-NODE.md): TRIF installed and
+  # run on a computer with no Node. The test runner itself runs on the Node TRIF pins (helper/runtime.json);
+  # every other node on the runner is deleted first, and everything TRIF runs gets PATH=/usr/bin:/bin, so
+  # install.sh, setup, the helper, `trif`, the update and uninstall can only use TRIF's own Node.
+  clean-machine:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # (the upgrade test installs the last release, tag v0.3.0, first)
+      - name: The pinned Node version
+        id: pin
+        run: |
+          v=$(sed -n 's/^  "version": "\([0-9.]*\)",$/\1/p' helper/runtime.json)
+          test -n "$v" || { echo "no version in helper/runtime.json"; exit 1; }
+          echo "node=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.pin.outputs.node }}
+      - name: Coding agents (native binaries), for real sandboxed runs on macOS (the test skips each one that's missing)
+        if: runner.os == 'macOS'
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash || echo "Claude Code didn't install: its run is skipped"
+          brew install --cask codex || echo "Codex didn't install: its run is skipped"
+          ls -l ~/.local/bin/claude /opt/homebrew/bin/codex 2>&1 || true
+      - name: Delete every other node on the runner
+        run: |
+          keep=$(dirname "$(command -v node)")
+          echo "test runner's node: $keep/node ($(node --version))"
+          for d in $(echo "$PATH" | tr ':' ' ') /usr/local/bin /opt/homebrew/bin /usr/bin /bin; do
+            [ "$d" = "$keep" ] && continue
+            for f in node npm npx corepack; do
+              if [ -e "$d/$f" ] || [ -L "$d/$f" ]; then echo "removing $d/$f"; sudo rm -f "$d/$f"; fi
+            done
+          done
+          if PATH=/usr/bin:/bin command -v node; then echo "node is still on /usr/bin:/bin"; exit 1; fi
+          for f in /usr/local/bin/node /opt/homebrew/bin/node; do test ! -e "$f" || { echo "$f is still there"; exit 1; }; done
+      - name: Clean-machine and upgrade tests
+        run: node --test --test-reporter=spec tests/clean-machine.test.js
+        env:
+          TRIF_CLEAN_MACHINE: 1

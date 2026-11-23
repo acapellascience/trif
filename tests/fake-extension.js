@@ -62,6 +62,7 @@ function testEnv(home, extra = {}) {
     TRIF_DEFAULT_AGENT_DIRS: '',
     TRIF_UPDATE_DELAY: '2000000000', // no update check over the network during a test
     TRIF_NO_LAUNCHCTL: '1', // setup --browser safari writes the bridge's agent but doesn't start it
+    TRIF_RUNTIME: 'off', // setup never downloads TRIF's own Node (lib/runtime.js); a test that wants it brings fake pins
     TRIF_BOX_ROOT: path.join(home, 'boxes'), // agent runs' mailboxes (runs.js boxRoot)
     // Never the real Keychain (lib/keyring.js): a tool that isn't there, unless a test brings a fake one.
     TRIF_KEYCHAIN_BIN: path.join(home, 'no-keychain', 'security'),
@@ -127,8 +128,9 @@ async function waitFor(fn, { timeout = 5000, interval = 25, message = 'condition
 }
 
 class FakeExtension {
-  // (`hostJs`: another copy of TRIF's helper/host.js than this checkout's, e.g. tests/run-sandbox.test.js's)
-  constructor({ home, env = {}, hostJs = HOST_JS }) {
+  // (`hostJs`: another copy of TRIF's helper/host.js than this checkout's, e.g. tests/run-sandbox.test.js's;
+  // `command`: what to start instead, as a browser does, e.g. an installed workspace's bin/trif-host)
+  constructor({ home, env = {}, hostJs = HOST_JS, command = null }) {
     this.home = home;
     windowsShims(home);
     this.messages = [];      // every message received from the host (a set in parts as the mods message it makes)
@@ -138,7 +140,8 @@ class FakeExtension {
     this.handlers = {};      // cmd -> (args, msg) => result | Promise<result>; throw to answer ok:false
     this.autoRespond = true;
     this.waiters = [];
-    this.child = spawn(process.execPath, [hostJs, 'chrome-extension://iaablflfafmonebdomeikadolkgdbkhe/'], {
+    const origin = 'chrome-extension://iaablflfafmonebdomeikadolkgdbkhe/';
+    this.child = spawn(command || process.execPath, command ? [origin] : [hostJs, origin], {
       env: testEnv(home, env),
       stdio: ['pipe', 'pipe', 'pipe'],
     });

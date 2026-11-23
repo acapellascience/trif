@@ -21,7 +21,6 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 
 - A Mac (or Linux, or Windows 10/11: see [Windows](#windows)).
 - Google Chrome 138 or newer (or Firefox 153, or Safari 27.2: see below).
-- Node 18 or newer: check with `node --version`, or install it from [nodejs.org](https://nodejs.org).
 - A coding agent: [Claude Code](https://claude.com/claude-code) (you can log in from the side panel), or
   [Codex](https://github.com/openai/codex) 0.138 or newer (`brew install codex`, then `codex login` in a terminal).
   Pick one in the side panel's settings when you have both (each site's chat keeps its own choice of
@@ -33,24 +32,26 @@ switches stay as they were; in Safari, install the new TRIF.app (see Safari belo
 
 ## Install
 
-These steps install the latest release, **0.3.1**, from npm. GitHub's `main` branch is where work in progress
+These steps install the latest release, **0.3.1**. GitHub's `main` branch is where work in progress
 lands: it can have features the release doesn't (and new bugs), so don't install from a checkout of it
 unless you're working on TRIF.
 
 1. **Install the helper.** In a terminal:
 
    ```sh
-   npx timsrobot setup
+   curl -fsSL https://timsrobot.com/install.sh | sh
    ```
 
-   If you were sent a file (`timsrobot-0.3.1.tgz`) instead, run this from the folder it's in:
+   You don't need Node.js: this brings TRIF's own copy, kept in `~/.trif/runtime` and used only by
+   TRIF (it doesn't change a Node you have, or your PATH). Already have Node 18 or newer?
+   `npx timsrobot setup` does the same (npx asks once whether to install the package: type `y`). If you
+   were sent a file (`timsrobot-0.3.1.tgz`) instead, run this from the folder it's in (it needs Node):
 
    ```sh
    npx --yes --package ./timsrobot-0.3.1.tgz trif setup
    ```
 
-   npx asks once whether to install the `trif` package: type `y`. This creates `~/.trif` (your mods
-   live in `~/.trif/sites`) and connects it to Chrome. It's safe to run again. On a Mac it then shows the
+   This creates `~/.trif` (your mods live in `~/.trif/sites`) and connects it to Chrome. It's safe to run again. On a Mac it then shows the
    extension folder in Finder and opens `chrome://extensions` in Chrome, and waits, saying as each of
    the next steps gets done (Ctrl-C skips that).
 
@@ -71,8 +72,9 @@ unless you're working on TRIF.
 
 ### Firefox
 
-TRIF also runs in Firefox 153 or newer. Open Firefox once before running `npx timsrobot setup`, so setup
-finds it (or run `npx timsrobot setup --browser firefox`). If Firefox was open during setup, quit it
+TRIF also runs in Firefox 153 or newer. Open Firefox once before installing the helper, so setup finds
+it (or run `curl -fsSL https://timsrobot.com/install.sh | sh -s -- --browser firefox`, or
+`~/.trif/bin/trif setup --browser firefox` if TRIF is already installed). If Firefox was open during setup, quit it
 completely and reopen it. Then open
 [trif-firefox.xpi](https://github.com/acapellascience/trif/releases/latest/download/trif-firefox.xpi)
 in Firefox and click **Add** to install the add-on (if Firefox downloads it instead, drag the file onto
@@ -90,7 +92,7 @@ this is for trying it out:
 
 1. From a checkout of this repo, `node scripts/build-safari.js` (needs Xcode) makes
    `dist/safari-app/TRIF.app`. Open it once: it adds the TRIF extension to Safari.
-2. `npx timsrobot setup --browser safari` starts the Safari bridge, a small background program
+2. `curl -fsSL https://timsrobot.com/install.sh | sh -s -- --browser safari` starts the Safari bridge, a small background program
    Safari's extension talks to (Safari can't start the helper itself the way Chrome does). It starts again
    whenever you log in.
 3. In Safari: Settings → Advanced, tick "Show features for web developers"; Settings → Developer, tick
@@ -229,6 +231,10 @@ click the gear, then **Check for Updates**. From a terminal: `~/.trif/bin/trif u
 Updates are signed: TRIF installs only versions signed with its release key, so a copy from anywhere
 else is refused.
 
+TRIF runs on its own copy of Node, and an update brings a new one when TRIF needs it. If you installed
+TRIF before it had its own (with `npx timsrobot setup`), the next update downloads it once (about 30 MB)
+and moves TRIF onto it; the Node you installed is left alone, and TRIF no longer needs it.
+
 Tim's mods can also get fixes between TRIF releases, checked along with TRIF's updates and signed the same
 way. With **Install updates automatically** on, a mod you haven't changed gets the new version (marked
 "updated", switched off until you turn it on); otherwise its row offers **Use the new version**. A mod you
@@ -245,9 +251,10 @@ stops both checks.
 checks every piece and says how to fix what's broken. Common fixes:
 
 - **"Helper isn't connected"**: quit the browser completely and reopen it. If that doesn't help, run
-  `npx timsrobot setup` again, then restart the browser.
+  `curl -fsSL https://timsrobot.com/install.sh | sh` again (it keeps your mods and settings), then restart
+  the browser.
 - **Mods don't run**: make sure **Allow User Scripts** is on (step 3), then reload the page.
-- **Claude Code isn't found**: install it, then run `npx timsrobot setup` again in the same terminal.
+- **Claude Code isn't found**: install it, then run `~/.trif/bin/trif setup` in the same terminal.
 - **"rg" Not Opened** while Codex works: a search tool that ships with Codex hasn't been checked by
   Apple. It's harmless: click Done (Codex works without it).
 
@@ -264,10 +271,18 @@ echo 'export PATH="$HOME/.trif/bin:$PATH"' >> ~/.zshrc
 
 ## Uninstall
 
-Remove TRIF from `chrome://extensions` (Firefox: about:addons; Safari: delete TRIF.app). Remove the API
-keys you saved from the Keychain first, while the command is still there: `~/.trif/bin/trif agent key
---remove-key` (and again with `--agent codex`), and `~/.trif/bin/trif agent open-model --remove-key`
-(they're listed in Keychain Access as "TRIF API key" and "TRIF open model key"). Then delete:
+```sh
+~/.trif/bin/trif uninstall
+```
+
+removes TRIF's helper, its `trif` command, its own Node and its connections to your browsers. Your mods
+(`~/.trif`) and settings stay, so installing TRIF again picks them up; `trif uninstall --all` deletes
+those too, with your paired phones and the API keys TRIF saved. Then remove the extension from
+`chrome://extensions` (Firefox: about:addons; Safari: delete TRIF.app).
+
+If `trif` is already gone, by hand: remove TRIF from `chrome://extensions` (Firefox: about:addons;
+Safari: delete TRIF.app). Remove the API keys you saved from the Keychain (Keychain Access lists them as
+"TRIF API key" and "TRIF open model key"). Then delete:
 
 - `~/.trif`, your mods and TRIF's files (keep a copy of `~/.trif/sites` if you want your mods later),
   and `~/.webmods`, the link to it, if you used TRIF when it was called WebMods;
@@ -342,7 +357,11 @@ are printed instead of emailed); see [site/README.md](site/README.md) to deploy 
 bumps the version, runs the tests, builds both extensions and the npm package, has Mozilla sign the
 Firefox add-on, makes the beta zips (from `beta/`), and writes the update feeds in `updates/`. Then it asks
 before publishing: a tagged commit, a GitHub release with the files, and the feeds last. `--dry-run`
-builds everything into `dist/release/<version>` and publishes nothing.
+builds everything into `dist/release/<version>` and publishes nothing. The release also gets `install.sh`, the no-Node
+installer filled in with this release's package and the Node pins in `helper/runtime.json`;
+timsrobot.com/install.sh redirects to the newest one. `node scripts/release.js refresh-runtime --dry-run`
+shows the pins for the newest Node of the pinned major (without `--dry-run` it rewrites
+`helper/runtime.json`; commit that before releasing).
 
 Two things it doesn't do, both yours: **rename the GitHub repo** from `acapellascience/WebMods` to
 `acapellascience/trif` before releasing 0.2.0 (package.json points installs at the new name; the script

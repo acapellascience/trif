@@ -13,9 +13,10 @@ const STARTER_OFF = S.starterSites().filter((s) => !S.SITES_ON.includes(s));
 
 const COMMANDS = {
   setup: {
-    usage: 'trif setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--no-link] [--examples [SITES]|--no-examples] [--verbose] [--no-wait]',
+    usage: 'trif setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--runtime|--no-runtime] [--no-link] [--examples [SITES]|--no-examples] [--verbose] [--no-wait]',
     summary: 'install the workspace, native messaging host and CLI link (safe to re-run)',
-    details: `First time: npx timsrobot setup   (needs Node 18 or newer).
+    details: `First time: ${P.INSTALL_COMMAND}   (brings TRIF's own Node: the computer needs none;
+with Node 18 or newer, npx timsrobot setup does the same).
 Creates the workspace (~/.trif, unless --home or TRIF_HOME says otherwise; a ~/.webmods from before 0.2.0,
 when TRIF was called WebMods, is moved there first and left as a link to it) with sites/ and bin/, and the
 private folder (settings, logs, screenshots; ~/Library/Application Support/TRIF on a Mac, moved out of the
@@ -42,12 +43,31 @@ Where the wrappers point:
              in a fresh copy only when the files changed.
   --link     run the files where they are, without copying (the default in a git checkout, for
              developing TRIF itself).
+Which node they run:
+  TRIF's own copy of Node (the version pinned in helper/runtime.json, downloaded from nodejs.org and
+  checked against its pinned SHA-256 into <home>/runtime), for --copy installs; the node running setup
+  for --link ones. --runtime uses TRIF's own for --link too; --no-runtime (or TRIF_RUNTIME=off) never.
+  If the download fails, setup uses the node running it and tries again at the next update.
 It also records this terminal's PATH in config.json (env.PATH) so the helper can find your coding
 agent for the side panel, and writes .claude/settings.json (what Claude Code may do in the workspace).
 Other options: --no-link skips the /usr/local/bin link; --native-dir DIR writes the manifest only to DIR;
 --bin-dir DIR links the CLI there instead of /usr/local/bin.
-Run it again after upgrading TRIF, moving the repo or upgrading Node.`,
-    examples: ['npx timsrobot setup', 'trif setup', 'trif setup --browser brave', 'trif setup --browser all', 'trif setup --examples x.com,google.com', 'node helper/cli.js setup --copy'],
+Run it again after upgrading TRIF or moving the repo (a git checkout: also after upgrading Node).`,
+    examples: [P.INSTALL_COMMAND, `${P.INSTALL_COMMAND} -s -- --browser safari`, 'npx timsrobot setup', 'trif setup', 'trif setup --browser brave', 'trif setup --browser all', 'trif setup --examples x.com,google.com', 'node helper/cli.js setup --copy'],
+  },
+  uninstall: {
+    usage: 'trif uninstall [--all [--yes]] [--home DIR] [--bin-dir DIR] [--native-dir DIR] [--verbose]',
+    summary: "remove TRIF's helper, CLI and browser connections (your mods and settings stay unless --all)",
+    details: `Undoes setup: removes the native messaging host manifests that start this workspace's helper (one
+another workspace wrote stays, and is listed), the Safari bridge's agent (stopped first), the
+/usr/local/bin/trif link (--bin-dir: in that folder), the running helpers, and the workspace's bin/, app/
+and runtime/ (TRIF's own Node). Your mods, the workspace's AGENTS.md and the private folder (settings,
+paired phones, logs) stay, so installing TRIF again picks up where you left off.
+--all also removes the API keys TRIF saved in the Keychain, the private folder, the runs' mailboxes and
+the workspace with your mods (a mods folder set outside it stays). It asks first at a terminal; elsewhere
+it needs --yes. The browser extension isn't touched: remove it in the browser. --verbose lists every path
+removed. The user's alone: never run it unless they ask.`,
+    examples: ['trif uninstall', 'trif uninstall --all'],
   },
   status: {
     usage: 'trif status [TAB]',
@@ -479,7 +499,7 @@ agent-levels/off picks one. Works without the browser, and in side-panel runs.`,
 };
 
 const GROUPS = [
-  ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report']],
+  ['Setup and diagnosis', ['setup', 'status', 'doctor', 'update', 'report', 'uninstall']],
   ['Mod files (work without Chrome)', ['mods', 'new', 'check', 'delete', 'restore', 'history', 'undo', 'reveal', 'export', 'import', 'files', 'add', 'install-example', 'mod-update']],
   ['Switching mods off and on (need Chrome running with the extension)', ['disable', 'enable', 'approve', 'reject', 'not-broken']],
   ['Pages (need Chrome running with the extension)', ['tabs', 'run', 'reload', 'verify', 'open', 'close', 'navigate', 'text', 'sweep', 'screenshot', 'record', 'requests', 'request', 'errors', 'logs']],

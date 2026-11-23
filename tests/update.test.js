@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const { tempDir, runCli, privDir } = require('./fake-extension');
 const U = require('../helper/lib/update');
+const R = require('../helper/lib/runtime');
 const { changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, repoMismatch, remoteRepo, latestFeed, signBytes, firefoxFeed, xpiMatches, releaseAssets,
   refreshFeed, feedStaleOn, keychainItem, keychainWriteInput, saveKeychainItem, webExtSignArgs, webExtEnv } = require('../scripts/release');
 const { makeFakeKeychain } = require('./fake-keychain');
@@ -61,7 +62,8 @@ function fakePackage(version, { copy = true, exit = 0, wait = 0 } = {}) {
     let lock = null;
     try { lock = fs.readFileSync(path.join(home, '.app.lock'), 'utf8').split('\\n')[1]; } catch {}
     fs.writeFileSync(path.join(home, 'setup-ran.json'), JSON.stringify({ argv: process.argv.slice(2), PATH: process.env.PATH,
-      lockHeldForUs: !!lock && lock === process.env.TRIF_INSTALL_LOCK }));
+      lockHeldForUs: !!lock && lock === process.env.TRIF_INSTALL_LOCK, setupTimeout: process.env.TRIF_SETUP_TIMEOUT_MS || null,
+      onRuntime: process.env.FAKE_RUNTIME || null }));
     setTimeout(() => {
       if (${copy}) fs.cpSync(path.join(__dirname, '..'), path.join(home, 'app'), { recursive: true });
       console.log(${exit} ? 'Safari bridge FAILED to start it: launchctl said no' : 'setup done');
@@ -249,6 +251,7 @@ test('release script: secrets go to security and web-ext in no argv or environme
       p.stdout.on('data', (d) => { out += d; });
       p.stderr.on('data', (d) => { out += d; });
       const t = setTimeout(() => p.kill(), 60000);
+      p.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out: `${out}\n${e.message}` }); });
       p.on('exit', (code) => { clearTimeout(t); resolve({ code, out }); });
     });
     amo.close();
@@ -331,8 +334,32 @@ test('install: downloads, checks and runs the new version\'s setup with the reco
     assert.equal(U.readState(ws.home).lastInstalled.to, '0.2.0');
     assert.deepStrictEqual(fs.readdirSync(ws.home).filter((f) => f.startsWith('.update-')), [], 'temp folder removed');
 
+    assert.equal(ran.setupTimeout, String(U.SETUP_TIMEOUT_MS), 'setup is told how long it has (for the runtime download)');
+    assert.equal(ran.onRuntime, null, 'no runtime installed: the node running the update');
     // Now up to date.
     await assert.rejects(U.install(ws, { root, publicKey: k.pub, browsers: [] }), /is up to date/);
+  } finally { await server.close(); }
+});
+
+test('install: the new version\'s setup runs on TRIF\'s own Node when it\'s installed', { skip: !R.platformKey() || process.platform === 'win32' }, async () => {
+  const k = keys();
+  const server = await serve({});
+  try {
+    const { ws, root } = appWorkspace('0.1.0');
+    ws.config.updateFeed = `${server.base}/latest.json`;
+    const dir = path.join(R.runtimeRoot(ws.home), R.runtimeName(R.platformKey()));
+    const node = R.nodeIn(dir);
+    fs.mkdirSync(path.dirname(node), { recursive: true });
+    fs.writeFileSync(node, `#!/bin/sh\nFAKE_RUNTIME=1 exec "${process.execPath}" "$@"\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(dir, R.MARK), '{}');
+    assert.equal(U.updateNode(ws.home), node);
+    assert.equal(U.updateNode(ws.home, { execPath: node, installed: () => null }), node, 'already on a runtime: that one');
+    assert.equal(U.updateNode(ws.home, { execPath: '/usr/bin/node', installed: () => null }), '/usr/bin/node');
+
+    publish(server, k, { version: '0.2.0', tgz: fakePackage('0.2.0') });
+    const r = await U.install(ws, { root, publicKey: k.pub, browsers: [] });
+    assert.equal(r.to, '0.2.0');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(ws.home, 'setup-ran.json'), 'utf8')).onRuntime, '1');
   } finally { await server.close(); }
 });
 

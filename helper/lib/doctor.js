@@ -15,6 +15,7 @@ const { isExecutable } = require('./setup');
 const { isWindows, panelRunsOff } = require('./platform');
 const { staleGuides } = require('./guides');
 const { firefoxAddonUrl } = require('./update');
+const R = require('./runtime');
 
 const EXT_URL = `chrome://extensions/?id=${P.EXTENSION_ID}`;
 
@@ -58,6 +59,26 @@ function checkWrapperScript(script, ws) {
     return { status: 'warn', title: `host wrapper runs ${script}, inside npm's npx cache, which npm may delete` };
   }
   return { status: 'warn', title: `host wrapper runs ${script}, not this copy (${P.HOST_JS})` };
+}
+
+/**
+ * Which Node the wrapper runs: TRIF's own (docs/NO-NODE.md), whole and the version this build pins, or the
+ * computer's. A copy install on the computer's Node warns (it breaks when that Node is removed or
+ * upgraded), unless TRIF_RUNTIME turned the runtime off or there's none for this platform; a git
+ * checkout on it is expected. Returns { status, title, fix? } or null.
+ */
+function runtimeCheck(node, home, { copy, setupFix, env = process.env, check = R.checkRuntime } = {}) {
+  const rt = check(node, home);
+  if (rt) {
+    if (rt.problem) return { status: 'fail', title: `TRIF's own Node in ${rt.dir} is damaged: ${rt.problem}`, fix: `remove that folder (rm -rf ${JSON.stringify(rt.dir)}), then ${setupFix}` };
+    if (rt.version !== rt.pinned) return { status: 'warn', title: `TRIF's own Node is v${rt.version}; this TRIF uses v${rt.pinned}`, fix: setupFix };
+    return { status: 'ok', title: `TRIF's own Node v${rt.version} (${rt.dir})` };
+  }
+  let off = null;
+  try { const s = R.runtimeSetting(env); off = s.off || (R.platformKey(process.platform, process.arch, s.pins) ? null : `none for ${process.platform}-${process.arch}`); } catch (e) { off = e.message; }
+  if (!copy) return { status: 'info', title: `TRIF runs on this computer's Node (${node}), as a git checkout does (trif setup --runtime for TRIF's own)` };
+  if (off) return { status: 'info', title: `TRIF runs on this computer's Node (${node}); its own is off (${off})` };
+  return { status: 'warn', title: `TRIF runs on this computer's Node (${node}), not its own: it stops working if that Node is removed or upgraded`, fix: 'run: trif setup --runtime' };
 }
 
 const SAFARI_PORT = require('../safari-bridge').PORT;
@@ -159,16 +180,17 @@ async function doctor(opts = {}) {
     await new Promise((r) => setImmediate(r));
     try { return await fn(); } finally { opts.onProgress(null); }
   };
-  // From a git checkout, point at its CLI; otherwise npx fetches TRIF again if the install is broken.
+  // From a git checkout, point at its CLI; otherwise the installer fetches TRIF (and its Node) again if the
+  // install is broken.
   const setupFix = P.isGitCheckout()
     ? 'run: trif setup   (or: node ' + P.CLI_JS + ' setup)'
-    : 'run: npx timsrobot setup   (or: trif setup)';
+    : `run: ${P.INSTALL_COMMAND}   (or: trif setup)`;
   let installRoot = P.REPO_ROOT; // where the wrapper's files are: its extension/ is what Chrome should load
 
   // Node
   const major = nodeMajor(process.version);
   if (major >= 18) add('ok', `Node ${process.version}`);
-  else add('fail', `Node ${process.version} is too old (TRIF needs Node 18 or newer)`, 'install a current Node from https://nodejs.org or with your package manager, then run trif setup again');
+  else add('fail', `Node ${process.version} is too old (TRIF needs Node 18 or newer)`, P.isGitCheckout() ? 'install a current Node from https://nodejs.org or with your package manager, then run trif setup again' : setupFix);
 
   // Inside a side-panel run on Windows the run's fence (lib/win/fence.js) shows it its own copy of the
   // workspace and nothing of the real one, its wrappers included: said, not failed on.
@@ -237,7 +259,7 @@ async function doctor(opts = {}) {
       const r = spawnSync(w.node, ['--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true });
       const v = (r.stdout || '').trim();
       if (nodeMajor(v) < 18) {
-        add('fail', `host wrapper's node ${w.node} is ${v || 'not runnable'}; TRIF needs Node 18+`, 'install a current Node, then ' + setupFix);
+        add('fail', `host wrapper's node ${w.node} is ${v || 'not runnable'}; TRIF needs Node 18+`, P.isGitCheckout() ? 'install a current Node, then ' + setupFix : setupFix);
       } else {
         wrapperOk = true;
         helperNode = w.node;
@@ -246,6 +268,8 @@ async function doctor(opts = {}) {
         add('ok', `host wrapper ${ws.hostWrapper} -> ${w.script} (${copy ? 'installed copy' : 'linked'}, node ${v})`);
         const problem = checkWrapperScript(w.script, ws);
         if (problem) add(problem.status, problem.title, problem.fix || setupFix);
+        const rt = runtimeCheck(w.node, ws.home, { copy, setupFix });
+        if (rt) add(rt.status, rt.title, rt.fix);
       }
     }
   }
@@ -536,4 +560,4 @@ function formatDoctor(r) {
   return [...r.checks.map(formatCheck), '', formatSummary(r)].join('\n');
 }
 
-module.exports = { doctor, formatDoctor, formatCheck, formatSummary, parseWrapper, checkWrapperScript, helperDownFix };
+module.exports = { doctor, formatDoctor, formatCheck, formatSummary, parseWrapper, checkWrapperScript, helperDownFix, runtimeCheck };

@@ -19,6 +19,7 @@ const { preinstallMods, updateShippedMods, retireShippedMods, starterSites, star
 const { acquireInstallLock, pidAlive } = require('./lock');
 const { isWindows, renameRetry, nodeExeName } = require('./platform');
 const { firefoxAddonUrl } = require('./update');
+const R = require('./runtime');
 
 // Quote for a POSIX shell double-quoted string.
 function shq(s) {
@@ -45,6 +46,45 @@ function pickNodePath() {
     try { if (fs.realpathSync(c) === real) return c; } catch { /* ignore */ }
   }
   return exec;
+}
+
+/**
+ * The node the wrappers and the Safari agent run (docs/NO-NODE.md): TRIF's own runtime (lib/runtime.js),
+ * downloaded now if it isn't there, for installed copies (mode copy); the node running setup for git
+ * checkouts (mode link), unless want is true. want false (--no-runtime), TRIF_RUNTIME=off, or a failed
+ * download: the node running setup (pickNodePath), saying why. Returns { node, how: 'runtime'|'system',
+ * version?, fetched?, pins? (the runtime's), error?, why? }.
+ */
+/**
+ * How long setup lets the runtime download take. Under an update (it holds the install lock) the updater
+ * says how long it gives setup (TRIF_SETUP_TIMEOUT_MS, update.js); the download gets all but a minute of
+ * it. Updaters from before the runtime say nothing and kill setup at 120 s: 75 s then, and the next update
+ * tries again. Otherwise (a person running setup) ten minutes.
+ */
+function downloadBudget(env = process.env) {
+  if (!envVar('INSTALL_LOCK', env)) return 10 * 60 * 1000;
+  const given = Number(envVar('SETUP_TIMEOUT_MS', env));
+  if (!Number.isFinite(given) || given <= 0) return 75000;
+  return Math.max(30000, Math.min(10 * 60 * 1000, given - 60000));
+}
+
+function chooseNode(home, { mode, want, env = process.env, ensure = R.ensureRuntimeSync } = {}) {
+  const system = (why, error = null) => ({ node: pickNodePath(), how: 'system', why, ...(error ? { error } : {}) });
+  if (want === false) return system('--no-runtime');
+  if (want === undefined && mode === 'link') return system('a git checkout (--runtime to use it)');
+  let setting;
+  try { setting = R.runtimeSetting(env); } catch (e) { return system('TRIF_RUNTIME', e.message); }
+  if (setting.off) return system(setting.off);
+  if (!R.platformKey(process.platform, process.arch, setting.pins)) return system(`no runtime for ${process.platform}-${process.arch}`);
+  const have = R.installedNode(home, { pins: setting.pins });
+  if (have) return { node: have, how: 'runtime', version: setting.pins.version, fetched: false, pins: setting.pins };
+  if (process.stderr.isTTY && !env.TRIF_RUNTIME_ARCHIVE) process.stderr.write(`Downloading Node ${setting.pins.version} for TRIF…\n`);
+  try {
+    const r = ensure(home, { pinsFile: setting.file, timeoutMs: downloadBudget(env), env });
+    return { node: r.node, how: 'runtime', version: r.version, fetched: !!r.fetched, pins: setting.pins };
+  } catch (e) {
+    return system('the download failed', e.message);
+  }
 }
 
 function hostWrapperContent(nodePath, home, hostJs = P.HOST_JS) {
@@ -388,8 +428,9 @@ function revealFolder(dir) {
  *         launchAgentsDir (where the Safari bridge's agent goes; default ~/Library/LaunchAgents),
  *         launchctl (false: write the agent but don't start it; also TRIF_NO_LAUNCHCTL=1),
  *         platform, homedir, env (tests: Windows' steps anywhere), regOpts ({env, run} for win/registry.js),
- *         addToUserPath (Windows' PATH step, win/userpath.js) }
- * Returns { ok, lines: [string], ws, manifests: [{browser, file}], nodePath, mode, root, migration, targets (the
+ *         addToUserPath (Windows' PATH step, win/userpath.js),
+ *         runtime (true: TRIF's own Node even for a git checkout; false: the node running setup) }
+ * Returns { ok, lines: [string], ws, manifests: [{browser, file}], nodePath, runtime (chooseNode), mode, root, migration, targets (the
  *   browsers set up), trif (the CLI as typed in this terminal) }
  */
 /** A path as typed in a shell: ~/… under the home folder, quoted if it needs to be. */
@@ -576,7 +617,16 @@ function setup(opts = {}) {
   else note('agents        No coding agent found: install Claude Code (https://claude.com/claude-code) or Codex, then run setup again.');
 
   // 3. Wrappers
-  const nodePath = pickNodePath();
+  const rt = chooseNode(home, { mode, want: opts.runtime });
+  const nodePath = rt.node;
+  if (rt.how === 'runtime') {
+    if (rt.fetched) tell(`✓ Downloaded Node ${rt.version} for TRIF`);
+    say(`runtime       Node ${rt.version} for TRIF: ${nodePath}${rt.fetched ? ' (downloaded now)' : ''}`);
+  } else if (rt.error) {
+    note(`runtime       couldn't download TRIF's own Node (${rt.error}); using ${nodePath} for now, and trying again at the next update`);
+  } else {
+    say(`runtime       not used (${rt.why}): node ${nodePath}`);
+  }
   const hostJs = path.join(helperDir, 'host.js');
   const cliJs = path.join(helperDir, 'cli.js');
   if (win) {
@@ -674,6 +724,14 @@ function setup(opts = {}) {
     }
   }
 
+  // Runtimes nothing runs from any more (an older pin's), now that the wrappers and the Safari agent name
+  // this one; not one a Safari agent this setup didn't rewrite still names.
+  if (rt.how === 'runtime') {
+    const plists = [safariAgentPlist(), opts.launchAgentsDir ? path.join(path.resolve(opts.launchAgentsDir), path.basename(safariAgentPlist())) : null].filter(Boolean);
+    const removed = R.pruneRuntimes(home, { pins: rt.pins, keep: plists.flatMap(R.runtimesNamedIn) });
+    if (removed.length) say(`              removed the runtimes nothing uses any more: ${removed.join(', ')}`);
+  }
+
   const setUp = targets.filter((t) => manifests.some((m) => m.browser === t.key)).map((t) => (t.key === 'custom' ? t.nativeDirs[0] : t.label));
   if (setUp.length) tell(`✓ Set up for ${setUp.join(' and ')}`);
 
@@ -744,7 +802,7 @@ function setup(opts = {}) {
     for (const l of safariSteps(1)) note(`  ${l}`);
     note(`  5. Check everything with: ${trif} doctor`);
     sayThen();
-    return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration, targets, trif };
+    return { ok, lines: shown(), ws, manifests, nodePath, runtime: rt, mode, root, migration, targets, trif };
   }
   // setup installs no add-on: Firefox only keeps signed ones, and Mozilla signs each release's. The
   // newest is on the latest GitHub release (scripts/release.js), from package.json's repository.
@@ -764,7 +822,7 @@ function setup(opts = {}) {
     note(`  4. Check everything with: ${trif} doctor`);
     if (targets.some((t) => t.safari)) { note('  Safari:'); for (const l of safariSteps(1)) note(`    ${l}`); }
     sayThen();
-    return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration, targets, trif };
+    return { ok, lines: shown(), ws, manifests, nodePath, runtime: rt, mode, root, migration, targets, trif };
   }
   // The extension folder is hidden (~/.trif) from Load unpacked's file picker, so on a Mac show it in
   // Finder, ready to drag onto chrome://extensions, and put its path on the clipboard for Cmd-Shift-G.
@@ -808,10 +866,10 @@ function setup(opts = {}) {
   if (targets.some((t) => t.safari)) { note('  Safari:'); for (const l of safariSteps(1)) note(`    ${l}`); }
   sayThen();
 
-  return { ok, lines: shown(), ws, manifests, nodePath, mode, root, migration, targets, trif };
+  return { ok, lines: shown(), ws, manifests, nodePath, runtime: rt, mode, root, migration, targets, trif };
 }
 
 module.exports = {
   setup, recordPath, cleanPath, hostWrapperContent, cliWrapperContent, manifestFor, pickNodePath, shq, isExecutable,
-  chooseMode, installApp, sameTree, COPY_ITEMS, safariAgentContent, loadSafariAgent, openChromeExtensions,
+  chooseMode, chooseNode, downloadBudget, installApp, sameTree, COPY_ITEMS, safariAgentContent, loadSafariAgent, openChromeExtensions,
 };

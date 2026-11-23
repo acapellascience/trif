@@ -25,7 +25,8 @@ dependencies, no build step.**
      watches the mods folder, pushing mods to the extension.
    - `cli.js`: the `trif` command agents (and people) run.
    - `trif setup` installs everything: workspace, native host manifest, wrapper script, CLI link.
-     Strangers run it as `npx timsrobot setup` (npm package `timsrobot`, see "Native host installation").
+     Strangers run it through `curl -fsSL https://timsrobot.com/install.sh | sh` (no Node needed: it brings
+     TRIF's own) or, with Node, `npx timsrobot setup` (npm package `timsrobot`); see "Native host installation".
 3. **Workspace** (`~/.trif/`, overridable with env `TRIF_HOME`, or `WEBMODS_HOME` as it was called before 0.2.0). The agent's working directory:
    ```
    ~/.trif/
@@ -685,9 +686,15 @@ the panel tags it "from <browser>" while it's off.
 
 ## Native host installation (`trif setup`)
 
-First install, for anyone with Node ≥ 18: **`npx timsrobot setup`**. The npm package `timsrobot` (root
-`package.json`, `bin: trif → helper/cli.js`) ships `helper/`, `extension/`, `examples/` and this file.
-Re-running setup is safe; run it again to update.
+First install: **`curl -fsSL https://timsrobot.com/install.sh | sh`** (setup's options after `sh -s --`).
+timsrobot.com/install.sh redirects to the newest GitHub release's `install.sh` (site/src/index.js), filled in
+by scripts/release.js from scripts/install.sh: it downloads TRIF's own Node (pinned in
+`helper/runtime.json`) and the release's package, checks both against their SHA-256, and runs
+`helper/cli.js setup --copy` with that Node, which keeps it in `<home>/runtime` (docs/NO-NODE.md). Anyone
+with Node ≥ 18 can run **`npx timsrobot setup`** instead, with the same result (setup fetches TRIF's own
+Node too). The npm package `timsrobot` (root `package.json`, `bin: trif → helper/cli.js`) ships
+`helper/`, `extension/`, `examples/` and this file. Re-running setup is safe; run it again to update.
+`trif uninstall` undoes it (mods and settings stay unless `--all`).
 
 - **Where the wrappers point (install mode).**
   - `copy` (default when the package isn't a git checkout, i.e. `<package>/.git` doesn't exist, as
@@ -1154,7 +1161,7 @@ Nothing is hosted; the agent uses the user's own login/subscription.
     page groups mods by site: the folder (minus `www.`) if the mod runs there, else its one site, else
     "Several sites"; mods matching any host go under "Every site".
   - No reload prompt: the agent reloads the tab after each change (AGENTS.md), and switches reload it too.
-  - **States:** helper not connected → short setup instructions (`npx timsrobot setup`, link to Setup page);
+  - **States:** helper not connected → short setup instructions (`SETUP_COMMAND`: the curl installer, link to Setup page);
     user scripts off → button opening chrome://extensions/?id=…; agent missing → the error text from the
     helper (it includes the fix); agent not logged in (`loggedIn === false` in `agent.list`, or the chat's
     last line is a run's `login` line) → "Claude Code isn't logged in" with a **Log in** button (see

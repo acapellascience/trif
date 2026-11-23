@@ -4,7 +4,7 @@
 // See docs/PROTOCOL.md, "Side panel and agent runs".
 
 import { SEE_TAB_TITLE, seeTabWhere } from './capturegrant.js';
-import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, SAFARI, BROWSER, setBrowser, SETUP_COMMAND, PHONE_PREFIX, isPhoneMod,
+import { siteForUrl, modAppliesTo, modSites, isMultiSite, offOnSite, normalizeOffSites, scopeFor, hostInScope, limitToSites, withOffSites, modGroup, GROUPS, GROUP_NAMES, groupWord, groupOffOn, offSitesFor, normalizeGroupsOff, FIREFOX, SAFARI, BROWSER, setBrowser, SETUP_COMMAND, RESETUP_COMMAND, PHONE_PREFIX, isPhoneMod,
   SITE_ACCESS, siteOrigins, siteState, hasSiteAccess, sensitiveSites, splitForPage,
   normalizeModOrder, orderMods, moveId, setModOrder,
   normalizeSettings, normalizePicks, siteSettings, withoutModel, panelQuery, panelWindowBounds, rememberScreen,
@@ -1111,7 +1111,7 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
   } else if (status && !helperOk) {
     bad = true;
     const p = el('p');
-    p.append('Run ', code(SETUP_COMMAND), ` in a terminal (needs Node 18+), then restart ${BROWSER}.`);
+    p.append('Run ', code(SETUP_COMMAND), ` in a terminal, then restart ${BROWSER}.`);
     parts.push(el('p', 'title', 'The TRIF helper isn’t connected'), p);
     if (status.helper.error) parts.push(el('p', 'note', `${BROWSER} says: ${status.helper.error}`));
     const actions = el('p', 'actions');
@@ -1138,7 +1138,7 @@ function renderNotice({ helperOk, agentInfo, anyAgent }) {
       if (agentInfo.note) { const p = el('p'); setMarkdown(p, agentInfo.note); parts.push(p); }
     } else {
       parts.push(el('p', 'title', 'No coding agent found'));
-      parts.push(el('p', null, `Install Claude Code, then run ${SETUP_COMMAND} again from the same terminal.`));
+      parts.push(el('p', null, `Install Claude Code, then run ${RESETUP_COMMAND} from the same terminal.`));
     }
     if (anyAgent) parts.push(el('p', 'note', 'Pick another agent in Settings.'));
   } else if (helperOk && view.agentsError && !view.agents) {

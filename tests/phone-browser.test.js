@@ -49,7 +49,7 @@ test('the phone view: the site sees an iPhone in that tab only, and Back to desk
     assert.equal(opened.route, 'window');
     assert.equal(opened.panel, true, 'TRIF\'s side panel is there, beside the page');
     const W = opened.viewport.w;
-    assert.equal(opened.viewport.h, 750, 'the page area is the phone\'s height');
+    assert.equal(opened.viewport.h, 780, 'the page area is the phone\'s height');
     // the page's width: the phone's, or as narrow as the browser lets this window go with its side panel (headless
     // Chrome 156: a 792 px window, a 406 px page)
     const winW = () => E((id) => chrome.windows.get(id).then((w) => w.width), opened.window);

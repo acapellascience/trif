@@ -1,5 +1,5 @@
 'use strict';
-// `trif setup` on Windows puts <home>\bin (trif.cmd) on the user's PATH: the per-user Path value under
+// `trif setup` on Windows puts <home>\bin (trif.cmd) on the user's PATH (and `trif uninstall` takes it off): the per-user Path value under
 // HKCU\Environment, which every program started afterwards gets (Windows has no /usr/local/bin to link
 // into, and no shell profile to tell the user to edit).
 //
@@ -26,6 +26,15 @@ try {
   $old = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
   $norm = { param($p) ([Environment]::ExpandEnvironmentVariables($p)).TrimEnd('\\').ToLowerInvariant() }
   $want = & $norm $dir
+  if ($req.remove) {
+    $keep = @($old -split ';' | Where-Object { $_ -and ((& $norm $_) -ne $want) })
+    if ($keep.Count -eq @($old -split ';' | Where-Object { $_ }).Count) { [Console]::Out.Write('missing'); exit 0 }
+    $key.SetValue('Path', ($keep -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+    $key.Close()
+    [Environment]::SetEnvironmentVariable('TRIF_PATH_CHANGED', '1', 'User')
+    [Environment]::SetEnvironmentVariable('TRIF_PATH_CHANGED', $null, 'User')
+    [Console]::Out.Write('removed'); exit 0
+  }
   foreach ($e in ($old -split ';')) { if ($e -and ((& $norm $e) -eq $want)) { [Console]::Out.Write('already'); exit 0 } }
   if ($req.check) { [Console]::Out.Write('missing'); exit 0 }
   $new = if ($old.Trim(';')) { $old.TrimEnd(';') + ';' + $dir } else { $dir }
@@ -50,4 +59,15 @@ function addToUserPath(dir, { check = false, ...opts } = {}) {
   return { how: null, error: psComplaint(r) };
 }
 
-module.exports = { SCRIPT, addToUserPath };
+/**
+ * Takes every entry naming `dir` off the user's PATH (trif uninstall). Returns {how: 'removed'|'missing',
+ * error}. Never throws.
+ */
+function removeFromUserPath(dir, opts = {}) {
+  const r = runPowerShellSync(SCRIPT, { dir, remove: true }, opts);
+  const how = String(r.stdout || '').trim();
+  if (r.code === 0 && ['removed', 'missing'].includes(how)) return { how, error: null };
+  return { how: null, error: psComplaint(r) };
+}
+
+module.exports = { SCRIPT, addToUserPath, removeFromUserPath };

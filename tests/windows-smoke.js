@@ -92,6 +92,7 @@ function runCmd(file, args, env) {
     LOCALAPPDATA: path.join(profile, 'AppData', 'Local'),
     APPDATA: path.join(profile, 'AppData', 'Roaming'),
     TRIF_UPDATE_DELAY: '2000000000',
+    TRIF_RUNTIME: 'off', // (the job's Node, Node 18 and 22, not TRIF's own: tests/windows-clean-machine.js checks that one)
   };
   delete env.HOME;
   delete env.TRIF_HOME;

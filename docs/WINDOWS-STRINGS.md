@@ -91,6 +91,23 @@ API), built like the fence.
 | 45 | `phone link: this computer isn't on a network just now` · `phone link: couldn't read Windows Firewall's rules for Node.js (<why>)` | the same, information lines |
 | 46 | `Windows' C# compiler (csc.exe, part of .NET Framework 4) isn't on this computer, so TRIF can't build its announcer` · `couldn't build TRIF's announcer: <why>` | the helper's log only (`phone link: can't announce, …`); the panel shows the existing `Your phone may not find this computer just now.` |
 
+## New: no Node needed on Windows (drafts; docs/NO-NODE.md step 12)
+
+Live on the branch, none approved. The install command and the texts around it, as the Mac's step-7 drafts in
+`docs/NO-NODE-STRINGS.md` are; the Windows forms of the same sentences.
+
+| # | Text | Where |
+|---|---|---|
+| 47 | `irm https://timsrobot.com/install.ps1 \| iex` | the install command on Windows (`extension/lib.js` `SETUP_COMMAND` when the browser says Windows; `helper/lib/paths.js` `WINDOWS_INSTALL_COMMAND`), inside the existing "Run `{SETUP_COMMAND}` in a terminal, then restart {browser}." lines: the panel's not-connected card and landing note, the setup page, the background's error. "in a terminal" stays (PowerShell is a terminal; the command only works there, not in Command Prompt) |
+| 48 | `~\.trif\bin\trif.cmd setup` | Windows' `RESETUP_COMMAND`: "Install Claude Code, then run {it} from the same terminal." (panel) and "… Install one, then run {it} from the same terminal." (setup page). Named by its path because a terminal open since before setup doesn't have `~\.trif\bin` on its PATH yet; `.cmd` because the folder also holds `trif` for Git Bash, which PowerShell mustn't pick |
+| 49 | README, Windows section: "In PowerShell, run:" + the command in a code block, then "then follow its next steps (the extension folder is `%USERPROFILE%\.trif\app\extension`). You don't need Node.js: this brings TRIF's own copy, kept in `~\.trif\runtime` and used only by TRIF. Already have Node 18 or newer? `npx timsrobot setup` does the same, in PowerShell or Command Prompt. Setup adds `~\.trif\bin` to your PATH: open a new terminal afterwards to use `trif`. `trif uninstall` takes TRIF off again (your mods and settings stay unless you add `--all`)." | `README.md` (replaces "run `npx timsrobot setup` in a terminal (PowerShell or Command Prompt), then follow its next steps …") |
+| 50 | `Downloading Node <ver> for TRIF...` · `Downloading TRIF <version>...` · then setup's own output | install.ps1's progress (stderr), as install.sh's |
+| 51 | each starts `TRIF install: `: `this installer is for Windows: on macOS or Linux, use install.sh` · `needs Windows' own tar.exe (Windows 10 1803 or newer)` · `there's no TRIF for Windows on <arch>` · `there's no TRIF for <win-arch>` · `refusing to download <url> (https only)` · `couldn't download <url>: <why>` · `the download of <file> doesn't match its pinned checksum (got <sha>); not using it` · `couldn't unpack <file>` · `the downloaded Node doesn't run on this computer (<what it said>)` · `couldn't unpack TRIF's package` · `TRIF's package has no helper in it` · `setup reported a problem (code <n>): see above.` | install.ps1's failures, in the PowerShell window (it never closes the window) |
+| 52 | "Installs TRIF <version> on Windows 10 (1803 or newer) or 11, with no Node.js needed" + the two ways to run it (`irm <url> \| iex`, and `& ([scriptblock]::Create((irm <url>))) --browser edge` for setup's options) and what it does | install.ps1's header comment (anyone who opens the script before running it reads it) |
+| 53 | `On Windows, in PowerShell: irm https://timsrobot.com/install.ps1 \| iex` (after the first line's parenthesis), and that command among the examples | `trif help setup` |
+| 54 | `run: irm https://timsrobot.com/install.ps1 \| iex   (or: trif setup)` | doctor's fix for a broken install on Windows (not a git checkout); and `trif update`'s "…run \`<it>\` to install a copy that can update" there |
+| 55 | `problem  couldn't take <bin> off your PATH (<why>); remove it in Settings → System → About → Advanced system settings → Environment Variables` · `problem  couldn't remove the registry key <key>: <why>` · with `--verbose`: `removed  <bin> (from your PATH)`, `removed  <key>`, `removed  <folder> (as this command ends)` | `trif uninstall` on Windows. (TRIF's own node.exe and trif.cmd are what the command runs from, so those folders, or with `--all` the whole workspace, go a moment after it ends, from a hidden Windows PowerShell; nothing is said about it beyond the verbose line) |
+
 ## Behaviour a person sees, without new words
 
 - **"Open in editor"** (the code card's menu, `trif reveal --editor`) opens the mod in **Notepad** on
@@ -115,3 +132,5 @@ API), built like the fence.
 | `Waiting for Chrome: drag the folder onto chrome://extensions…` | setup's wait, after `--browser chrome,edge` (`helper/lib/setupwait.js` names the first Chromium browser set up) | someone using Edge reads "Chrome"; the wait itself sees Edge's hello all the same |
 | `This computer’s name is too long for the code. Shorten it in System Settings, then try again.` | Settings, Connect a phone, when the computer's name is too long (`extension/phonelink.js` `tooLong`) | System Settings is the Mac's; on Windows it's Settings, System, About, Rename this PC |
 | `beta/chrome/START HERE.txt`, `beta/firefox/START HERE.txt` | the beta zips | written for Terminal on a Mac ("Open Terminal and paste these two lines") |
+| `Remove the TRIF extension from your browser too: chrome://extensions (Firefox: about:addons; Safari: delete TRIF.app).` | `trif uninstall`'s last line (no-node's) | on Windows there's no Safari, and Edge's page is `edge://extensions` (it opens `chrome://` too) |
+| `Removed TRIF's helper, CLI and browser connections. Your mods (<home>) and settings (<private>) are still there…` | `trif uninstall` | fine on Windows; `<private>` is `%LOCALAPPDATA%\TRIF` there |

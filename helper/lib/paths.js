@@ -40,11 +40,16 @@ const REPO_ROOT = path.resolve(HELPER_DIR, '..');
 const HOST_JS = path.join(HELPER_DIR, 'host.js');
 const CLI_JS = path.join(HELPER_DIR, 'cli.js');
 const APP_DIR_NAME = 'app'; // <home>/app: setup's self-contained copy when not run from a git checkout
-// The front door: timsrobot.com/install.sh redirects to the newest release's install.sh (site/src/index.js),
-// which brings TRIF's own Node, so the computer needs none. `npx timsrobot setup` still works with Node.
+// The front door: timsrobot.com/install.sh (served by the site, site/src/index.js; for now there is none:
+// main b4febdf), which brings TRIF's own Node, so the computer needs none. `npx timsrobot setup` still works
+// with Node. Windows: install.ps1, the same in Windows PowerShell (scripts/install.ps1).
 // (Keep in step with extension/lib.js SETUP_COMMAND.)
 const INSTALL_URL = 'https://timsrobot.com/install.sh';
 const INSTALL_COMMAND = `curl -fsSL ${INSTALL_URL} | sh`;
+const WINDOWS_INSTALL_URL = 'https://timsrobot.com/install.ps1';
+const WINDOWS_INSTALL_COMMAND = `irm ${WINDOWS_INSTALL_URL} | iex`;
+/** The install command for `platform`'s terminal. */
+function installCommand(platform = process.platform) { return platform === 'win32' ? WINDOWS_INSTALL_COMMAND : INSTALL_COMMAND; }
 
 // Single source of truth for the version: the root package.json (extension/manifest.json must match;
 // a test checks it).
@@ -264,7 +269,7 @@ function examplesDir() {
 module.exports = {
   NAME, FULL_NAME, CLI_NAME, LEGACY_CLI_NAME, HOME_DIR_NAME, LEGACY_HOME_DIR_NAME, legacyHome, currentDefaultHome, isDefaultHome,
   HOST_NAME, DEV_EXTENSION_ID, FIREFOX_EXTENSION_ID, STORE_EXTENSION_IDS, EXTENSION_ID, EXTENSION_ORIGIN, HELPER_DIR, REPO_ROOT,
-  HOST_JS, CLI_JS, APP_DIR_NAME, VERSION, INSTALL_URL, INSTALL_COMMAND,
+  HOST_JS, CLI_JS, APP_DIR_NAME, VERSION, INSTALL_URL, INSTALL_COMMAND, WINDOWS_INSTALL_URL, WINDOWS_INSTALL_COMMAND, installCommand,
   expandHome, defaultHome, resolveHome, readConfig, workspace, examplesDir, isGitCheckout, extensionIds, extensionOrigins,
   PRIVATE_FILES, defaultPrivateDir, privateDir, privateDirInfo, configFile, localAppData, sameName, wrapperPaths,
 };

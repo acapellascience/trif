@@ -35,7 +35,8 @@
 // "## Unreleased" one, keys, GitHub login, package.json's repository matching the git remote), bumps the version, refreshes examples/shipped-history.json, runs the tests, builds the
 // Chrome and Firefox extensions and the npm package, has Mozilla sign the Firefox add-on (unlisted),
 // makes the two beta zips and install.sh (scripts/install.sh filled in with the package's URL and SHA-256
-// and the runtime pins: `curl -fsSL …/install.sh | sh` installs with no Node), and writes the update feeds: updates/latest.json (+ .sig, signed with the
+// and the runtime pins: `curl -fsSL …/install.sh | sh` installs with no Node; install.ps1 likewise for
+// Windows, `irm …/install.ps1 | iex`), and writes the update feeds: updates/latest.json (+ .sig, signed with the
 // release key) for the helper, updates/firefox.json for Firefox, and updates/mods.json (+ .sig), the mods
 // feed, empty: the release ships every mod as it is. Then it asks before publishing
 // anything: a commit and tag, a GitHub release with the files, and the feeds (pushed last, once the files
@@ -521,6 +522,27 @@ function installScript(template, { version, packageUrl, packageSha256, pins }) {
   return out;
 }
 
+/**
+ * install.ps1 for a release (Windows): the template (scripts/install.ps1) with the package's URL and SHA-256
+ * and the Windows runtime pins (.zip) written in, as installScript does install.sh's. Single-quoted
+ * PowerShell strings, so only plain values go in (checked here).
+ */
+function installScriptWindows(template, { version, packageUrl, packageSha256, pins }) {
+  const problem = runtimePinsProblem(pins);
+  if (problem) throw new Error(problem);
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`bad version ${version}`);
+  if (!/^https:\/\/[\w.-]+\/[\w./%+-]+$/.test(packageUrl)) throw new Error(`install.ps1: the package URL ${packageUrl} isn't a plain https URL`);
+  if (!/^[0-9a-f]{64}$/.test(packageSha256)) throw new Error('install.ps1: the package SHA-256 is not 64 hex digits');
+  const rows = Object.entries(pins.archives).filter(([key]) => key.startsWith('win-'))
+    .flatMap(([key, list]) => list.filter((a) => /\.zip$/.test(a.file)).map((a) => `${key} ${a.file} ${a.sha256}`));
+  if (!rows.length) throw new Error('install.ps1: helper/runtime.json has no Windows .zip');
+  const values = { VERSION: version, PACKAGE_URL: packageUrl, PACKAGE_SHA256: packageSha256, NODE_VERSION: pins.version, NODE_BASE: pins.base, NODE_ARCHIVES: rows.join('\n') };
+  return template.replace(/@@([A-Z0-9_]+)@@/g, (m, name) => {
+    if (!(name in values)) throw new Error(`install.ps1 template: unknown ${m}`);
+    return values[name];
+  });
+}
+
 /** The newest Node release of `major` in nodejs.org's index.json. */
 function newestNode(index, major) {
   const vs = (Array.isArray(index) ? index : []).map((r) => String(r.version || '').replace(/^v/, ''))
@@ -607,10 +629,10 @@ function preflight(version, { dryRun }) {
  * releases/latest/download/trif-firefox.xpi is a link to the newest add-on that never changes. install.sh
  * likewise: releases/latest/download/install.sh is always the newest release's.
  */
-function releaseAssets(out, { tgz, chromeZip, xpi, zips, installSh = null }) {
+function releaseAssets(out, { tgz, chromeZip, xpi, zips, installSh = null, installPs1 = null }) {
   const latestXpi = xpi && path.join(out, FIREFOX_XPI);
   if (latestXpi) fs.copyFileSync(xpi, latestXpi);
-  return [tgz, chromeZip, ...(xpi ? [xpi, latestXpi] : []), ...zips, ...(installSh ? [installSh] : [])];
+  return [tgz, chromeZip, ...(xpi ? [xpi, latestXpi] : []), ...zips, ...(installSh ? [installSh] : []), ...(installPs1 ? [installPs1] : [])];
 }
 
 function bump(version, dir = ROOT) {
@@ -769,8 +791,13 @@ async function release(version, { dryRun, skipTests }) {
   fs.writeFileSync(installSh, installScript(fs.readFileSync(path.join(src, 'scripts', 'install.sh'), 'utf8'), {
     version, packageUrl: `${base}/${tgzName}`, packageSha256: sha256(tgz), pins: readJson(path.join(src, 'helper', 'runtime.json')),
   }), { mode: 0o755 });
+  // install.ps1: the same for Windows (Windows PowerShell; TRIF's own node.exe).
+  const installPs1 = path.join(out, 'install.ps1');
+  fs.writeFileSync(installPs1, installScriptWindows(fs.readFileSync(path.join(src, 'scripts', 'install.ps1'), 'utf8'), {
+    version, packageUrl: `${base}/${tgzName}`, packageSha256: sha256(tgz), pins: readJson(path.join(src, 'helper', 'runtime.json')),
+  }));
 
-  const assets = releaseAssets(out, { tgz, chromeZip: path.join(out, `trif-chrome-${version}.zip`), xpi, zips, installSh });
+  const assets = releaseAssets(out, { tgz, chromeZip: path.join(out, `trif-chrome-${version}.zip`), xpi, zips, installSh, installPs1 });
   console.log(`\nReady in ${path.relative(ROOT, out)}:`);
   for (const a of assets) console.log(`  ${path.basename(a)}`);
   console.log(`\nWhat's new in ${version} (the side panel's summary):\n${panelNotes(notes, { repo, version })}\n`);
@@ -833,4 +860,4 @@ if (require.main === module) {
   else release(cmd, { dryRun: flags.has('--dry-run'), skipTests: flags.has('--skip-tests') }).catch((e) => fail(e.stack || e.message));
 }
 
-module.exports = { runtimePins, runtimePinsProblem, installScript, newestNode, refreshRuntimeCommand, RUNTIME_PLATFORMS, modsFeedBytes, modsFeedEntries, refreshModsFeed, AMO_ISSUER, AMO_SECRET, keychain, keychainItem, keychainWriteInput, saveKeychainItem, refreshFeed, feedStaleOn, webExtSignArgs, webExtEnv, WEB_EXT_CONFIG, changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };
+module.exports = { runtimePins, runtimePinsProblem, installScript, installScriptWindows, newestNode, refreshRuntimeCommand, RUNTIME_PLATFORMS, modsFeedBytes, modsFeedEntries, refreshModsFeed, AMO_ISSUER, AMO_SECRET, keychain, keychainItem, keychainWriteInput, saveKeychainItem, refreshFeed, feedStaleOn, webExtSignArgs, webExtEnv, WEB_EXT_CONFIG, changelogSection, unreleasedSection, changelogSummary, unwrapMarkdown, summaryProblem, panelNotes, remoteRepo, repoMismatch, latestFeed, signBytes, firefoxFeed, bump, xpiMatches, releaseAssets };

@@ -118,3 +118,68 @@ test('uninstall stops the running helpers, and refuses a folder that isn\'t a wo
   assert.match(bad.stderr, /doesn't look like a TRIF workspace/);
   assert.ok(exists(path.join(notOne, 'precious.txt')));
 });
+
+// Windows (lib/uninstall.js, its Windows branch), run anywhere with stand-ins: reg.exe (makeFakeReg) and
+// PowerShell (makeFakePowerShell, for the user's PATH). The keys naming this workspace's manifests go, another
+// workspace's stays; <home>\bin comes off the PATH; bin and the runtime are handed to `later` (this process
+// runs from them there), not deleted while it runs.
+test('uninstall on Windows: registry keys, the PATH entry, bin and runtime removed once the command ends', async () => {
+  const { makeFakePowerShell, makeFakeReg } = require('./fake-powershell');
+  const B = require('../helper/lib/browsers');
+  const { setup } = require('../helper/lib/setup');
+  const { uninstall } = require('../helper/lib/uninstall');
+  const root = tempDir('uninst-win-');
+  const home = path.join(root, 'trif');
+  const homedir = path.join(root, 'profile');
+  const env = { LOCALAPPDATA: path.join(homedir, 'AppData', 'Local'), APPDATA: path.join(homedir, 'AppData', 'Roaming') };
+  fs.mkdirSync(path.join(env.LOCALAPPDATA, 'Google', 'Chrome', 'User Data'), { recursive: true });
+  const reg = makeFakeReg();
+  const regOpts = { env: {}, run: reg.run };
+  const ps = makeFakePowerShell(path.join(root, 'ps'));
+  const ws = P.workspace(home, { platform: 'win32' });
+  const r = setup({ home, platform: 'win32', homedir, env, regOpts, mode: 'link', noExamples: true, browser: 'chrome,edge,firefox',
+    addToUserPath: (dir) => { ps.setUserPath(`C:\\Windows;${dir};C:\\Tools`); return { how: 'added', error: null }; } });
+  assert.ok(r.ok, r.lines.join('\n'));
+  fs.mkdirSync(path.join(home, 'runtime', 'node-v24.0.0-win-x64'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'runtime', 'node-v24.0.0-win-x64', 'node.exe'), '');
+  const table = B.browserTable(homedir, 'win32', env);
+  const keyOf = (k) => B.nativeRegKeys(table.find((b) => b.key === k), regOpts)[0];
+  for (const k of ['chrome', 'edge', 'firefox']) assert.ok(reg.get(keyOf(k)), k);
+  // Firefox's key names another workspace's manifest by now: not this one's to remove.
+  const otherManifest = path.join(root, 'other', 'com.webmods.helper.json');
+  reg.keys.set(keyOf('firefox').toLowerCase(), otherManifest);
+
+  const handed = [];
+  const u = await uninstall({ home, platform: 'win32', homedir, env, regOpts, userPath: { bin: ps.bin }, later: (dirs) => handed.push(...dirs) });
+  assert.ok(u.ok, u.problems.join('\n'));
+  assert.equal(reg.get(keyOf('chrome')), undefined, "Chrome's key removed");
+  assert.equal(reg.get(keyOf('edge')), undefined, "Edge's key removed");
+  assert.equal(reg.get(keyOf('firefox')), otherManifest, "another workspace's key kept");
+  for (const k of ['chrome', 'edge', 'firefox']) assert.equal(exists(path.join(table.find((b) => b.key === k).nativeDirs[0], `${P.HOST_NAME}.json`)), false, `${k}'s manifest removed`);
+  assert.equal(ps.userPath(), 'C:\\Windows;C:\\Tools', 'the PATH entry gone, the others kept');
+  assert.ok(u.removed.includes(`${ws.bin} (from your PATH)`));
+  assert.deepEqual(handed, [ws.bin, path.join(home, 'runtime')]);
+  assert.ok(exists(ws.bin) && exists(path.join(home, 'runtime')), 'not deleted while this process runs from them');
+  assert.ok(exists(home) && exists(ws.private), 'the workspace and the private folder stay');
+
+  // --all: the whole workspace is handed over (bin and the runtime with it); the private folder goes now.
+  const handed2 = [];
+  const u2 = await uninstall({ home, all: true, platform: 'win32', homedir, env: { ...env, TRIF_KEYCHAIN_BIN: ps.bin, TRIF_BOX_ROOT: path.join(root, 'boxes') }, regOpts, userPath: { bin: ps.bin }, later: (dirs) => handed2.push(...dirs) });
+  assert.ok(u2.ok, u2.problems.join('\n'));
+  assert.deepEqual(handed2, [home]);
+  assert.equal(exists(ws.private), false);
+});
+
+test('removeLater: a hidden, detached Windows PowerShell that waits for the process, then deletes the folders', { skip: process.platform !== 'win32' && 'Windows only' }, async () => {
+  const { removeLater } = require('../helper/lib/uninstall');
+  const { spawn } = require('child_process');
+  const root = tempDir('later-');
+  const dir = path.join(root, "it's here Zoë");
+  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'bin', 'f.txt'), 'x');
+  const waiter = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 3000)']);
+  removeLater([dir], { pid: waiter.pid });
+  await new Promise((r) => setTimeout(r, 1000));
+  assert.ok(exists(dir), 'still there while the process runs');
+  await waitFor(() => !exists(dir), { timeout: 30000, message: 'removed after it ended' });
+});

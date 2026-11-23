@@ -312,10 +312,12 @@ const handlers = {
       throw new UsageError(e.message);
     }
     if (ctx.json) {
-      printJson({ ok: r.ok, home, all, removed: r.removed, kept: r.kept, keys: r.keys, problems: r.problems });
+      printJson({ ok: r.ok, home, all, removed: r.removed, later: r.later || [], kept: r.kept, keys: r.keys, problems: r.problems });
     } else {
       const lines = [];
       if (ctx.opts['--verbose']) for (const p of r.removed) lines.push(`removed  ${p}`);
+      // (Windows: what this command is running from, removed once it ends: lib/uninstall.js removeLater)
+      if (ctx.opts['--verbose']) for (const p of r.later || []) lines.push(`removed  ${p} (as this command ends)`);
       for (const k of r.kept) lines.push(`kept     ${k.path}: ${k.why}`);
       for (const p of r.problems) lines.push(`problem  ${p}`);
       if (lines.length) lines.push('');

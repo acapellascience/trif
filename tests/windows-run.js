@@ -120,7 +120,8 @@ const MOD = '// ==WebMod==\n// @name Hello\n// @match https://example.com/*\n// 
   const S = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'trif-run-')));
   const home = path.join(S, 'Test User');
   const local = path.join(home, 'AppData', 'Local');
-  const env = { ...process.env, USERPROFILE: home, LOCALAPPDATA: local, APPDATA: path.join(home, 'AppData', 'Roaming'), TRIF_UPDATE_DELAY: '2000000000', TRIF_DEFAULT_AGENT_DIRS: '' };
+  const env = { ...process.env, USERPROFILE: home, LOCALAPPDATA: local, APPDATA: path.join(home, 'AppData', 'Roaming'), TRIF_UPDATE_DELAY: '2000000000', TRIF_DEFAULT_AGENT_DIRS: '',
+    TRIF_RUNTIME: 'off' }; // (the job's Node, not TRIF's own: tests/windows-clean-machine.js checks that one)
   for (const k of Object.keys(env)) if (/^(TRIF_HOME|WEBMODS_HOME|HOME)$/i.test(k)) delete env[k];
   for (const d of [local, env.APPDATA]) fs.mkdirSync(d, { recursive: true });
   const setup = spawnSync(process.execPath, [path.join(REPO, 'helper', 'cli.js'), 'setup', '--copy', '--no-link', '--no-examples', '--native-dir', path.join(S, 'native')], { env, encoding: 'utf8', timeout: 300000 });

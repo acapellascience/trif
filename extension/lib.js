@@ -34,10 +34,14 @@ export const PANEL = FIREFOX ? 'sidebar' : SAFARI ? 'panel' : 'side panel';
 // What sets the helper up for this browser: plain setup doesn't install Safari's bridge. The installer
 // (timsrobot.com/install.sh, a redirect to the newest release's) brings TRIF's own Node: no Node needed.
 // (Keep in step with helper/lib/paths.js INSTALL_COMMAND.)
+// Windows: install.ps1 in PowerShell (helper/lib/paths.js WINDOWS_INSTALL_COMMAND), and trif.cmd by its
+// path (a terminal open since before setup doesn't have <home>\bin on its PATH yet).
 export const INSTALL_URL = 'https://timsrobot.com/install.sh';
-export const SETUP_COMMAND = SAFARI ? `curl -fsSL ${INSTALL_URL} | sh -s -- --browser safari` : `curl -fsSL ${INSTALL_URL} | sh`;
+export const WINDOWS_INSTALL_URL = 'https://timsrobot.com/install.ps1';
+export const WINDOWS = /^Win/i.test(globalThis.navigator?.userAgentData?.platform || globalThis.navigator?.platform || '');
+export const SETUP_COMMAND = SAFARI ? `curl -fsSL ${INSTALL_URL} | sh -s -- --browser safari` : WINDOWS ? `irm ${WINDOWS_INSTALL_URL} | iex` : `curl -fsSL ${INSTALL_URL} | sh`;
 // Setup again once TRIF is installed (e.g. after installing a coding agent, so the helper finds it): no download.
-export const RESETUP_COMMAND = SAFARI ? '~/.trif/bin/trif setup --browser safari' : '~/.trif/bin/trif setup';
+export const RESETUP_COMMAND = SAFARI ? '~/.trif/bin/trif setup --browser safari' : WINDOWS ? '~\\.trif\\bin\\trif.cmd setup' : '~/.trif/bin/trif setup';
 export const SETTINGS_URL = FIREFOX ? 'about:addons' : SAFARI ? 'Safari Settings → Extensions' : `chrome://extensions/?id=${EXTENSION_ID}`;
 // PROTOCOL.md calls this `__webmods_runtime`, but chrome.userScripts rejects ids starting with "_"
 // (reserved for generated ids), so it is registered under this id.

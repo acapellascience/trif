@@ -180,9 +180,60 @@ test('the front door: one install command, the same in the extension, the CLI an
   const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
   assert.ok(readme.includes('```sh\n   ' + P.INSTALL_COMMAND + '\n   ```'), 'README install step 1 shows it');
   assert.doesNotMatch(readme, /^- Node 18 or newer/m, 'Node is no longer a requirement');
+  // (The site serves no /install.sh for now, and never a redirect to a release's file: main b4febdf. The
+  // installer comes back served from the site itself: tests/site.test.js.)
   const site = fs.readFileSync(path.join(__dirname, '..', 'site', 'src', 'index.js'), 'utf8');
-  assert.ok(site.includes(`pathname === '${new URL(P.INSTALL_URL).pathname}'`), 'timsrobot.com redirects that path');
+  assert.doesNotMatch(site, /releases\/latest\/download\/install\.(sh|ps1)/, 'no redirect to a release file');
   const { COMMANDS } = require('../helper/lib/help');
   assert.match(COMMANDS.setup.details, /^First time: curl -fsSL https:\/\/timsrobot\.com\/install\.sh \| sh /);
   assert.ok(COMMANDS.setup.examples.includes(P.INSTALL_COMMAND));
+});
+
+test('the front door on Windows: install.ps1 in PowerShell, the same in the extension, the CLI and doctor', async () => {
+  const P = require('../helper/lib/paths');
+  assert.strictEqual(P.WINDOWS_INSTALL_COMMAND, 'irm https://timsrobot.com/install.ps1 | iex');
+  assert.strictEqual(P.installCommand('win32'), P.WINDOWS_INSTALL_COMMAND);
+  assert.strictEqual(P.installCommand('darwin'), P.INSTALL_COMMAND);
+  const saved = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/157.0.0.0', platform: 'Win32', userAgentData: { platform: 'Windows', brands: [] } }, configurable: true, writable: true });
+  let lib;
+  try { lib = await import('../extension/lib.js?windows'); } finally {
+    if (saved) Object.defineProperty(globalThis, 'navigator', saved); else delete globalThis.navigator;
+  }
+  assert.strictEqual(lib.WINDOWS, true);
+  assert.strictEqual(lib.WINDOWS_INSTALL_URL, P.WINDOWS_INSTALL_URL);
+  assert.strictEqual(lib.SETUP_COMMAND, P.WINDOWS_INSTALL_COMMAND);
+  assert.strictEqual(lib.RESETUP_COMMAND, '~\\.trif\\bin\\trif.cmd setup');
+  const { COMMANDS } = require('../helper/lib/help');
+  assert.ok(COMMANDS.setup.examples.includes(P.WINDOWS_INSTALL_COMMAND));
+  const { doctor } = require('../helper/lib/doctor');
+  const home = tempDir('front-win-');
+  const d = await doctor({ home: path.join(home, 'nope'), platform: 'win32', homedir: home, env: {}, regOpts: { env: {}, run: () => ({ status: 1, stdout: '', stderr: '' }) } });
+  const ws = d.checks.find((c) => /^workspace /.test(c.title));
+  if (!P.isGitCheckout()) assert.match(ws.fix, /irm https:\/\/timsrobot\.com\/install\.ps1 \| iex/);
+});
+
+// install.ps1 (scripts/install.ps1, filled in by release.js installScriptWindows): the values, Windows' .zip
+// pins only, and refusals. It's run for real on Windows only (tests/windows-clean-machine.js, in CI).
+const PS1 = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'install.ps1'), 'utf8');
+test('installScriptWindows: every value written in, Windows .zip archives only; refuses values that can\'t go in as is', () => {
+  const fillW = (over = {}) => rel.installScriptWindows(PS1, {
+    version: '0.4.0', packageUrl: 'https://github.com/acapellascience/trif/releases/download/v0.4.0/timsrobot-0.4.0.tgz',
+    packageSha256: 'c'.repeat(64), pins: R.PINS, ...over,
+  });
+  const s = fillW();
+  assert.doesNotMatch(s, /@@/);
+  assert.match(s, /^ {2}\$TrifVersion = '0\.4\.0'$/m);
+  assert.match(s, /^ {2}\$PackageSha256 = 'c{64}'$/m);
+  assert.match(s, new RegExp(`^ {2}\\$NodeBase = '${R.PINS.base}'$`, 'm'));
+  for (const k of ['win-x64', 'win-arm64']) for (const a of R.PINS.archives[k]) assert.ok(s.includes(`\n${k} ${a.file} ${a.sha256}\n`), k);
+  assert.doesNotMatch(s, /darwin-|linux-|\.tar\./);
+  assert.match(s, /^& \{$/m, 'all in one script block...');
+  assert.strictEqual(s.trimEnd().split('\n').pop(), '} @args', '...run at the very end');
+  assert.doesNotMatch(s.replace(/^\s*#.*$/gm, ''), /\bexit\b/, 'never exit (it would close the window under iex)');
+  assert.throws(() => fillW({ packageUrl: "https://x.test/a'b.tgz" }), /plain https URL/);
+  assert.throws(() => fillW({ packageUrl: 'http://x.test/a.tgz' }), /plain https URL/);
+  assert.throws(() => fillW({ packageSha256: 'abc' }), /64 hex/);
+  assert.throws(() => fillW({ pins: { ...R.PINS, archives: {} } }), /no archive for/);
+  assert.throws(() => rel.installScriptWindows(`${PS1}@@OTHER@@`, { version: '0.4.0', packageUrl: 'https://x.test/a.tgz', packageSha256: 'c'.repeat(64), pins: R.PINS }), /unknown @@OTHER@@/);
 });

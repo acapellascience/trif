@@ -134,7 +134,9 @@ class Cdp {
   const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'trif-browser-')));
   const profile = path.join(base, UNICODE ? 'Zoë 用户 100%' : 'Test User');
   fs.mkdirSync(profile);
-  const env = { ...process.env, USERPROFILE: profile, LOCALAPPDATA: path.join(profile, 'AppData', 'Local'), APPDATA: path.join(profile, 'AppData', 'Roaming'), TRIF_UPDATE_DELAY: '2000000000' };
+  const env = { ...process.env, USERPROFILE: profile, LOCALAPPDATA: path.join(profile, 'AppData', 'Local'), APPDATA: path.join(profile, 'AppData', 'Roaming'), TRIF_UPDATE_DELAY: '2000000000',
+    // (the job's Node, not TRIF's own: tests/windows-clean-machine.js checks that one)
+    TRIF_RUNTIME: 'off' };
   for (const k of Object.keys(env)) if (/^(TRIF_HOME|WEBMODS_HOME|HOME)$/i.test(k)) delete env[k];
   for (const d of [env.LOCALAPPDATA, env.APPDATA]) fs.mkdirSync(d, { recursive: true });
   const home = path.join(profile, '.trif');

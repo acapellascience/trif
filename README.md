@@ -108,10 +108,18 @@ Settings → Extensions and delete the old WebMods app.
 
 ### Windows
 
-TRIF's extension, helper and `trif` command work on Windows 10 and 11, in Chrome, Edge, Brave and Firefox:
-run `npx timsrobot setup` in a terminal (PowerShell or Command Prompt), then follow its next steps (the
-extension folder is `%USERPROFILE%\.trif\app\extension`). Setup adds `~\.trif\bin` to your PATH: open a
-new terminal afterwards to use `trif`.
+TRIF's extension, helper and `trif` command work on Windows 10 and 11, in Chrome, Edge, Brave and Firefox.
+In PowerShell, run:
+
+```powershell
+irm https://timsrobot.com/install.ps1 | iex
+```
+
+then follow its next steps (the extension folder is `%USERPROFILE%\.trif\app\extension`). You don't need
+Node.js: this brings TRIF's own copy, kept in `~\.trif\runtime` and used only by TRIF. Already have Node 18
+or newer? `npx timsrobot setup` does the same, in PowerShell or Command Prompt. Setup adds `~\.trif\bin` to
+your PATH: open a new terminal afterwards to use `trif`. `trif uninstall` takes TRIF off again (your mods and
+settings stay unless you add `--all`).
 
 Chats from the side panel work with Claude Code and Codex. On Windows TRIF gives them no shell: they
 change mods with file tools and run TRIF's commands through a tool of TRIF's, inside a fence TRIF builds on

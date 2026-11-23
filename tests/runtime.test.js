@@ -150,3 +150,38 @@ test('ensureRuntime with archiveFile (install.sh\'s download): used when it\'s a
   fs.writeFileSync(local, Buffer.concat([data, Buffer.from('x')]));
   await assert.rejects(R.ensureRuntime(tempDir('runtime-home-'), { ...opts(pins, never), archiveFile: local }), /pinned checksum/);
 });
+
+// Windows' archive is a .zip: node-v<ver>-win-<arch>/{node.exe, LICENSE, npm, node_modules/…}. Only node.exe
+// and LICENSE are taken out (by name), into <home>\runtime\node-v<ver>-win-<arch>\node.exe (no bin\ there).
+// On macOS/Linux the fake node.exe is a shell script and tar reads the .zip (bsdtar; skipped without zip).
+const hasZip = (() => { try { execFileSync('zip', ['-v'], { stdio: 'ignore' }); return true; } catch { return false; } })();
+test('ensureRuntime on Windows: the .zip, only node.exe and LICENSE out of it, node.exe at the folder\'s top', { skip: process.platform === 'win32' ? 'the fake node.exe is a shell script' : !hasZip && 'needs zip' }, async () => {
+  const home = tempDir('runtime-home-');
+  const dir = tempDir('runtime-src-');
+  const key = 'win-arm64';
+  const top = path.join(dir, `node-v${VERSION}-${key}`);
+  fs.mkdirSync(path.join(top, 'node_modules', 'npm'), { recursive: true });
+  fs.writeFileSync(path.join(top, 'node.exe'), `#!/bin/sh\necho v${VERSION}\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(top, 'npm.cmd'), '@echo off\r\n');
+  fs.writeFileSync(path.join(top, 'node_modules', 'npm', 'package.json'), '{}');
+  fs.writeFileSync(path.join(top, 'LICENSE'), 'MIT\n');
+  const file = path.join(dir, `node-v${VERSION}-${key}.zip`);
+  execFileSync('zip', ['-qr', file, path.basename(top)], { cwd: dir });
+  const data = fs.readFileSync(file);
+  const sha256 = crypto.createHash('sha256').update(data).digest('hex');
+  const pins = { version: VERSION, base: 'https://nodejs.org/dist/v24.22.3/', archives: { [key]: [{ file: path.basename(file), sha256 }] } };
+  const urls = [];
+  const r = await R.ensureRuntime(home, { pins, platform: 'win32', arch: 'arm64', fetch: async (u) => { urls.push(u); return data; } });
+  const out = path.join(home, 'runtime', `node-v${VERSION}-${key}`);
+  assert.deepStrictEqual(urls, [`https://nodejs.org/dist/v24.22.3/node-v${VERSION}-${key}.zip`]);
+  assert.strictEqual(r.node, path.join(out, 'node.exe'));
+  assert.deepStrictEqual(fs.readdirSync(out).sort(), ['.trif-runtime.json', 'LICENSE', 'node.exe']);
+  assert.strictEqual(R.installedNode(home, { pins, platform: 'win32', arch: 'arm64' }), r.node);
+  assert.deepStrictEqual(R.runtimeOf(r.node, home, { platform: 'win32' }), { dir: out, name: `node-v${VERSION}-${key}`, version: VERSION });
+  assert.strictEqual(R.checkRuntime(r.node, home, { platform: 'win32', pins }).problem, null);
+  assert.deepStrictEqual(fs.readdirSync(path.join(home, 'runtime')), [`node-v${VERSION}-${key}`], 'no temporary folder left');
+  // A .zip whose checksum isn't the pin: refused, nothing left.
+  const home2 = tempDir('runtime-home-');
+  await assert.rejects(R.ensureRuntime(home2, { pins: { ...pins, archives: { [key]: [{ file: path.basename(file), sha256: '0'.repeat(64) }] } }, platform: 'win32', arch: 'arm64', fetch: async () => data }), /pinned checksum/);
+  assert.deepStrictEqual(fs.readdirSync(path.join(home2, 'runtime')), []);
+});

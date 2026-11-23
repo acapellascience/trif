@@ -16,7 +16,7 @@ const COMMANDS = {
     usage: 'trif setup [--browser chrome|chromium|brave|edge|arc|firefox|safari|all] [--home DIR] [--copy|--link] [--runtime|--no-runtime] [--no-link] [--examples [SITES]|--no-examples] [--verbose] [--no-wait]',
     summary: 'install the workspace, native messaging host and CLI link (safe to re-run)',
     details: `First time: ${P.INSTALL_COMMAND}   (brings TRIF's own Node: the computer needs none;
-with Node 18 or newer, npx timsrobot setup does the same).
+with Node 18 or newer, npx timsrobot setup does the same). On Windows, in PowerShell: ${P.WINDOWS_INSTALL_COMMAND}
 Creates the workspace (~/.trif, unless --home or TRIF_HOME says otherwise; a ~/.webmods from before 0.2.0,
 when TRIF was called WebMods, is moved there first and left as a link to it) with sites/ and bin/, and the
 private folder (settings, logs, screenshots; ~/Library/Application Support/TRIF on a Mac, moved out of the
@@ -53,7 +53,7 @@ agent for the side panel, and writes .claude/settings.json (what Claude Code may
 Other options: --no-link skips the /usr/local/bin link; --native-dir DIR writes the manifest only to DIR;
 --bin-dir DIR links the CLI there instead of /usr/local/bin.
 Run it again after upgrading TRIF or moving the repo (a git checkout: also after upgrading Node).`,
-    examples: [P.INSTALL_COMMAND, `${P.INSTALL_COMMAND} -s -- --browser safari`, 'npx timsrobot setup', 'trif setup', 'trif setup --browser brave', 'trif setup --browser all', 'trif setup --examples x.com,google.com', 'node helper/cli.js setup --copy'],
+    examples: [P.INSTALL_COMMAND, `${P.INSTALL_COMMAND} -s -- --browser safari`, P.WINDOWS_INSTALL_COMMAND, 'npx timsrobot setup', 'trif setup', 'trif setup --browser brave', 'trif setup --browser all', 'trif setup --examples x.com,google.com', 'node helper/cli.js setup --copy'],
   },
   uninstall: {
     usage: 'trif uninstall [--all [--yes]] [--home DIR] [--bin-dir DIR] [--native-dir DIR] [--verbose]',

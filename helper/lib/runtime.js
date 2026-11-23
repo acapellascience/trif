@@ -50,8 +50,15 @@ function installedNode(home, { platform = process.platform, arch = process.arch,
   return isExecutable(node) && fs.existsSync(path.join(dir, MARK)) ? node : null;
 }
 
+// Windows: its own tar.exe in System32 (bsdtar, which reads .zip; there since Windows 10 1803), never
+// whichever tar comes first on PATH (Git's GNU tar can't read a .zip).
+function defaultTar() {
+  if (process.platform !== 'win32') return 'tar';
+  return require('./platform').systemExe('tar.exe');
+}
+
 function hasXz() {
-  try { return spawnSync('xz', ['--version'], { stdio: 'ignore', timeout: 5000 }).status === 0; } catch { return false; }
+  try { return spawnSync('xz', ['--version'], { stdio: 'ignore', timeout: 5000, windowsHide: true }).status === 0; } catch { return false; }
 }
 
 /** The archive to download: .tar.xz (smaller) where tar can unpack it, else .tar.gz; .zip on Windows. */
@@ -63,7 +70,7 @@ function pickArchive(key, { platform = process.platform, xz = null, pins = PINS 
 
 function run(file, args, opts = {}) {
   return new Promise((resolve) => {
-    execFile(file, args, { maxBuffer: 1024 * 1024, timeout: 120000, ...opts }, (error, stdout, stderr) => {
+    execFile(file, args, { maxBuffer: 1024 * 1024, timeout: 120000, windowsHide: true, ...opts }, (error, stdout, stderr) => {
       resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, out: `${stdout || ''}${stderr || ''}` });
     });
   });
@@ -74,7 +81,7 @@ function run(file, args, opts = {}) {
  * fetched } (fetched: whether it was downloaded now); throws RuntimeError, leaving nothing behind, when this
  * platform has no runtime, the download fails, or its checksum isn't the pinned one.
  */
-async function ensureRuntime(home, { fetch = null, platform = process.platform, arch = process.arch, xz = null, pins = PINS, tar = 'tar', archiveFile = null } = {}) {
+async function ensureRuntime(home, { fetch = null, platform = process.platform, arch = process.arch, xz = null, pins = PINS, tar = defaultTar(), archiveFile = null } = {}) {
   const key = platformKey(platform, arch, pins);
   if (!key) throw new RuntimeError(`there's no TRIF runtime for ${platform}-${arch}`);
   const have = installedNode(home, { platform, arch, pins });
@@ -100,9 +107,13 @@ async function ensureRuntime(home, { fetch = null, platform = process.platform, 
     fs.writeFileSync(file, data);
     const unpacked = path.join(tmp, 'x');
     fs.mkdirSync(unpacked);
-    const r = await run(tar, ['-xf', file, '-C', unpacked]);
+    // (Windows' .zip holds npm and its ~2000 files beside node.exe: only node.exe and LICENSE are taken out
+    // of it, by name. The tarballs keep bin/node under the same top folder and are unpacked whole.)
+    const topName = archive.file.replace(/\.(tar\.xz|tar\.gz|zip)$/, '');
+    const members = archive.file.endsWith('.zip') ? [`${topName}/node.exe`, `${topName}/LICENSE`] : [];
+    const r = await run(tar, ['-xf', file, '-C', unpacked, ...members]);
     if (r.code) throw new RuntimeError(`couldn't unpack ${archive.file}: ${r.out.trim().slice(-300)}`);
-    const top = path.join(unpacked, archive.file.replace(/\.(tar\.xz|tar\.gz|zip)$/, ''));
+    const top = path.join(unpacked, topName);
     const from = nodeIn(top, platform);
     if (!isExecutable(from) && !(platform === 'win32' && fs.existsSync(from))) throw new RuntimeError(`${archive.file} has no node in it`);
 
@@ -174,7 +185,7 @@ function runtimeSetting(env = process.env) {
  */
 function ensureRuntimeSync(home, { pinsFile = null, timeoutMs = 10 * 60 * 1000, env = process.env } = {}) {
   const r = spawnSync(process.execPath, [__filename, 'ensure', home, ...(pinsFile ? [pinsFile] : [])], {
-    encoding: 'utf8', timeout: timeoutMs, maxBuffer: 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8', timeout: timeoutMs, maxBuffer: 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     env: { ...env, NODE_TEST_CONTEXT: '' },
   });
   if (r.error && r.error.code === 'ETIMEDOUT') throw new RuntimeError(`the download took longer than ${Math.round(timeoutMs / 1000)} s`);
@@ -234,7 +245,7 @@ function checkRuntime(nodePath, home, { platform = process.platform, pins = PINS
   let sha;
   try { sha = crypto.createHash('sha256').update(fs.readFileSync(nodePath)).digest('hex'); } catch (e) { out.problem = `its node can't be read (${e.code || e.message})`; return out; }
   if (sha !== mark.nodeSha256) { out.problem = 'its node has changed since it was downloaded'; return out; }
-  const v = runVersion ? runVersion(nodePath) : String(spawnSync(nodePath, ['--version'], { encoding: 'utf8', timeout: 10000 }).stdout || '').trim();
+  const v = runVersion ? runVersion(nodePath) : String(spawnSync(nodePath, ['--version'], { encoding: 'utf8', timeout: 10000, windowsHide: true }).stdout || '').trim();
   if (v !== `v${rt.version}`) out.problem = `its node doesn't run (${v || 'no output'})`;
   return out;
 }

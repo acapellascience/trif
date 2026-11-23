@@ -40,6 +40,14 @@ if (script.includes('TRIF_USER_PATH')) {
   const f = path.join(here, 'userpath.txt');
   const old = (() => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } })();
   const norm = (p) => p.replace(/[\\\\/]+$/, '').toLowerCase();
+  if (req.remove) {
+    const all = old.split(';').filter(Boolean);
+    const keep = all.filter((e) => norm(e) !== norm(req.dir));
+    if (keep.length === all.length) { process.stdout.write('missing'); process.exit(0); }
+    fs.writeFileSync(f, keep.join(';'));
+    process.stdout.write('removed');
+    process.exit(0);
+  }
   if (old.split(';').some((e) => e && norm(e) === norm(req.dir))) { process.stdout.write('already'); process.exit(0); }
   if (req.check) { process.stdout.write('missing'); process.exit(0); }
   fs.writeFileSync(f, old.replace(/;+$/, '') ? old.replace(/;+$/, '') + ';' + req.dir : req.dir);

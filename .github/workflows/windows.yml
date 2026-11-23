@@ -6,7 +6,10 @@
 #     a % in its name, starts the helper as Chrome does and talks to it over its pipe;
 #   - tests/windows-browser.js (Node 22 only): Chrome for Testing, then Microsoft Edge, loads the unpacked
 #     extension, and the extension reaches the helper through the registry key and trif-host.bat, as for a
-#     user.
+#     user;
+#   - clean-machine: tests/windows-clean-machine.js, TRIF with no Node on the PATH it gets (docs/NO-NODE.md):
+#     install.ps1 run the way a person runs it, TRIF's own node.exe, the helper on it (and inside a run's
+#     fence), an update, uninstall; and the upgrade from a Node-based install.
 # Nothing is published, uploaded or signed, and no secrets are used.
 name: windows
 
@@ -110,6 +113,37 @@ jobs:
         if: always() && matrix.node != 18
         continue-on-error: true
         run: node --test --test-timeout=180000 tests/cdp-page.test.js tests/sandbox-browser.test.js tests/css-browser.test.js tests/clickjack-browser.test.js
+
+  # TRIF on a Windows computer with no Node (docs/NO-NODE.md, step 12). The script itself runs on the pinned
+  # version (helper/runtime.json), from setup-node's folder; the runner's own Node (Program Files) is deleted
+  # first, and every program TRIF starts gets a PATH of Windows' folders alone (the script checks `where node`
+  # finds nothing there). It downloads the real node.exe .zip from nodejs.org once.
+  clean-machine:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # (the upgrade starts from an older commit: TRIF_UPGRADE_FROM, default 014da14)
+      - name: The pinned Node version
+        id: pin
+        shell: pwsh
+        run: |
+          $v = (Get-Content helper/runtime.json -Raw | ConvertFrom-Json).version
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Output "TRIF's own Node: $v"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.pin.outputs.version }}
+      - name: No other Node on this computer
+        shell: pwsh
+        run: |
+          Remove-Item -LiteralPath "$env:ProgramFiles\nodejs" -Recurse -Force -ErrorAction SilentlyContinue
+          if (Test-Path -LiteralPath "$env:ProgramFiles\nodejs") { Write-Output "Program Files\nodejs is still there"; exit 1 }
+          where.exe node
+          node --version
+      - name: Clean machine (install.ps1, TRIF's own node.exe, the helper, the fence, update, uninstall; the upgrade)
+        run: node tests/windows-clean-machine.js
 
   # For information, never failing: every test the list in tests/windows-skips.json skips on Windows, run
   # anyway, to see which pass by now (a test that does comes off the list).

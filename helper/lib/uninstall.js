@@ -8,7 +8,14 @@
 // outside it is left, and said).
 // Only what belongs to this workspace goes: a manifest or Safari agent another workspace wrote (a git
 // checkout's, say) stays, and is said. Setup's own files are found as setup writes them (browsers.js,
-// setup.js), so this stays in step with it; Windows (branch `windows`) adds its registry keys here.
+// setup.js), so this stays in step with it.
+//
+// Windows: the browsers' registry keys that name a manifest removed here go too, and <home>\bin comes off
+// the user's PATH. A running program's file can't be deleted there, and this command is usually running on
+// TRIF's own node.exe (<home>\runtime) through trif.cmd (<home>\bin; cmd.exe reads a batch file again after
+// each command it runs, so deleting it under cmd.exe makes it say "The batch file cannot be found."):
+// those folders (with --all, the workspace) are handed to a hidden Windows PowerShell that waits for this
+// process to end, then deletes them (`removeLater`).
 
 const fs = require('fs');
 const os = require('os');
@@ -21,6 +28,7 @@ const { acquireInstallLock } = require('./lock');
 const { envVar } = require('./env');
 const R = require('./runtime');
 const { boxRoot } = require('./runs');
+const { isWindows, systemExe } = require('./platform');
 
 const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
 const exists = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
@@ -49,24 +57,67 @@ function isHelperProcess(pid) {
   return r.status === 0 && /host\.js\b/.test(r.stdout);
 }
 
+/** Windows: whether process `pid` is a node.exe (tasklist, by its full path). */
+function isWindowsHelperProcess(pid, { env = process.env } = {}) {
+  const r = spawnSync(systemExe('tasklist.exe', env), ['/FI', `PID eq ${Number(pid)}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true, timeout: 15000 });
+  return r.status === 0 && /^"node\.exe",/im.test(String(r.stdout || ''));
+}
+
+// (A PowerShell single-quoted string: only ' needs doubling.)
+const psq = (s) => `'${String(s).replace(/'/g, "''")}'`;
+
+/**
+ * Windows: deletes `dirs` once process `pid` has ended (this one: its node.exe and the trif.cmd that started it
+ * can't go while it runs), from a hidden, detached Windows PowerShell (System32's: never one on PATH, nor
+ * TRIF_POWERSHELL_BIN's stand-in). Tries for a minute: a terminal whose current folder is in one keeps it.
+ * The paths go in the script itself (-EncodedCommand, UTF-16): nothing secret.
+ */
+function removeLater(dirs, { pid = process.pid, env = process.env } = {}) {
+  if (!dirs.length) return null;
+  const script = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    `Wait-Process -Id ${Number(pid)} -Timeout 600`,
+    'Start-Sleep -Milliseconds 1500',
+    `$dirs = @(${dirs.map(psq).join(', ')})`,
+    'for ($i = 0; $i -lt 60; $i++) {',
+    '  foreach ($d in $dirs) { if (Test-Path -LiteralPath $d) { Remove-Item -LiteralPath $d -Recurse -Force } }',
+    '  if (-not ($dirs | Where-Object { Test-Path -LiteralPath $_ })) { break }',
+    '  Start-Sleep -Seconds 1',
+    '}',
+  ].join('\n');
+  const root = env.SystemRoot || env.SYSTEMROOT || env.windir || 'C:\\Windows';
+  const ps = path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const { psArgs } = require('./win/powershell');
+  const child = require('child_process').spawn(ps, psArgs(script), { detached: true, stdio: 'ignore', windowsHide: true, cwd: path.parse(dirs[0]).root });
+  child.on('error', () => { /* said below: the folders stay */ });
+  child.unref();
+  return child;
+}
+
 function sleepSync(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
 
 /**
  * opts: { home, all, homedir (where browsers and LaunchAgents are; default the home folder), nativeDir
  *         (only that folder's manifest, as setup --native-dir), binDir (default /usr/local/bin),
  *         launchAgentsDir, launchctl (false, or TRIF_NO_LAUNCHCTL=1: remove the agent's file only),
- *         isHelper (pid -> bool), env }
- * Resolves { ok, removed: [path], kept: [{path, why}], problems: [string], keys: [account], ws, modsOutside }.
+ *         isHelper (pid -> bool), env,
+ *         Windows: platform, regOpts ({env, run} for win/registry.js), userPath ({bin} for win/userpath.js,
+ *         or false: leave the user's PATH alone), later (dirs -> deletes them after this process: removeLater) }
+ * Resolves { ok, removed: [path], later: [path] (Windows: removed once this process ends), kept: [{path, why}],
+ *   problems: [string], keys: [account], ws, modsOutside }.
  */
 async function uninstall(opts = {}) {
   const env = opts.env || process.env;
   const homedir = opts.homedir || os.homedir();
-  const ws = P.workspace(opts.home);
+  const platform = opts.platform || process.platform;
+  const win = isWindows(platform);
+  const ws = P.workspace(opts.home, { platform });
   const home = ws.home;
   const removed = [];
   const kept = [];
   const problems = [];
   const keys = [];
+  const later = [];
   const rm = (p, { recursive = true } = {}) => {
     if (!exists(p)) return;
     try { fs.rmSync(p, { recursive, force: true }); removed.push(p); } catch (e) { problems.push(`couldn't remove ${p}: ${e.message}`); }
@@ -83,15 +134,36 @@ async function uninstall(opts = {}) {
     // 1. Browser connections first, so a browser can't start a helper again.
     const files = new Set();
     if (opts.nativeDir) files.add(path.join(path.resolve(opts.nativeDir), `${P.HOST_NAME}.json`));
-    else for (const b of browserTable(homedir)) for (const f of manifestFiles(b)) files.add(f);
+    const table = opts.nativeDir ? [] : browserTable(homedir, platform, env);
+    if (opts.nativeDir) files.add(path.join(path.resolve(opts.nativeDir), `${P.HOST_NAME}.json`));
+    else for (const b of table) for (const f of manifestFiles(b)) files.add(f);
+    const gone = new Set();
     for (const f of files) {
       let m;
       try { m = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) {
         if (e.code !== 'ENOENT') kept.push({ path: f, why: "it isn't one TRIF wrote" });
         continue;
       }
-      if (inBin(m && m.path, ws)) rm(f, { recursive: false });
+      if (inBin(m && m.path, ws)) { rm(f, { recursive: false }); if (!exists(f)) gone.add(path.resolve(f).toLowerCase()); }
       else kept.push({ path: f, why: `it starts another TRIF (${m && m.path})` });
+    }
+    // Windows: each browser finds its manifest through a registry key (win/registry.js): a key naming a
+    // manifest just removed goes; one naming another (another workspace's) stays.
+    if (win && gone.size) {
+      const registry = require('./win/registry');
+      const { nativeRegKeys } = require('./browsers');
+      const seen = new Set();
+      for (const b of table) {
+        for (const key of nativeRegKeys(b, opts.regOpts)) {
+          if (seen.has(key.toLowerCase())) continue;
+          seen.add(key.toLowerCase());
+          const { value } = registry.getDefault(key, opts.regOpts);
+          if (!value || !gone.has(path.resolve(value).toLowerCase())) continue;
+          const error = registry.deleteKey(key, opts.regOpts);
+          if (error) problems.push(`couldn't remove the registry key ${key}: ${error}`);
+          else removed.push(key);
+        }
+      }
     }
 
     // 2. The Safari bridge (and its agent from before 0.2.0), stopped and removed.
@@ -112,9 +184,15 @@ async function uninstall(opts = {}) {
       rm(plist, { recursive: false });
     }
 
-    // 3. The CLI link setup made (only a link to this workspace's wrapper).
+    // 3. The CLI link setup made (only a link to this workspace's wrapper). Windows: <home>\bin on the user's
+    // PATH instead (win/userpath.js).
     const binDir = opts.binDir ? path.resolve(opts.binDir) : '/usr/local/bin';
-    for (const name of [P.CLI_NAME, P.LEGACY_CLI_NAME]) {
+    if (win && opts.userPath !== false) {
+      const r = require('./win/userpath').removeFromUserPath(ws.bin, opts.userPath || {});
+      if (r.error) problems.push(`couldn't take ${ws.bin} off your PATH (${r.error}); remove it in Settings → System → About → Advanced system settings → Environment Variables`);
+      else if (r.how === 'removed') removed.push(`${ws.bin} (from your PATH)`);
+    }
+    for (const name of win ? [] : [P.CLI_NAME, P.LEGACY_CLI_NAME]) {
       const link = path.join(binDir, name);
       let target;
       try { target = fs.readlinkSync(link); } catch { continue; }
@@ -125,16 +203,22 @@ async function uninstall(opts = {}) {
     }
 
     // 4. Running helpers stop (their browser would otherwise keep one running on files that are gone).
-    const isHelper = opts.isHelper || isHelperProcess;
+    // (Windows: the helper's markers name the pid; taskkill /T takes its programs with it, the phone link's
+    // announcer among them.)
+    const isHelper = opts.isHelper || (win ? (pid) => isWindowsHelperProcess(pid, { env }) : isHelperProcess);
     const stopping = helperSockets(home).filter((h) => h.pid !== process.pid && pidAlive(h.pid) && isHelper(h.pid));
-    for (const h of stopping) { try { process.kill(h.pid, 'SIGTERM'); } catch { /* gone */ } }
+    for (const h of stopping) {
+      if (win && !opts.isHelper) spawnSync(systemExe('taskkill.exe', env), ['/PID', String(h.pid), '/T', '/F'], { windowsHide: true, timeout: 15000 });
+      else { try { process.kill(h.pid, 'SIGTERM'); } catch { /* gone */ } }
+    }
     for (let waited = 0; waited < 5000 && stopping.some((h) => pidAlive(h.pid)); waited += 100) sleepSync(100);
 
     // 5. --all: the API keys TRIF saved (read before the private folder, which names the open model's).
     if (opts.all) {
       const keyring = require('./keyring');
       const b = keyring.backend({ env });
-      if (b && fs.existsSync(b.bin)) {
+      // (Windows' Credential Manager: bin null, System32's PowerShell)
+      if (b && (b.bin === null || fs.existsSync(b.bin))) {
         const agentkeys = require('./agentkeys');
         for (const id of Object.keys(agentkeys.AGENT_KEYS)) {
           try { const r = await agentkeys.removeAgentKey(id, { env }); if (r.removed) keys.push(r.account); } catch (e) { problems.push(`couldn't remove the ${id} API key: ${e.message}`); }
@@ -143,15 +227,16 @@ async function uninstall(opts = {}) {
       }
     }
 
-    // 6. TRIF's own files in the workspace.
-    rm(ws.bin);
+    // 6. TRIF's own files in the workspace. (Windows: bin and the runtime once this process has ended; with
+    // --all, the whole workspace then, below.)
+    if (win) later.push(...[ws.bin, R.runtimeRoot(home)].filter(exists));
+    else { rm(ws.bin); rm(R.runtimeRoot(home)); }
     rm(ws.appDir);
-    rm(R.runtimeRoot(home));
     let names = [];
     try { names = fs.readdirSync(home); } catch { /* gone */ }
     const base = path.basename(ws.appDir);
     for (const n of names) {
-      if (n.startsWith(`.${base}.new-`) || n.startsWith(`.${base}.old-`) || n.startsWith('.update-') || /^helper(-\d+)?\.sock$/.test(n)) rm(path.join(home, n));
+      if (n.startsWith(`.${base}.new-`) || n.startsWith(`.${base}.old-`) || n.startsWith('.update-') || /^helper(-\d+)?\.(sock|pipe)$/.test(n)) rm(path.join(home, n));
     }
 
     // 7. --all: everything else.
@@ -169,12 +254,15 @@ async function uninstall(opts = {}) {
         try { if (fs.lstatSync(legacy).isSymbolicLink() && real(legacy) === real(home)) { fs.unlinkSync(legacy); removed.push(legacy); } } catch { /* none */ }
       }
       lock.release();
-      rm(home);
+      if (win) { later.length = 0; later.push(home); } else rm(home);
     }
-    return { ok: problems.length === 0, removed, kept, problems, keys, ws, modsOutside };
+    if (later.length) {
+      try { (opts.later || removeLater)(later, { env }); } catch (e) { problems.push(`couldn't hand ${later.join(', ')} over to be removed: ${e.message}`); }
+    }
+    return { ok: problems.length === 0, removed, later, kept, problems, keys, ws, modsOutside };
   } finally {
     try { lock.release(); } catch { /* the workspace is gone */ }
   }
 }
 
-module.exports = { uninstall, plistIsOurs, inBin };
+module.exports = { uninstall, plistIsOurs, inBin, removeLater, isWindowsHelperProcess };

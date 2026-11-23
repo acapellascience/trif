@@ -184,7 +184,7 @@ async function doctor(opts = {}) {
   // install is broken.
   const setupFix = P.isGitCheckout()
     ? 'run: trif setup   (or: node ' + P.CLI_JS + ' setup)'
-    : `run: ${P.INSTALL_COMMAND}   (or: trif setup)`;
+    : `run: ${P.installCommand(platform)}   (or: trif setup)`;
   let installRoot = P.REPO_ROOT; // where the wrapper's files are: its extension/ is what Chrome should load
 
   // Node

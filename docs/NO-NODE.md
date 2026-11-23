@@ -113,11 +113,40 @@ There's no `trif uninstall` today. Add one: removes the native-messaging manifes
 LaunchAgent, `<home>/bin`, `<home>/app`, `<home>/runtime`; keeps the mods (`<home>/sites`) and the private
 folder unless `--all`. (Text people see: docs/NO-NODE-STRINGS.md.)
 
-### Windows
+### Windows (built on branch `windows`, step 12)
 
-Branch `windows` keeps `nodePath` as the one thing the wrappers (`trif-host.bat`, `trif.cmd`) name, so
-the runtime slots in at the same place (`node.exe` from `node-v<ver>-win-x64.zip`). Build and CI-test it
-only once `windows` is on main.
+The same runtime, the same pins file. What's different there:
+
+- **Where**: `%USERPROFILE%\.trif\runtime\node-v<ver>-win-<x64|arm64>\node.exe` (+ LICENSE and the
+  `.trif-runtime.json` record): no `bin\` level, as nodejs.org's .zip has none. From
+  `node-v<ver>-win-<arch>.zip` (pinned in helper/runtime.json, 37.8 MB for x64), unpacked by Windows' own
+  `%SystemRoot%\System32\tar.exe` (bsdtar, which reads .zip; never a tar on PATH: Git's GNU tar can't),
+  taking out only `node.exe` and `LICENSE` by name (the .zip also holds npm's ~2000 files).
+- **Wrappers**: `trif-host.bat`, `trif.cmd` and Git Bash's `trif` (lib/win/launchers.js) name it as they
+  named the system node, through `nodePath`: inside the workspace, so written from the wrapper's own folder,
+  `"%~dp0..\runtime\node-v…\node.exe"`, and the files stay ASCII whatever the profile folder is called.
+- **The fence** (side-panel runs, lib/win/fence.js) grants the run's AppContainer read and execute on that
+  one file, as it did the system node.
+- **Front door**: `irm https://timsrobot.com/install.ps1 | iex` in PowerShell (`& ([scriptblock]::Create((irm
+  …))) --browser edge` passes setup's options). scripts/install.ps1, filled in by release.js
+  `installScriptWindows` like install.sh: Windows PowerShell 5.1 only, picks win-arm64 or win-x64 from the
+  OS's architecture, downloads the .zip and the package, checks each against its SHA-256 (`Save-Checked`,
+  the one place that verifies), runs `node.exe package\helper\cli.js setup --copy` with
+  `TRIF_RUNTIME_ARCHIVE` = the checked .zip. All in one script block run at its end (a cut-off download
+  doesn't parse); it never calls `exit` (under `iex` it would close the window). Not served yet: the site
+  delivery waits on the release's design for install.sh (served from the site, its downloads checked),
+  which install.ps1 follows.
+- **Uninstall**: the browsers' registry keys naming a removed manifest go, `<home>\bin` comes off the user's
+  PATH (win/userpath.js `removeFromUserPath`), running helpers are found by their pipe markers and ended with
+  `taskkill /T`. `bin\` and `runtime\` (with `--all`, the workspace) can't be deleted while this command runs
+  from them (node.exe is in use; cmd.exe re-reads trif.cmd after each command): a hidden, detached Windows
+  PowerShell waits for the process to end and deletes them (`removeLater`).
+- **Upgrade from a Node-based install**: as on macOS: the old updater runs the new setup on the system node;
+  setup fetches the runtime and rewrites the wrappers. Pruning an older runtime that's running (the helper
+  that ran the update) fails on its node.exe and is retried at the next setup.
+- **Tests**: tests/windows-clean-machine.js (CI job `clean-machine` in windows.yml): install.ps1, the
+  helper, the fence, an update, uninstall --all, and the upgrade from a Node-based install, with no node on
+  the PATH TRIF gets. `--safe` (the default off CI) touches nothing outside its scratch folder.
 
 ### Who signs
 

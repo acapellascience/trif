@@ -530,6 +530,42 @@ install) and Windows Firewall's own prompt (no setup rule, no administrator).
   resolving without an address in the record, the firewall prompt and its rule, a phone run and sync through
   it; `docs/WINDOWS.md` step 13.
 
+## No Node on Windows (11-23)
+
+Tim (11-23): "we should build no-node for windows". `no-node` (59b0b02) merged in (`bb072f8`), then main's
+b4febdf (no /install.sh redirect, `88975de`); docs/NO-NODE.md "Windows" has the design, NO-NODE-PROGRESS step 12.
+- **Merge conflicts** (4, both sides kept): `setup.js` setup()'s doc comment; `doctor.js` (Windows' streaming
+  `add`/`step` and no-node's `runtimeCheck` export); `sidepanel.js` imports; README (0.3.1 with the curl door).
+  Auto-merged and checked: setup's `chooseNode` feeds `nodePath` to win/setup.js `writeWrappers` unchanged.
+- **Built**: runtime.js on Windows (System32 tar.exe, node.exe + LICENSE only, in the temp folder with relative
+  names); scripts/install.ps1 (`irm https://timsrobot.com/install.ps1 | iex`) and its delivery as
+  release-0.4.0 does install.sh (site/src/install-windows.js + index.js `installerWindows`; release.js
+  `installScriptWindows`, `checkWindowsPins` against nodejs.org's SHASUMS256.txt, `installModuleWindows`
+  written after `checkPublished`; never a release asset); uninstall on Windows (registry keys, Path, helpers
+  by marker, `removeLater`); the Windows install command in paths.js/extension/doctor/help/update; README's
+  Windows section; drafts 47-55 in WINDOWS-STRINGS.md.
+- **Tests**: tests/windows-clean-machine.js, CI job `clean-machine` (windows.yml): install.ps1 run as a
+  person runs it in a `Zoë 用户 100%` profile with no node on the PATH TRIF gets, help/doctor on the runtime,
+  the helper started by trif-host.bat running on TRIF's node.exe, `trif status`, node.exe inside a run's
+  fence, an update from a signed local feed, `uninstall --all`; then the upgrade from 014da14 on the
+  computer's Node to this build, the computer's Node deleted, doctor and the helper still fine, `uninstall`
+  keeping mods and settings. Unit tests: the .zip (runtime.test.js), uninstall on Windows with stand-ins,
+  install.ps1's template and module, the site route, the pins check. no-node's POSIX tests skipped on
+  Windows by name (`runtime-posix`, `install-sh`, `setup`). Smoke/browser/run keep the job's Node
+  (`TRIF_RUNTIME=off`).
+- **Tim's VM** (Windows 11 ARM, `--safe`: registry under a scratch root, PowerShell stand-in for keys and
+  Path, `--no-link`, no fence; Tim's 0.3.1 checked untouched after): 67 checks, all passed (win-arm64:
+  install.ps1 12.4 s, runtime 82 MB, `trif help` 1.1 s first then ~0.25-0.3 s, update 2.2 s, upgrade 7.8 s,
+  folders gone ~3 s after uninstall ended).
+- **Found and fixed on the way** (VM and CI): Windows' tar.exe gets its arguments in the console's code page
+  (a profile with an accent: "Failed to open …Zo? ??…"); Add-Type can't compile into such a TEMP either, so
+  Credential Manager failed for user names with accents (powershell.js PRELUDE: TEMP's 8.3 name); a Windows
+  PowerShell started from PowerShell 7 loads 7's modules (no Get-FileHash, ConvertFrom-Json): install.ps1
+  uses .NET, powershell.js drops PSModulePath; Node's children die with it and a detached PowerShell never
+  starts (removeLater goes through Start-Process); uninstall's late `require` after `app` was deleted; Node
+  has `navigator.platform` "win32" (the extension reads the browser's userAgent); PowerShell passes
+  `chrome,edge` as an array (quote it); PowerShell's errors as CLIXML ("#< CLIXML" was all doctor said).
+
 ## Next step
 
 **Nothing is left on the checklist: the goal was complete as of round 7, and the item added after it is

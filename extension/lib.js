@@ -38,7 +38,8 @@ export const PANEL = FIREFOX ? 'sidebar' : SAFARI ? 'panel' : 'side panel';
 // path (a terminal open since before setup doesn't have <home>\bin on its PATH yet).
 export const INSTALL_URL = 'https://timsrobot.com/install.sh';
 export const WINDOWS_INSTALL_URL = 'https://timsrobot.com/install.ps1';
-export const WINDOWS = /^Win/i.test(globalThis.navigator?.userAgentData?.platform || globalThis.navigator?.platform || '');
+// (the browser's own words, "Windows" / "Windows NT 10.0"; not navigator.platform, which Node also has: "win32")
+export const WINDOWS = /Windows/.test(globalThis.navigator?.userAgentData?.platform || globalThis.navigator?.userAgent || '');
 export const SETUP_COMMAND = SAFARI ? `curl -fsSL ${INSTALL_URL} | sh -s -- --browser safari` : WINDOWS ? `irm ${WINDOWS_INSTALL_URL} | iex` : `curl -fsSL ${INSTALL_URL} | sh`;
 // Setup again once TRIF is installed (e.g. after installing a coding agent, so the helper finds it): no download.
 export const RESETUP_COMMAND = SAFARI ? '~/.trif/bin/trif setup --browser safari' : WINDOWS ? '~\\.trif\\bin\\trif.cmd setup' : '~/.trif/bin/trif setup';

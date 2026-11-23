@@ -4,7 +4,7 @@
 // server holding a fake Node archive and a fake package whose cli.js records how it was run: never
 // nodejs.org, never a real setup (that's the clean-machine test's job).
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

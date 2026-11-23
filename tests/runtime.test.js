@@ -3,7 +3,7 @@
 // its pinned checksum, unpacking only node into <home>/runtime, pruning old ones. With a fake archive
 // whose "node" is a shell script; the real pins are checked for shape only.
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

@@ -3,7 +3,7 @@
 // browsers and LaunchAgents under a fake home folder, never the real ones), then uninstall: what goes, what
 // stays (mods, private folder; another workspace's manifest), --all and its confirmation, running helpers.
 
-const test = require('node:test');
+const test = require('./on-windows')(__filename);
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');

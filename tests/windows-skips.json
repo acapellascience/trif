@@ -12,7 +12,9 @@
     "release": "the build and release scripts are for the Mac (zip, the Keychain)",
     "permissions": "about a folder made unreadable with chmod, which takes no reading away from its owner on Windows (no POSIX permission bits)",
     "phone-link": "their keyring and dns-sd stand-ins are scripts for the Mac's security and dns-sd (Windows' keyring is Credential Manager, its announcer trif-dnssd.exe). What Windows has of it: tests/phone-link-windows.test.js (the announcer and its program, the firewall line) and windows.yml's announcer step",
-    "modes": "about file modes (600, 700), which do nothing on Windows: the profile folder's access list keeps other users out (docs/WINDOWS.md)"
+    "modes": "about file modes (600, 700), which do nothing on Windows: the profile folder's access list keeps other users out (docs/WINDOWS.md)",
+    "runtime-posix": "about TRIF's own Node on macOS and Linux: fake .tar.gz archives whose node is a shell script (Windows' .zip: tests/runtime.test.js \"ensureRuntime on Windows: …\" elsewhere, and tests/windows-clean-machine.js for real)",
+    "install-sh": "install.sh is for macOS and Linux and is checked with /bin/sh (Windows' install.ps1: tests/install-script.test.js \"installScriptWindows: …\", tests/windows-clean-machine.js)"
   },
   "files": {
     "agent-keys.test.js": {
@@ -171,6 +173,19 @@
     },
     "phone-sync.test.js": {
       "the base: per phone, private, and nothing in it taken on trust": "modes"
+    },
+    "install-script.test.js": {
+      "installScript: every value written in, unix archives only, valid sh; refuses values that can't go in as is": "install-sh"
+    },
+    "runtime.test.js": {
+      "ensureRuntime downloads once, keeps only node and its licence, and records what it came from": "runtime-posix",
+      "ensureRuntime with archiveFile (install.sh's download): used when it's a pinned file, still checked; otherwise downloaded": "runtime-posix"
+    },
+    "uninstall.test.js": {
+      "uninstall: removes manifests, the Safari agent, the CLI link, bin, app and runtime; keeps mods, private folder and another workspace's manifest": "setup",
+      "uninstall --all: needs --yes without a terminal; then removes keys, the private folder, mailboxes and the workspace": "setup",
+      "uninstall --all keeps a mods folder set outside the workspace": "setup",
+      "uninstall stops the running helpers, and refuses a folder that isn't a workspace": "setup"
     }
   }
 }

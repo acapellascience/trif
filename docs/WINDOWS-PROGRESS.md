@@ -445,6 +445,42 @@ and goes (`a61f639`, `trif not-broken`), the What's new / Not now fixes, the kin
 - `mod-visibility` was merged into `windows` meanwhile by its own session (`d8560db`); the commits above
   went on top of it.
 
+## trif doctor streams, and the merge of phone-link (11-23)
+
+Tim (11-23, his Windows VM): `trif doctor` looked hung, since `claude auth status --json` takes seconds there
+and doctor printed only at the end.
+- **Doctor** (`476298d`, every OS): `doctor()` takes `onCheck` (each check as it's added) and `onProgress`
+  (a slow step's "checking …" text, then null: the helper's ping, Windows' registry keys, looking for agents,
+  each agent's saved key and login, the open model, the saved API keys, Safari's bridge). The CLI prints each
+  check's lines as they come, the same text as before line for line (`--json` unchanged), and in a terminal
+  the step on stderr, wiped when it's done. Test in `tests/agents.test.js` (a stand-in whose login takes 1.5 s).
+- **phone-link merged** (`94e7851`, from `476298d`; phone-link at `b1989d5`, 23 commits): dictation, what's
+  in view at Send (screenshot, outline, selection), screenshots without access to every site, the `load`
+  power, the helper keeping the workspace guides in step (`guides.js`; doctor's "workspace guides" line), mod
+  health judged only where a mod applied, the phone view's iPhone 17 size. Conflicts in 14 files, each kept
+  both sides: `background.js` (`withInView`), `sidepanel.css`, `cli.js`, `runs.js`, `stage.js`,
+  `tests/mod-visibility.test.js` (mod-visibility, which both had: windows' `writeOptionFile` comment,
+  `joinInside`, the `on-windows` wrapper), `host.js` (`HELPER_DIR` beside `pipes`), `doctor.js`
+  (`staleGuides` beside `panelRunsOff`), and the guides again: windows has the lean ones, phone-link doesn't,
+  so phone-link's additions are written in the lean style (`load`'s line and the feed example
+  `tests/load-power-browser.test.js` reads, the CSP line, "What the user is looking at", redirect-only
+  domains, the screenshot row's click wait); `skill/trif` rebuilt.
+- One test fixed for Windows (`0012fe3`): `tests/inview.test.js` checked the in-view picture's mode 600, which
+  is 666 on windows-latest; checked off Windows only. `helper/lib/guides.js` writes through a temporary
+  file and a rename; on Windows a guide an agent has open can refuse the rename, which is caught and logged.
+- **Local, macOS, Node 22**: 1198 tests, 1165 pass, 32 skipped, 1 fail (`tests/phone-sync-e2e.test.js`, its
+  1.1 s "one sync a second" margin under the whole suite's load; the file alone passes twice).
+- **CI at `0012fe3`**: windows [45113662296](https://github.com/acapellascience/trif/actions/runs/45113662296)
+  green (Node 18, Node 22 with the Edge step, `still-skipped`), windows-fence
+  [45113662213](https://github.com/acapellascience/trif/actions/runs/45113662213) green. The macOS tests
+  [45113662238](https://github.com/acapellascience/trif/actions/runs/45113662238) red, not the merge's: two
+  failures phone-link has on its own, `tests/skill-browser.test.js` try-style ("topLevelList is not
+  defined": `rules.js selectorsOf` now calls a helper the skill's page script doesn't carry; red on phone-link
+  since `347e425`, [44951805489](https://github.com/acapellascience/trif/actions/runs/44951805489)) and
+  `tests/phone-browser.test.js` (expects a 750 px page area; `6eebf38` made the phone an iPhone 17, 780);
+  `inview-browser` and `phone-window-browser` failed once on the first attempt there and passed on its rerun
+  (and at `94e7851`): flakes.
+
 ## Next step
 
 **Nothing is left on the checklist: the goal was complete as of round 7, and the item added after it is

@@ -1499,6 +1499,68 @@ else if (a === 'login') { console.log('Not logged in'); process.exitCode = 1; }`
   assert.match(r.stdout, /^warn {2}Codex isn't logged in, so the side panel can't use it$/m);
 });
 
+// In Tim's Windows VM `trif doctor` looked hung: `claude auth status` takes seconds there, and doctor
+// printed nothing until the end.
+test('doctor: each check is printed as it\'s made, and a slow step is said before it starts', async () => {
+  const { spawn } = require('child_process');
+  const { testEnv, CLI_JS } = require('./fake-extension');
+  const { formatDoctor } = require('../helper/lib/doctor');
+  const root = tempDir();
+  const ws = path.join(root, 'ws');
+  const native = path.join(root, 'native');
+  const fakeBin = path.join(root, 'fakebin');
+  fs.mkdirSync(fakeBin);
+  // A Claude Code whose login check takes 1.5 s.
+  fs.writeFileSync(path.join(fakeBin, 'claude'), `#!${process.execPath}
+const a = process.argv[2];
+if (a === '--version') console.log('9.9.9 (Claude Code)');
+else if (a === 'auth') setTimeout(() => console.log('{"loggedIn": true, "authMethod": "claude.ai"}'), 1500);
+`);
+  fs.chmodSync(path.join(fakeBin, 'claude'), 0o755);
+  cmdFor(fakeBin, 'claude');
+  const termPath = [fakeBin, ...SYSTEM_PATH].join(path.delimiter);
+  await runCli(['setup', '--native-dir', native, '--no-link', '--no-examples'], { home: ws, env: { PATH: termPath } });
+
+  // The CLI: the first lines are out long before the slow check ends.
+  const child = spawn(process.execPath, [CLI_JS, 'doctor', '--native-dir', native], { env: testEnv(ws), stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  let first = null;
+  child.stdout.on('data', (d) => { if (first === null) first = Date.now(); stdout += d; });
+  child.stderr.on('data', (d) => { stderr += d; });
+  const end = await new Promise((resolve) => child.on('close', () => resolve(Date.now())));
+  assert.match(stdout, /^ok {4}Node v/);
+  assert.match(stdout, /^ok {4}Claude Code is logged in \(claude\.ai\)$/m);
+  assert.ok(end - first >= 1000, `the first line came ${end - first} ms before the end`);
+  assert.equal(stderr, '', 'no progress lines when stderr isn\'t a terminal');
+  // The same text as before, line for line.
+  const j = await runCli(['doctor', '--json', '--native-dir', native], { home: ws });
+  assert.equal(stdout, formatDoctor(JSON.parse(j.stdout)) + '\n');
+
+  // The module: each check as it's added, in order, and the slow step said before it and done after.
+  const events = [];
+  const probe = `const { doctor } = require(${JSON.stringify(path.join(__dirname, '..', 'helper', 'lib', 'doctor.js'))});
+const ev = [];
+doctor({ home: process.env.TRIF_HOME, nativeDir: ${JSON.stringify(native)},
+  onCheck: (c) => ev.push(['check', c.title]), onProgress: (t) => ev.push(['progress', t]) })
+  .then((r) => console.log(JSON.stringify({ ev, checks: r.checks.map((c) => c.title) })));`;
+  const r = await new Promise((resolve) => {
+    require('child_process').execFile(process.execPath, ['-e', probe], { env: testEnv(ws) }, (err, out) => resolve({ err, out }));
+  });
+  assert.ifError(r.err);
+  const { ev, checks } = JSON.parse(r.out);
+  events.push(...ev);
+  assert.deepEqual(events.filter((e) => e[0] === 'check').map((e) => e[1]), checks);
+  const said = events.findIndex((e) => e[0] === 'progress' && e[1] === "checking Claude Code's login (claude auth status --json)...");
+  assert.ok(said > 0, JSON.stringify(events));
+  assert.deepEqual(events[said + 1], ['progress', null]);
+  const loggedIn = events.findIndex((e) => e[0] === 'check' && /^Claude Code is logged in/.test(e[1]));
+  assert.ok(loggedIn > said);
+  assert.ok(events.slice(0, said).some((e) => e[0] === 'check' && /^Node v/.test(e[1])), 'the lines before it came first');
+  // Every progress line is followed by its end before anything else is said.
+  events.forEach((e, i) => { if (e[0] === 'progress' && e[1]) assert.deepEqual(events[i + 1], ['progress', null], JSON.stringify(events.slice(i, i + 2))); });
+});
+
 test('doctor: real plurals', () => {
   const { formatDoctor } = require('../helper/lib/doctor');
   const fail = { status: 'fail', title: 'x' };

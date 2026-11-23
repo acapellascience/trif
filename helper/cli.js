@@ -344,9 +344,30 @@ const handlers = {
   },
 
   async doctor(ctx) {
-    const { doctor, formatDoctor } = require('./lib/doctor');
-    const r = await doctor({ home: ctx.opts['--home'], nativeDir: ctx.opts['--native-dir'] });
-    if (ctx.json) printJson(r); else out(formatDoctor(r));
+    const { doctor, formatCheck, formatSummary } = require('./lib/doctor');
+    const opts = { home: ctx.opts['--home'], nativeDir: ctx.opts['--native-dir'] };
+    if (ctx.json) {
+      const r = await doctor(opts);
+      printJson(r);
+      if (!r.ok) process.exitCode = 1;
+      return;
+    }
+    // Each check's lines as it's made, and in a terminal what a slow step is doing meanwhile (on stderr,
+    // wiped when it's done), so a check that takes seconds (an agent's login) doesn't look like a hang.
+    const tty = !!process.stderr.isTTY;
+    let shown = false;
+    const r = await doctor({
+      ...opts,
+      onCheck: (c) => out(formatCheck(c)),
+      onProgress: (text) => {
+        if (!tty) return;
+        if (shown) process.stderr.write('\r\x1b[K');
+        shown = !!text;
+        if (text) process.stderr.write(text.slice(0, Math.max(10, (process.stderr.columns || 80) - 1)));
+      },
+    });
+    out('');
+    out(formatSummary(r));
     if (!r.ok) process.exitCode = 1;
   },
 

@@ -131,7 +131,13 @@ function tail(file, n) {
   } catch { return []; }
 }
 
-/** opts: { home, nativeDir, platform, homedir, env, regOpts } -> Promise<{ ok, checks: [{status, title, detail?, fix?}] }> */
+/**
+ * opts: { home, nativeDir, platform, homedir, env, regOpts, onCheck, onProgress }
+ *   -> Promise<{ ok, checks: [{status, title, detail?, fix?}] }>
+ * onCheck(check) hears each check as it's made, so the CLI can print it then; onProgress(text) hears what
+ * a slow step is about to do (an agent's login, the keyring, the helper), and onProgress(null) when it's
+ * done. Some take seconds (`claude auth status`, PowerShell on Windows), and without them doctor looked hung.
+ */
 async function doctor(opts = {}) {
   const platform = opts.platform || process.platform;
   const win = isWindows(platform);
@@ -139,7 +145,19 @@ async function doctor(opts = {}) {
   // (Windows has no executable bit: a .bat or .cmd that's there can run.)
   const runnable = (p) => (win ? (() => { try { return fs.statSync(p).isFile(); } catch { return false; } })() : isExecutable(p));
   const checks = [];
-  const add = (status, title, fix, detail) => checks.push({ status, title, fix, detail });
+  const add = (status, title, fix, detail) => {
+    const c = { status, title, fix, detail };
+    checks.push(c);
+    if (opts.onCheck) opts.onCheck(c);
+  };
+  // A slow step: said first, and a turn of the event loop so the lines before it are out (the steps spawn
+  // synchronously and block it).
+  const step = async (text, fn) => {
+    if (!opts.onProgress) return fn();
+    opts.onProgress(text);
+    await new Promise((r) => setImmediate(r));
+    try { return await fn(); } finally { opts.onProgress(null); }
+  };
   // From a git checkout, point at its CLI; otherwise npx fetches TRIF again if the install is broken.
   const setupFix = P.isGitCheckout()
     ? 'run: trif setup   (or: node ' + P.CLI_JS + ' setup)'
@@ -298,7 +316,7 @@ async function doctor(opts = {}) {
       }
       // Windows: the browser finds the manifest through its registry key (win/registry.js).
       if (win && t.regKeys) {
-        const reg = require('./win/setup').checkNativeHost(t, file, opts.regOpts);
+        const reg = await step(`checking ${t.label}'s registry key...`, () => require('./win/setup').checkNativeHost(t, file, opts.regOpts));
         if (reg) problems.push(reg);
       }
       if (problems.length) add('fail', `${t.label}: native host manifest ${file}: ${problems.join('; ')}`, fix);
@@ -314,7 +332,7 @@ async function doctor(opts = {}) {
       const bridgeJs = args.find((a) => a.endsWith('safari-bridge.js'));
       const fix = `${setupFix} --browser safari`;
       if (!bridgeJs || !fs.existsSync(bridgeJs)) add('fail', `Safari: the bridge's login item (${plist}) runs ${bridgeJs || 'nothing'}, which doesn't exist`, fix);
-      else if (await portOpen(SAFARI_PORT)) add('ok', `Safari: the bridge is running (127.0.0.1:${SAFARI_PORT})`);
+      else if (await step("checking Safari's bridge...", () => portOpen(SAFARI_PORT))) add('ok', `Safari: the bridge is running (127.0.0.1:${SAFARI_PORT})`);
       else add('fail', `Safari: the bridge isn't running (nothing on 127.0.0.1:${SAFARI_PORT})`, `${fix}   (errors: ${ws.safariBridgeErr})`);
       if (!fs.existsSync(ws.safariToken)) add('fail', `Safari: the bridge's key ${ws.safariToken} is missing, so Safari can't connect`, fix);
     }
@@ -341,21 +359,21 @@ async function doctor(opts = {}) {
   try {
     // Inside an agent run, the helper that started it (see lib/helpers.js).
     const sock = envVar('SOCK') && !opts.home ? envVar('SOCK') : ws.sock;
-    info = await request(sock, 'ping', {}, 3000);
+    info = await step('checking the helper...', () => request(sock, 'ping', {}, 3000));
   } catch (e) {
     // (Windows: the helper is found through <home>\helper.pipe, win/pipes.js; a pipe isn't a file.)
     const pipes = require('./win/pipes');
     const marker = pipes.primaryMarker(ws.home);
     const stale = pipes.usesPipes({ platform }) ? fs.existsSync(marker) : fs.existsSync(ws.sock);
     const fixLines = helperDownFix({ ...setUp, extensionDir: path.join(installRoot, 'extension') });
+    const lines = tail(ws.log, 8);
     if (!wrapperOk || !manifestsOk) fixLines.unshift('first fix the failures above, then:');
     add('fail',
       pipes.usesPipes({ platform })
         ? (stale ? `helper isn't running (${marker} names a pipe nothing is listening on)` : `helper isn't running (no ${marker})`)
         : stale ? `helper isn't running (socket ${ws.sock} exists but nothing is listening)` : `helper isn't running (no socket at ${ws.sock})`,
-      fixLines.join('\n'));
-    const lines = tail(ws.log, 8);
-    if (lines.length) checks[checks.length - 1].detail = `last lines of ${ws.log}:\n` + lines.join('\n');
+      fixLines.join('\n'),
+      lines.length ? `last lines of ${ws.log}:\n` + lines.join('\n') : undefined);
   }
   if (info) {
     add('ok', `helper running (pid ${info.pid}, v${info.helper})`);
@@ -372,7 +390,7 @@ async function doctor(opts = {}) {
       add('fail', `extension couldn't register ${e.id}: ${e.error}`, 'fix the mod\'s @match/@exclude patterns (see AGENTS.md)');
     }
     // Each connected browser has its own helper; `trif` uses this one unless told --browser.
-    const others = envVar('RUN_TOKEN') ? [] : (await listHelpers(ws.home)).filter((h) => h.pid !== info.pid);
+    const others = envVar('RUN_TOKEN') ? [] : (await step('checking the other browsers\' helpers...', () => listHelpers(ws.home))).filter((h) => h.pid !== info.pid);
     if (others.length) add('ok', `also connected: ${others.map(describeHelper).join(', ')}`, 'trif commands go to the default browser; add --browser <name|pid> to use another');
   }
 
@@ -413,7 +431,7 @@ async function doctor(opts = {}) {
     else add('warn', 'Windows\' C# compiler (csc.exe, part of .NET Framework 4) isn\'t on this computer, so chats from the panel can\'t start: TRIF builds its fence for them with it', 'turn on ".NET Framework 4.8 Advanced Services" in "Turn Windows features on or off"');
   }
   const agents = require('./agents');
-  const listed = agents.listAgents(ws);
+  const listed = await step('looking for coding agents...', () => agents.listAgents(ws));
   const env = agents.agentEnv(ws);
   const termDirs = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
   const { findExecutable } = require('./agents/util');
@@ -425,8 +443,10 @@ async function doctor(opts = {}) {
   for (const a of listed.agents) {
     const adapter = agents.getAdapter(a.id);
     if (!a.available || adapter.doctorChecks || !adapter.loginStatus) continue;
-    if (keys.AGENT_KEYS[a.id] && (await keys.hasAgentKey(a.id, { config: ws.config })).stored) continue;
-    logins.set(a.id, adapter.loginStatus({ path: a.path, env, cwd: fs.existsSync(ws.home) ? ws.home : undefined }));
+    if (keys.AGENT_KEYS[a.id] && (await step(`checking for a saved ${a.name} API key...`, () => keys.hasAgentKey(a.id, { config: ws.config }))).stored) continue;
+    const args = (adapter.loginStatusArgs || []).join(' ');
+    logins.set(a.id, await step(`checking ${a.name}'s login${args ? ` (${adapter.binary} ${args})` : ''}...`,
+      () => adapter.loginStatus({ path: a.path, env, cwd: fs.existsSync(ws.home) ? ws.home : undefined })));
   }
   const def = listed.agents.find((a) => a.id === listed.default);
   const defaultReady = !!def?.available && logins.get(def.id)?.loggedIn !== false;
@@ -454,9 +474,9 @@ async function doctor(opts = {}) {
   // Open models through Codex (experimental, agents/codex-oss.js): set up in config.json `openModel`?
   const oss = listed.agents.find((a) => a.id === 'codex-oss');
   if (oss && !oss.available && ws.config.openModel) add('warn', 'Open model: set up, but it runs through Codex, which isn\'t available', agents.getAdapter('codex-oss').missing);
-  else if (oss && oss.available) for (const c of await agents.getAdapter('codex-oss').doctorChecks(ws, { codexVersion: oss.version })) add(c.status, c.title, c.fix);
+  else if (oss && oss.available) for (const c of await step('checking the open model...', () => agents.getAdapter('codex-oss').doctorChecks(ws, { codexVersion: oss.version }))) add(c.status, c.title, c.fix);
   // API keys for plain Claude Code / Codex runs: in the keyring, or still in config.json (agentkeys.js).
-  for (const c of await require('./agentkeys').doctorChecks(ws)) add(c.status, c.title, c.fix);
+  for (const c of await step('checking saved API keys...', () => require('./agentkeys').doctorChecks(ws))) add(c.status, c.title, c.fix);
   // API keys exported in the shell profile: readable by every same-user process (sysctl KERN_PROCARGS2),
   // an agent's sandboxed commands included. Only their presence is checked.
   const keyVars = agents.getAdapter('codex-oss').keyVarsCheck(process.env);
@@ -465,24 +485,29 @@ async function doctor(opts = {}) {
   return { ok: !checks.some((c) => c.status === 'fail'), checks };
 }
 
-function formatDoctor({ ok, checks }) {
+// One check's lines (its status and title, then its fix and detail, indented).
+function formatCheck(c) {
   const tag = { ok: 'ok  ', warn: 'warn', fail: 'FAIL', info: '-   ' };
-  const out = [];
-  for (const c of checks) {
-    out.push(`${tag[c.status]}  ${c.title}`);
-    if (c.fix) {
-      const [first, ...rest] = c.fix.split('\n');
-      out.push(`      fix: ${first}`);
-      for (const r of rest) out.push(`           ${r}`);
-    }
-    if (c.detail) for (const d of c.detail.split('\n')) out.push(`      | ${d}`);
+  const out = [`${tag[c.status]}  ${c.title}`];
+  if (c.fix) {
+    const [first, ...rest] = c.fix.split('\n');
+    out.push(`      fix: ${first}`);
+    for (const r of rest) out.push(`           ${r}`);
   }
-  out.push('');
-  const fails = checks.filter((c) => c.status === 'fail').length;
-  const warns = checks.filter((c) => c.status === 'warn').length;
-  out.push(!ok ? `${plural(fails, 'problem')} found. Fix them in order (top first) and run trif doctor again.`
-    : warns ? `No problems, but ${warns} warning${warns === 1 ? '' : 's'} above.` : 'All good.');
+  if (c.detail) for (const d of c.detail.split('\n')) out.push(`      | ${d}`);
   return out.join('\n');
 }
 
-module.exports = { doctor, formatDoctor, parseWrapper, checkWrapperScript, helperDownFix };
+// The last line, after a blank one.
+function formatSummary({ ok, checks }) {
+  const fails = checks.filter((c) => c.status === 'fail').length;
+  const warns = checks.filter((c) => c.status === 'warn').length;
+  return !ok ? `${plural(fails, 'problem')} found. Fix them in order (top first) and run trif doctor again.`
+    : warns ? `No problems, but ${warns} warning${warns === 1 ? '' : 's'} above.` : 'All good.';
+}
+
+function formatDoctor(r) {
+  return [...r.checks.map(formatCheck), '', formatSummary(r)].join('\n');
+}
+
+module.exports = { doctor, formatDoctor, formatCheck, formatSummary, parseWrapper, checkWrapperScript, helperDownFix };

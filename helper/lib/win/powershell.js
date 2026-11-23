@@ -48,9 +48,15 @@ function encode(script) {
   return Buffer.from(script, 'utf16le').toString('base64');
 }
 
+// Before every script: a temporary folder whose path has letters outside ASCII (a profile like C:\Users\Zoë)
+// is swapped for its short 8.3 name. Add-Type compiles C# there, and the compiler can't write to such a path
+// ("Could not write to output file … The directory name is invalid", seen in a Windows 11 VM), so Credential
+// Manager calls failed for anyone whose user name has an accent. (No 8.3 names on the volume: left as is.)
+const PRELUDE = "if ($env:TEMP -match '[^\\x20-\\x7e]') { try { $short = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($env:TEMP).ShortPath; if ($short -notmatch '[^\\x20-\\x7e]') { $env:TEMP = $short; $env:TMP = $short } } catch { } }\n";
+
 /** The arguments for running `script`: no profile, no prompts, no logo. */
 function psArgs(script) {
-  return ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encode(script)];
+  return ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encode(PRELUDE + script)];
 }
 
 /**

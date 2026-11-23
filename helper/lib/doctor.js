@@ -217,6 +217,7 @@ async function doctor(opts = {}) {
 
   // Host wrapper
   let wrapperOk = false;
+  let helperNode = null; // (the node the helper runs with: Windows Firewall's rules for the phone link name it)
   if (fenced) {
     wrapperOk = true;
   } else if (!fs.existsSync(ws.hostWrapper)) {
@@ -239,6 +240,7 @@ async function doctor(opts = {}) {
         add('fail', `host wrapper's node ${w.node} is ${v || 'not runnable'}; TRIF needs Node 18+`, 'install a current Node, then ' + setupFix);
       } else {
         wrapperOk = true;
+        helperNode = w.node;
         installRoot = path.resolve(w.script, '..', '..');
         const copy = isInside(path.resolve(w.script), ws.appDir);
         add('ok', `host wrapper ${ws.hostWrapper} -> ${w.script} (${copy ? 'installed copy' : 'linked'}, node ${v})`);
@@ -429,6 +431,19 @@ async function doctor(opts = {}) {
   if (feed && feed.problem) {
     add('warn', `Tim's mods: the last check for their new versions (the mods feed${feed.checkedAt ? `, ${new Date(feed.checkedAt).toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''}) failed: ${feed.problem}`,
       "nothing changed because of it; it's checked again with TRIF's update check (trif update checks now)");
+  }
+
+  // The phone link on Windows, when it's on: can a phone get through Windows Firewall? (win/firewall.js; TRIF
+  // adds no rule, Windows asks the first time the link listens.)
+  if (win && !inRun) {
+    let link = null;
+    try { link = new (require('./phonelink/store').Store)(ws.home, { env: opts.env || process.env, name: 'doctor' }).read(); } catch { /* none */ }
+    if (link && link.on) {
+      const fw = require('./win/firewall');
+      const v = await step('checking Windows Firewall for the phone link...', () => fw.check(helperNode || process.execPath, { env: opts.env || process.env }));
+      const c = fw.doctorCheck(v);
+      add(c.status, c.title, c.fix);
+    }
   }
 
   // Coding agents for the side panel (optional: mods work without them). Inside a run they live outside

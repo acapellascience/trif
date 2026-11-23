@@ -6,6 +6,7 @@
 //   standIn.bin        the program: writes its pid and arguments to calls.log beside it, then waits to be killed
 //   standIn.calls()    → [{pid, argv}]
 //   standIn.die(true)  the next ones leave at once (false: they wait again)
+//   makeStandIn(dir, {windows: true}): Windows' trif-dnssd.exe instead, ended by closing its input
 
 const fs = require('fs');
 const path = require('path');
@@ -19,10 +20,22 @@ if (fs.existsSync(path.join(__dirname, 'die'))) process.exit(1);
 setInterval(() => {}, 1000);
 `;
 
-function makeStandIn(dir) {
+// (Windows' trif-dnssd.exe: a .js the announcer runs with Node; it holds the record until its standard input
+// closes, then says so in calls.log ({pid, ended: 'stdin'}) and exits)
+const STANDIN_WINDOWS = `'use strict';
+const fs = require('fs');
+const path = require('path');
+const log = (o) => fs.appendFileSync(path.join(__dirname, 'calls.log'), JSON.stringify(o) + '\\n');
+log({ pid: process.pid, argv: process.argv.slice(2) });
+if (fs.existsSync(path.join(__dirname, 'die'))) process.exit(3);
+process.stdin.resume();
+process.stdin.on('end', () => { log({ pid: process.pid, ended: 'stdin' }); process.exit(0); });
+`;
+
+function makeStandIn(dir, { windows = false } = {}) {
   fs.mkdirSync(dir, { recursive: true });
-  const bin = path.join(dir, 'dns-sd');
-  fs.writeFileSync(bin, STANDIN);
+  const bin = path.join(dir, windows ? 'trif-dnssd.js' : 'dns-sd');
+  fs.writeFileSync(bin, windows ? STANDIN_WINDOWS : STANDIN);
   fs.chmodSync(bin, 0o755);
   const calls = () => {
     let text = '';

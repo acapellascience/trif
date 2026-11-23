@@ -1,8 +1,9 @@
 # Windows: strings awaiting Tim
 
 Every text a person can read that the `windows` branch adds or changes, with where it shows, and after
-them the existing texts that read wrong on Windows and were left alone. None is approved. (The extension
-itself is unchanged on this branch: every text here comes from the helper, setup, the CLI or the README.) Text only
+them the existing texts that read wrong on Windows and were left alone. None is approved. (Every text here
+comes from the helper, setup, the CLI or the README, but for the phone link's firewall note, 40, in the
+extension.) Text only
 coding agents read (guides, the fence prototype's messages, test output) isn't here.
 
 `<…>` is filled in when the text is shown.
@@ -72,6 +73,24 @@ use for a refusal (`helper/lib/win/fenced-files.js`). Not listed here.
 | 26 | a new section, `### Windows`: "TRIF's extension, helper and `trif` command work on Windows 10 and 11, in Chrome, Edge, Brave and Firefox: run `npx timsrobot setup` in a terminal (PowerShell or Command Prompt), then follow its next steps (the extension folder is `%USERPROFILE%\.trif\app\extension`). Setup adds `~\.trif\bin` to your PATH: open a new terminal afterwards to use `trif`. Chats from the side panel work with Claude Code and Codex. On Windows TRIF gives them no shell: they change mods with file tools and run TRIF's commands through a tool of TRIF's, inside a fence TRIF builds on your computer the first time (with the C# compiler that comes with Windows). Log in to your coding agent in a terminal first (`claude`, then `/login`; or `codex login`): logging in from the panel isn't there on Windows yet. Open models can't be used from the panel on Windows yet; in a terminal in `~\.trif` they work as anywhere. API keys you save with `trif agent key` go to Windows Credential Manager." | after Safari's section. (Changed in round 4, when Codex's chats were switched on: the three sentences from "Chats from the side panel" to "work as anywhere"; before, they were about Claude Code alone and said Codex couldn't be used from the panel.) |
 | 27 | **changed**: `(on Linux, ~/.local/state/trif; on Windows, %LOCALAPPDATA%\TRIF, and the registry keys named com.webmods.helper under HKEY_CURRENT_USER\Software\…\NativeMessagingHosts);` | Uninstalling |
 
+## New: the phone link on Windows (11-23)
+
+The phone link and phone sync are on on Windows, as on the Mac: Settings' **Connect a phone**, the phone
+menu's **Sync with phone**. TRIF adds no firewall rule and asks for no administrator: Windows Defender
+Firewall's own "Allow access?" for Node.js JavaScript Runtime comes up the first time the link listens (a
+phone being connected, or one connected already). The announcer is TRIF's trif-dnssd.exe (Windows' DNS-SD
+API), built like the fence.
+
+| # | Text | Where |
+|---|---|---|
+| 40 | `Windows may ask whether Node.js can use the network: allow it on private networks, so your phone can reach this computer.` | Settings, under Connect a phone, while the code is on screen, on Windows only (`extension/phonelink.js` `TEXT.firewall`; also in docs/PHONE-LINK-STRINGS.md) |
+| 41 | `phone link: Windows Firewall lets a phone reach this computer (Node.js is allowed on <private> networks)` | `trif doctor` on Windows while the link is on, an ok line (`helper/lib/win/firewall.js`) |
+| 42 | `phone link: Windows Firewall blocks Node.js on this <private> network, so a phone can't reach this computer` — fix: `in Windows Security, Firewall & network protection, "Allow an app through firewall": tick Node.js JavaScript Runtime for Private (and make your home Wi-Fi a private network in Settings, Network & internet)` | the same, a warning (a Block rule: the prompt was cancelled, or Block chosen) |
+| 43 | `phone link: Windows Firewall lets Node.js in on other networks, not this <public> one, so a phone can't reach this computer here` — fix: as 42 | the same, a warning |
+| 44 | `phone link: Windows will ask whether Node.js can use the network the first time you connect a phone: allow it on private networks` | the same, an information line (no rule yet) |
+| 45 | `phone link: this computer isn't on a network just now` · `phone link: couldn't read Windows Firewall's rules for Node.js (<why>)` | the same, information lines |
+| 46 | `Windows' C# compiler (csc.exe, part of .NET Framework 4) isn't on this computer, so TRIF can't build its announcer` · `couldn't build TRIF's announcer: <why>` | the helper's log only (`phone link: can't announce, …`); the panel shows the existing `Your phone may not find this computer just now.` |
+
 ## Behaviour a person sees, without new words
 
 - **"Open in editor"** (the code card's menu, `trif reveal --editor`) opens the mod in **Notepad** on
@@ -94,4 +113,5 @@ use for a refusal (`helper/lib/win/fenced-files.js`). Not listed here.
 | `No coding agent found: install Claude Code (https://claude.com/claude-code) or Codex, then run setup again.` | setup | fine on Windows; listed because it's the line a Windows user is likeliest to see first |
 | `open chrome://extensions …`, `Turn on "Allow User Scripts": click "Open TRIF’s Chrome settings" on the TRIF tab Chrome opens, or "Details" on TRIF in chrome://extensions.`, doctor's `fix: open chrome://extensions/?id=…`, `reload TRIF on chrome://extensions` | setup's next steps, doctor, the helper's errors (`helper/lib/setup.js`, `doctor.js`, `host.js`) | in Edge it's `edge://extensions`, and Developer mode is in the left-hand column, not "top right". Edge takes `chrome://` addresses and opens its own page, so the steps still work; they just name Chrome |
 | `Waiting for Chrome: drag the folder onto chrome://extensions…` | setup's wait, after `--browser chrome,edge` (`helper/lib/setupwait.js` names the first Chromium browser set up) | someone using Edge reads "Chrome"; the wait itself sees Edge's hello all the same |
+| `This computer’s name is too long for the code. Shorten it in System Settings, then try again.` | Settings, Connect a phone, when the computer's name is too long (`extension/phonelink.js` `tooLong`) | System Settings is the Mac's; on Windows it's Settings, System, About, Rename this PC |
 | `beta/chrome/START HERE.txt`, `beta/firefox/START HERE.txt` | the beta zips | written for Terminal on a Mac ("Open Terminal and paste these two lines") |

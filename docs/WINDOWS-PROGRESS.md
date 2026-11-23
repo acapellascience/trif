@@ -481,6 +481,41 @@ and doctor printed only at the end.
   `inview-browser` and `phone-window-browser` failed once on the first attempt there and passed on its rerun
   (and at `94e7851`): flakes.
 
+## The phone link on Windows (11-23)
+
+Tim (11-23): turn the phone link and phone sync on on Windows, with Windows' own DNS-SD API (no Bonjour
+install) and Windows Firewall's own prompt (no setup rule, no administrator).
+- **The switch-off is gone**: `helper/lib/phonelink/link.js`, `extension/phonelink.js` and
+  `extension/sidepanel.js` are phone-link's again (no `unsupported: 'windows'`); Settings has Connect a phone
+  and the phone menu Sync with phone, as on the Mac. `phone.status` says `system: 'windows'` there, for one new
+  note under the code (draft 40: Windows may ask about Node.js).
+- **The announcer**: `helper/lib/win/dnssd.cs` → `trif-dnssd-<hash>.exe` in `<home>\bin`, built once per
+  version by Windows' csc.exe as the fence is (`helper/lib/win/dnssd.js`). Chosen over PowerShell with
+  Add-Type because the record lives as long as a process holds it: a PowerShell would compile its C# again for
+  every record (seconds, on each listener change), while the fence's way is already on the branch and starts in
+  a moment. It takes the Mac's `dns-sd -R <name> _trif._tcp local <port> v=1 id=<id>` arguments (bonjour.js
+  `recordArgs`, unchanged) and calls `DnsServiceConstructInstance` (host `<COMPUTERNAME>.local`, no address:
+  Windows answers for its own name) and `DnsServiceRegister`; it holds the record until its standard input
+  closes, then `DnsServiceDeRegister`. bonjour.js on Windows ends it by closing its input (a kill would leave
+  the record to time out), and at the helper's exit its input closes with the helper. A failed registration
+  exits 3, which the announcer's pauses and retries already handle. `-B <type> <domain> <seconds>` browses
+  (CI, and a check by hand in the VM).
+- **The firewall**: nothing listens at the helper's start; server.js binds only when the store says so (the
+  link on, and a phone paired or the code on screen), so Windows' "Allow access?" comes up at Connect a phone.
+  `trif doctor`, while the link is on: Windows Firewall's inbound rules for the helper's node.exe and the
+  current networks' profiles (`helper/lib/win/firewall.js`, PowerShell's NetSecurity module, read only, a few
+  seconds behind a "checking …" line): allowed here / blocked here / allowed on other networks only / not asked
+  yet (drafts 41–45).
+- **Tests**: `tests/phone-link-windows.test.js` on every system (the announcer on `win32` with a `.js` stand-in:
+  the Mac's arguments, ended by closing its input, retried when it exits; no csc.exe → `missing`; the program's
+  build with a stand-in compiler; the firewall's verdicts and doctor's lines; the PowerShell read; doctor's
+  line end to end on Windows only). `tests/windows-dnssd.js` on windows-latest (windows.yml, information
+  first): the real program built, registered, found by browsing, taken back. The older phone-link tests stay
+  skipped on Windows (reason `phone-link`, reworded: their keyring and dns-sd stand-ins are the Mac's scripts).
+- **Only a real pairing shows**: the iPhone finding the record over Wi-Fi (Parallels on Bridged), the host name
+  resolving without an address in the record, the firewall prompt and its rule, a phone run and sync through
+  it; `docs/WINDOWS.md` step 13.
+
 ## Next step
 
 **Nothing is left on the checklist: the goal was complete as of round 7, and the item added after it is

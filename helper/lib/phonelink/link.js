@@ -17,12 +17,6 @@
 //     the opt-in), and its sync.* handlers answer `off` once the user turns syncing off in Settings (`phone.sync`,
 //     the store's `sync`, D11).
 //
-// Windows (docs/WINDOWS-PROGRESS.md, "Merge of phone-link"): off. The phone finds the computer by its Bonjour
-// record alone, and bonjour.js announces with the Mac's dns-sd, so a Windows computer would listen on the network
-// for a phone that can't find it (and Windows Firewall would ask about it). There the link has the store and
-// nothing else: no listener, no announcer, no phone runs, no sync; `status()` says `unsupported: 'windows'` (the
-// panel shows no Connect a phone and no Sync with phone), and every command but phone.status is refused.
-//
 // TRIF_PHONE_LINK_HOST (tests): 127.0.0.1 or ::1, so a test's listener is never on the network. Anything else
 // is not taken: the variable can only narrow where the listener is.
 
@@ -52,7 +46,6 @@ class Link extends EventEmitter {
    */
   constructor({ home, runs, version, log, agent, getWorkspace, afterWrite, switches, env = process.env, name, platform = process.platform } = {}) {
     super();
-    this.unsupported = platform === 'win32' ? 'windows' : null;
     this.log = typeof log === 'function' ? log : () => {};
     this.env = env;
     this.store = new Store(home, { env, ...(name ? { name } : {}) });
@@ -63,6 +56,7 @@ class Link extends EventEmitter {
     this.afterWrite = afterWrite;
     this.switches = switches;
     this.home = home;
+    this.platform = platform; // (Windows: status says so, for the panel's firewall note)
     this.server = null;
     this.announcer = null;
     this.remote = null; // (kept after stop(): a phone run still ending is still not the panel's)
@@ -89,10 +83,10 @@ class Link extends EventEmitter {
   async start() {
     if (this.owner) return;
     this.owner = true;
-    if (this.unsupported) { this.emit('change'); return; }
     const host = envVar('PHONE_LINK_HOST', this.env);
     this.server = new Server(this.store, { version: this.version, log: this.log, ...(LOOPBACK.has(host) ? { host } : {}) });
-    this.announcer = new Announcer(this.store, this.server, { env: this.env, log: this.log });
+    // (Windows: trif-dnssd.exe is built in the workspace's bin folder, bonjour.js)
+    this.announcer = new Announcer(this.store, this.server, { env: this.env, log: this.log, platform: this.platform, binDir: require('../paths').workspace(this.home).bin });
     this.remote = new Remote(this.store, this.server, this.runs, { home: this.home, getWorkspace: this.getWorkspace, log: this.log, agent: this.agent });
     this.remote.start();
     this.sync = new PhoneSync(this.store, this.server, this.runs, {
@@ -162,15 +156,11 @@ class Link extends EventEmitter {
     const synced = (id) => { const r = this.sync ? this.sync.status(id) : null; return r ? { ...r } : null; };
     // (online: a live session with this phone just now, so Sync now reaches it)
     const online = new Set([...((this.server && this.server.sessions) || [])].filter((x) => x.open && x.phone).map((x) => x.phone.id));
-    return { ...st, phones: st.phones.map((p) => ({ ...p, synced: synced(p.id), online: online.has(p.id) })), here: this.owner, listening: !!(this.server && this.server.address()), announce: a ? a.error : null, ...(this.unsupported ? { unsupported: this.unsupported } : {}) };
+    return { ...st, phones: st.phones.map((p) => ({ ...p, synced: synced(p.id), online: online.has(p.id) })), here: this.owner, listening: !!(this.server && this.server.address()), announce: a ? a.error : null, ...(this.platform === 'win32' ? { system: 'windows' } : {}) };
   }
 
   /** A `phone.*` command from the side panel. Resolves what the panel is answered. */
   async command(cmd, args = {}) {
-    if (this.unsupported && cmd !== 'phone.status') {
-      if (!COMMANDS.includes(cmd)) throw new Error(`unknown command "${cmd}"`);
-      throw fail('unsupported', 'the phone link isn\'t on Windows yet');
-    }
     switch (cmd) {
       case 'phone.status': return this.status();
       case 'phone.on':

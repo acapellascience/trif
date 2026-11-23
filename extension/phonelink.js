@@ -30,6 +30,9 @@ export const TEXT = {
   toggle: 'Let connected phones reach this computer',
   elsewhere: 'Another browser’s TRIF is handling phones just now. Connect a phone from there.',
   announce: 'Your phone may not find this computer just now.',
+  // (Windows, while the code is on screen: Windows Firewall asks about Node.js the first time the link listens.
+  // A draft: docs/WINDOWS-STRINGS.md)
+  firewall: 'Windows may ask whether Node.js can use the network: allow it on private networks, so your phone can reach this computer.',
   tooLong: 'This computer’s name is too long for the code. Shorten it in System Settings, then try again.',
   // Phone sync (docs/PHONE-SYNC.md; D11: on for a paired phone, the user can turn it off here)
   syncToggle: 'Keep phone mods the same here and on connected phones',
@@ -100,14 +103,14 @@ function syncOf(st, p, time) {
  */
 export function phoneLinkView(state, now = Date.now(), date = shortDate, time = shortTime) {
   const st = state?.status;
-  // (unsupported: a helper where the link is off, Windows: helper/lib/phonelink/link.js)
-  if (!st || typeof st !== 'object' || st.unsupported) return { hidden: true };
+  if (!st || typeof st !== 'object') return { hidden: true };
   const phones = Array.isArray(st.phones) ? st.phones : [];
   const pairing = state.pairing && state.pairing.expires > now && st.on ? state.pairing : null;
   const notes = [];
   if (state.added) notes.push({ text: fill(TEXT.added, { phone: state.added }), error: false });
   if (state.removed) notes.push({ text: fill(TEXT.removed, { phone: state.removed }), error: false });
   if (st.on && (st.announce === 'missing' || st.announce === 'failing')) notes.push({ text: TEXT.announce, error: false });
+  if (pairing && st.system === 'windows') notes.push({ text: TEXT.firewall, error: false });
   if (state.error) notes.push({ text: state.error, error: true });
   return {
     hidden: false,
@@ -145,7 +148,7 @@ function phonesName(phones) {
 export const ASK_MS = 30000; // (a phone told to sync that hasn't in this long: as if it weren't connected)
 export function phoneSyncView(state, now = Date.now()) {
   const st = state?.status;
-  if (!st || typeof st !== 'object' || st.here === false || st.unsupported) return null;
+  if (!st || typeof st !== 'object' || st.here === false) return null;
   const phones = Array.isArray(st.phones) ? st.phones : [];
   // (none paired: Connect a phone; while its code is on screen, nothing: the code is the next step)
   if (!phones.length) return state.pairing ? null : { text: null, actions: ['connect'], busy: !!state.busy };

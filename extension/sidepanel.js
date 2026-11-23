@@ -3684,8 +3684,6 @@ async function connectPhone() {
   requestAnimationFrame(() => ($('#phone-link .pl-pair') || $('#phone-link'))?.scrollIntoView({ block: 'nearest' }));
 }
 function renderPhoneSync() {
-  // (no Sync with phone where the helper has no phone link: Windows, helper/lib/phonelink/link.js)
-  if (ui.phoneMenuSync) ui.phoneMenuSync.hidden = !!phoneLink.state.status?.unsupported;
   if (!ui.phoneSync) return;
   const v = SAFARI ? null : phoneLink.syncView();
   const show = !!v && (inPhone() || (phoneLineShown && !!v.text));

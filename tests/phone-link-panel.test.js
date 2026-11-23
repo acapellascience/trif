@@ -422,9 +422,12 @@ test('connect a phone: every string the panel shows is in docs/PHONE-LINK-STRING
   assert.match(js, /function hideToast\(\) \{[^}]*clearTimeout[\s\S]*?ui\.toast\.hidden = true;/);
 });
 
-test('a helper without the phone link (Windows): no Connect a phone section, no phone line', async () => {
+test('Windows: while the code is on screen, a note that Windows Firewall may ask about Node.js', async () => {
   const mod = await load();
-  assert.deepStrictEqual(mod.phoneLinkView({ status: status({ unsupported: 'windows' }) }), { hidden: true });
-  assert.equal(mod.phoneSyncView({ status: status({ unsupported: 'windows' }) }), null);
-  assert.notEqual(mod.phoneSyncView({ status: status() }), null, 'elsewhere: Connect a phone');
+  const pairing = { qr: 'trif://pair?x', expires: Date.now() + 60000 };
+  const note = mod.TEXT.firewall;
+  assert.ok(mod.phoneLinkView({ status: status({ on: true, system: 'windows' }), pairing }).notes.some((n) => n.text === note));
+  assert.ok(!mod.phoneLinkView({ status: status({ on: true, system: 'windows' }) }).notes.some((n) => n.text === note), 'only with the code');
+  assert.ok(!mod.phoneLinkView({ status: status({ on: true }), pairing }).notes.some((n) => n.text === note), 'not on a Mac');
+  assert.notEqual(mod.phoneSyncView({ status: status({ system: 'windows' }) }), null, 'Connect a phone, as on the Mac');
 });

@@ -649,12 +649,26 @@ terminal** so `trif` is on the Path.
     phone window, and the reload after it (and after its approval) stays the mobile page, also on a site
     with a service worker (x.com). Resize the phone window: the page follows. **Back to desktop**: the window
     widens back out to the size and place of the window the tab came from, with the tab and TRIF's side
-    panel still in it, still on that site, as a desktop tab (no window closes). The phone menu has no **Sync
-    with phone** and Settings no **Connect a phone** on Windows (the phone link is off there:
-    `docs/WINDOWS-PROGRESS.md`, "Merge of phone-link").
+    panel still in it, still on that site, as a desktop tab (no window closes). The phone menu has **Sync
+    with phone** and Settings **Connect a phone**, as on the Mac (step 13).
 12. **Per-site access and sensitive sites.** On a site TRIF hasn't been on, "Fix …" makes Chrome ask for
     that site alone (no "all sites" prompt anywhere). Open `mail.google.com` or `paypal.com`: TRIF starts
     blocked there (the blocked screen, with Unblock), and Google's other sites' mods don't run on it.
+13. **Pair an iPhone with the VM** (the phone link: `docs/PHONE-LINK.md`). First, in Parallels, the VM's
+    **Hardware → Network** set to **Bridged Network** (Default Adapter or the Mac's Wi-Fi): with Shared
+    Networking the VM sits behind the Mac's NAT, the phone can't reach its port, and the VM's Bonjour record
+    never reaches the Wi-Fi. Then in Windows, Settings → Network & internet: the network **Private**. In
+    the panel, Settings, **Connect a phone**: the code shows with the note that Windows may ask about Node.js;
+    **Windows Defender Firewall's "Allow access?"** comes up for Node.js JavaScript Runtime (the link listens
+    only now, not at the helper's start): tick **Private networks**, Allow. `%USERPROFILE%\.trif\bin` now
+    has `trif-dnssd-….exe` (built for the first announcement). On the iPhone, TRIF, More, **My computer**,
+    scan the code: the computer is found by its name (the record `_trif._tcp`), paired, and its row shows
+    in the panel. `trif doctor` says `ok    phone link: Windows Firewall lets a phone reach this computer
+    (Node.js is allowed on private networks)`. Then a phone run (ask the iPhone for a small phone mod) and
+    **Sync with phone** from the phone menu: the phone's mods show here, and a switch flipped on one side
+    follows on the other. By hand, in PowerShell: `& (Get-Item "$env:USERPROFILE\.trif\bin\trif-dnssd-*.exe").FullName
+    -B _trif._tcp local 5` lists the record while the link listens. Turn **Let connected phones reach this
+    computer** off: the record goes (the same command finds nothing) and nothing listens.
 
 ### The same in Microsoft Edge
 

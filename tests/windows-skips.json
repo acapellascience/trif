@@ -11,7 +11,7 @@
     "safari": "Safari and launchd are macOS only",
     "release": "the build and release scripts are for the Mac (zip, the Keychain)",
     "permissions": "about a folder made unreadable with chmod, which takes no reading away from its owner on Windows (no POSIX permission bits)",
-    "phone-link": "the phone link and phone sync are off on Windows (no Bonjour announcer there for the phone to find the computer by: helper/lib/phonelink/link.js, docs/WINDOWS-PROGRESS.md \"Merge of phone-link\"); these tests also use keyring stand-ins that are scripts. What Windows has of it: tests/phone-link-store.test.js \"Windows: the link is off…\"",
+    "phone-link": "their keyring and dns-sd stand-ins are scripts for the Mac's security and dns-sd (Windows' keyring is Credential Manager, its announcer trif-dnssd.exe). What Windows has of it: tests/phone-link-windows.test.js (the announcer and its program, the firewall line) and windows.yml's announcer step",
     "modes": "about file modes (600, 700), which do nothing on Windows: the profile folder's access list keeps other users out (docs/WINDOWS.md)"
   },
   "files": {

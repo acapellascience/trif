@@ -46,6 +46,14 @@ if (script.includes('TRIF_USER_PATH')) {
   process.stdout.write('added');
   process.exit(0);
 }
+if (script.includes('TRIF_FIREWALL')) {
+  // (win/firewall.js: firewall.json beside the stand-in is the answer; the program asked about goes to firewall.log)
+  fs.appendFileSync(path.join(here, 'firewall.log'), req.program + '\\n');
+  let answer = '{"rules":[],"networks":["Private"]}';
+  try { answer = fs.readFileSync(path.join(here, 'firewall.json'), 'utf8'); } catch { /* the default */ }
+  process.stdout.write(answer);
+  process.exit(0);
+}
 process.stderr.write('unknown script\\n');
 process.exit(3);
 `;
@@ -63,6 +71,9 @@ function makeFakePowerShell(dir) {
     setUserPath: (v) => fs.writeFileSync(path.join(dir, 'userpath.txt'), v),
     argvText: () => read('argv.log'),
     fail: (msg) => (msg === null ? fs.rmSync(path.join(dir, 'fail'), { force: true }) : fs.writeFileSync(path.join(dir, 'fail'), msg)),
+    // (win/firewall.js) what Windows Firewall says, and the programs asked about
+    setFirewall: (answer) => fs.writeFileSync(path.join(dir, 'firewall.json'), JSON.stringify(answer)),
+    firewallAsked: () => read('firewall.log').split('\n').filter(Boolean),
   };
 }
 

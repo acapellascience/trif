@@ -7,10 +7,15 @@
 // the link is on and someone is paired or pairing (the store's `listen`, which the listener follows). The
 // record carries the name, the port and the key's short id, never the key.
 //
-// macOS only for now (`/usr/bin/dns-sd`, built in; TRIF_DNS_SD names another binary, which is how the tests
-// keep the real one, and so Tim's Wi-Fi, out of it). Elsewhere `status().error` is 'unsupported' and nothing
-// is started (section 9).
+// macOS: `/usr/bin/dns-sd`, built in. Windows: TRIF's own trif-dnssd.exe (win/dnssd.js), built once by Windows'
+// C# compiler, which takes the same arguments and calls Windows' DNS-SD API (Windows 10 1809 and later): the
+// same record, so the phone finds a Windows computer unchanged. It holds the record until its standard input
+// closes, then takes it back (being killed would leave it to time out): so there the child is ended by closing
+// its input, and killed only if it doesn't go. TRIF_DNS_SD names another binary (a .js runs with this Node),
+// which is how the tests keep the real one, and so Tim's Wi-Fi, out of it. Elsewhere (Linux) `status().error`
+// is 'unsupported' and nothing is started (section 9).
 
+const path = require('path');
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 
@@ -53,13 +58,16 @@ const alive = (child) => child.exitCode === null && child.signalCode === null;
  * 'change' whenever status() would answer differently.
  */
 class Announcer extends EventEmitter {
-  constructor(store, server, { env = process.env, log = () => {}, platform = process.platform, retryMs = RETRY_MS, retryMaxMs = RETRY_MAX_MS, settledMs = SETTLED_MS } = {}) {
+  constructor(store, server, { env = process.env, log = () => {}, platform = process.platform, binDir = null, retryMs = RETRY_MS, retryMaxMs = RETRY_MAX_MS, settledMs = SETTLED_MS } = {}) {
     super();
     this.store = store;
     this.server = server;
     this.log = log;
-    this.bin = (env && env.TRIF_DNS_SD) || BIN;
-    this.supported = platform === 'darwin';
+    this.env = env;
+    this.win = platform === 'win32';
+    this.binDir = binDir; // (Windows: where trif-dnssd.exe is built, the workspace's bin folder)
+    this.bin = (env && env.TRIF_DNS_SD) || (this.win ? null : BIN);
+    this.supported = platform === 'darwin' || this.win;
     this.retryMs = retryMs;
     this.retryMaxMs = retryMaxMs;
     this.settledMs = settledMs;
@@ -101,7 +109,7 @@ class Announcer extends EventEmitter {
   }
 
   /**
-   * {running, error, record}. error: null; 'unsupported' (not a Mac); 'missing' (dns-sd couldn't be started:
+   * {running, error, record}. error: null; 'unsupported' (not a Mac or Windows); 'missing' (dns-sd couldn't be started:
    * the phone can't find the computer); 'failing' (it keeps dying; it is started again after a pause).
    */
   status() {
@@ -127,10 +135,24 @@ class Announcer extends EventEmitter {
     return { name: this.store.name, port: at.port, id };
   }
 
+  /** What to start: {file, prefix}, or null (said why: _missing). */
+  _program() {
+    if (!this.bin) {
+      const built = require('../win/dnssd').program(this.binDir || path.join(require('os').tmpdir(), 'trif-bin'), { env: this.env });
+      if (!built.file) { this._missing(new Error(built.error)); return null; }
+      this.bin = built.file;
+    }
+    return /\.js$/i.test(this.bin) ? { file: process.execPath, prefix: [this.bin] } : { file: this.bin, prefix: [] };
+  }
+
   _spawn() {
     const record = this.record;
+    const prog = this._program();
+    if (!prog) return;
     let child;
-    try { child = spawn(this.bin, recordArgs(record), { stdio: 'ignore' }); } catch (e) { this._missing(e); return; }
+    // (Windows: its input open, which it holds the record until; nothing shown)
+    try { child = spawn(prog.file, [...prog.prefix, ...recordArgs(record)], { stdio: [this.win ? 'pipe' : 'ignore', 'ignore', 'ignore'], windowsHide: true }); } catch (e) { this._missing(e); return; }
+    if (child.stdin) child.stdin.on('error', () => { /* gone already */ });
     const began = Date.now();
     this.child = child;
     child.once('spawn', () => {
@@ -169,7 +191,7 @@ class Announcer extends EventEmitter {
     this.error = 'missing';
     if (this.complained) return;
     this.complained = true;
-    this.log(`phone link: can't announce, ${this.bin} didn't start (${(e && (e.code || e.message)) || 'unknown'}): a phone won't find this computer`);
+    this.log(`phone link: can't announce, ${this.bin || 'the announcer'} didn't start (${(e && (e.code || e.message)) || 'unknown'}): a phone won't find this computer`);
   }
 
   /** No record: the child ended, no start waiting. */
@@ -187,13 +209,17 @@ class Announcer extends EventEmitter {
     const hard = setTimeout(() => { if (alive(child)) { try { child.kill('SIGKILL'); } catch { /* gone */ } } }, KILL_GRACE_MS);
     hard.unref();
     child.once('exit', () => { clearTimeout(hard); this.dying.delete(child); });
+    if (this.win) { try { child.stdin.end(); } catch { /* gone */ } return; } // (it takes the record back, then exits)
     try { child.kill('SIGTERM'); } catch { /* gone */ }
   }
 
   /** At the helper's exit: nothing of ours is left behind. */
   _killAll() {
     for (const child of [this.child, ...this.dying]) {
-      if (child && alive(child)) { try { child.kill('SIGKILL'); } catch { /* gone */ } }
+      if (!child || !alive(child)) continue;
+      // (Windows: its input closes with this process, and it takes the record back; killed, it couldn't)
+      if (this.win) { try { child.stdin.end(); } catch { /* gone */ } continue; }
+      try { child.kill('SIGKILL'); } catch { /* gone */ }
     }
   }
 

@@ -371,9 +371,13 @@ always-on network presence. Proposed: one state whose text names both causes. Fo
 - **Bluetooth** (no shared Wi-Fi) and **a relay from away from home**: not in version 1. The Noise session
   doesn't care what carries it: either is another transport under section 4's messages, and a relay would see
   only ciphertext.
-- **Windows and Linux**: the protocol, the store, the listener and the runs are plain Node. What differs is the
-  announcer (`dns-sd` is the Mac's; Windows has the DNS-SD API from Windows 10, Linux `avahi-publish`) and the
-  keyring for the private key (`keyring.js` has Linux's; the Windows port brings its own).
+- **Windows** (branch `windows`, 11-23): on. The announcer is TRIF's trif-dnssd.exe (`helper/lib/win/dnssd.cs`,
+  built by Windows' csc.exe like the fence), which registers the same record through Windows' DNS-SD API
+  (`DnsServiceRegister`, Windows 10 1809 and later) and takes it back when its input closes; the private key is in
+  Credential Manager (`keyring.js`). Windows Firewall asks about Node.js the first time the link listens; TRIF adds
+  no rule (`trif doctor` says what the rules allow: `helper/lib/win/firewall.js`).
+- **Linux**: the protocol, the store, the listener and the runs are plain Node. What differs is the announcer
+  (`avahi-publish` there).
 - **The desktop panel showing a phone's run** as it happens.
 - **Phone mods reaching the phone by themselves** (docs/MOBILE-EDIT.md 7b's iCloud idea) could use the link
   instead of iCloud.

@@ -56,8 +56,10 @@ function encode(script) {
 // (seen on windows-latest), %SystemRoot%\Temp\trif-<the user's SID>, used only if this user owns it (that folder's
 // inherited access lets only its creator, SYSTEM and administrators in; an elevated administrator's folders are
 // owned by Administrators).
-const PRELUDE = `if ($env:TEMP -match '[^\\x20-\\x7e]') {
-  $trifTemp = $null
+// $trifTemp is that folder (or null), for a script's own Add-Type to name (credman.js): setting TEMP isn't
+// always enough, .NET's temporary path stayed the old one on windows-latest.
+const PRELUDE = `$trifTemp = $null
+if ($env:TEMP -match '[^\\x20-\\x7e]') {
   try { $short = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($env:TEMP).ShortPath; if ($short -notmatch '[^\\x20-\\x7e]|[?]' -and [IO.Directory]::Exists($short)) { $trifTemp = $short } } catch { }
   if (-not $trifTemp) {
     try {

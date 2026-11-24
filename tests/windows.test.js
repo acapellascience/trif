@@ -216,7 +216,7 @@ test('windows PowerShell: System32\'s Windows PowerShell, no profile, the script
   // (after the prelude that gives Add-Type an ASCII temporary folder: powershell.js PRELUDE)
   const decoded = Buffer.from(args[4], 'base64').toString('utf16le');
   assert.ok(decoded.endsWith('\nWrite-Output "hi"'), decoded);
-  assert.match(decoded, /^if \(\$env:TEMP -match '\[\^\\x20-\\x7e\]'\) \{\n[\s\S]*ShortPath[\s\S]*'trif-' \+ \$me\.Value[\s\S]*GetOwner/);
+  assert.match(decoded, /^\$trifTemp = \$null\nif \(\$env:TEMP -match '\[\^\\x20-\\x7e\]'\) \{\n[\s\S]*ShortPath[\s\S]*'trif-' \+ \$me\.Value[\s\S]*GetOwner/);
   assert.equal(ps.psComplaint({ code: 1, stderr: 'Access is denied.\r\nAt line:1 char:5\r\n+ CategoryInfo : x\r\n' }), 'Access is denied.');
   // The scripts take what varies on stdin: nothing to interpolate into them.
   for (const s of [credman.SCRIPT, userpath.SCRIPT]) assert.match(s, /\[Console\]::In\.ReadLine\(\)/);

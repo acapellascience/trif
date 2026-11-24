@@ -27,7 +27,7 @@ const MAX_BYTES = 2560;
 const SCRIPT = `$ErrorActionPreference = 'Stop'
 try {
   $req = [Console]::In.ReadLine() | ConvertFrom-Json
-  Add-Type -Language CSharp -TypeDefinition @'
+  $trifSrc = @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
@@ -90,6 +90,17 @@ public static class TrifCred {
   }
 }
 '@
+  # (powershell.js's prelude found a temporary folder without letters outside ASCII: the compiler's files go
+  # there, whatever .NET's own temporary path says. Windows Server 2025 kept the old one.)
+  if ($trifTemp) {
+    $trifCp = New-Object System.CodeDom.Compiler.CompilerParameters
+    $trifCp.GenerateInMemory = $true
+    [void]$trifCp.ReferencedAssemblies.Add('System.dll')
+    $trifCp.TempFiles = New-Object System.CodeDom.Compiler.TempFileCollection($trifTemp, $false)
+    Add-Type -TypeDefinition $trifSrc -CompilerParameters $trifCp
+  } else {
+    Add-Type -Language CSharp -TypeDefinition $trifSrc
+  }
   switch ($req.op) {
     'get' { $hex = [TrifCred]::Read($req.target); if ($hex -eq $null) { exit 44 }; [Console]::Out.Write($hex); exit 0 }
     'has' { $hex = [TrifCred]::Read($req.target); if ($hex -eq $null) { exit 44 }; exit 0 }

@@ -51,13 +51,14 @@ function encode(script) {
 // Before every script: a temporary folder whose path has letters outside ASCII (a profile like C:\Users\Zoë)
 // is swapped for one without. Add-Type compiles C# there, and the compiler can't write to such a path ("Could
 // not write to output file … The directory name is invalid", seen in a Windows 11 VM), so Credential Manager
-// calls failed for anyone whose user name has an accent. First its short 8.3 name; where the volume has none
+// calls failed for anyone whose user name has an accent. First its short 8.3 name (where a folder has none, the
+// COM call writes its letters as "?" instead: not used); where the volume has none
 // (seen on windows-latest), %SystemRoot%\Temp\trif-<the user's SID>, used only if this user owns it (that folder's
 // inherited access lets only its creator, SYSTEM and administrators in; an elevated administrator's folders are
 // owned by Administrators).
 const PRELUDE = `if ($env:TEMP -match '[^\\x20-\\x7e]') {
   $trifTemp = $null
-  try { $short = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($env:TEMP).ShortPath; if ($short -notmatch '[^\\x20-\\x7e]') { $trifTemp = $short } } catch { }
+  try { $short = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($env:TEMP).ShortPath; if ($short -notmatch '[^\\x20-\\x7e]|[?]' -and [IO.Directory]::Exists($short)) { $trifTemp = $short } } catch { }
   if (-not $trifTemp) {
     try {
       $me = [Security.Principal.WindowsIdentity]::GetCurrent().User

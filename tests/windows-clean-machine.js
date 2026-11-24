@@ -371,16 +371,16 @@ function fenceCheck(c) {
       check((await runCmd(path.join(c.bin, 'trif.cmd'), ['help'], c.env)).code === 0, 'trif.cmd help after the update');
 
       if (!SAFE) {
-        // (For the record: Credential Manager deleting a key that isn't there, with the runner's own environment
-        // and with this computer's, on this script's Node.)
-        const credman = require('../helper/lib/win/credman');
+        // (For the record: what Windows PowerShell's temporary folder becomes under this profile, and Credential
+        // Manager deleting a key that isn't there, with the runner's environment and with this computer's.)
+        const probe = `const ps = require(${JSON.stringify(path.join(REPO, 'helper', 'lib', 'win', 'powershell.js'))});
+          const r = ps.runPowerShellSync("[Console]::Out.Write($env:TEMP + ' | ' + [IO.Path]::GetTempPath())", undefined);
+          console.log('TEMP in PowerShell: ' + r.stdout + ' (exit ' + r.code + ') ' + ps.clixmlText(r.stderr).slice(0, 300));
+          require(${JSON.stringify(path.join(REPO, 'helper', 'lib', 'win', 'credman.js'))}).removeKey('TRIF clean-machine probe', 'none-' + process.pid)
+            .then((x) => console.log('delete: ' + JSON.stringify(x)), (e) => console.log('delete: ' + e.message));`;
         for (const [name, env] of [['the runner\'s environment', process.env], ['the scratch profile\'s', c.env]]) {
-          const saved = { ...process.env };
-          for (const k of Object.keys(process.env)) delete process.env[k];
-          Object.assign(process.env, env);
-          try { info(`Credential Manager, a key that isn't there, ${name}: ${JSON.stringify(await credman.removeKey('TRIF clean-machine probe', `none-${process.pid}`))}`); } catch (e) { info(`Credential Manager, a key that isn't there, ${name}: ${e.message}`); }
-          for (const k of Object.keys(process.env)) delete process.env[k];
-          Object.assign(process.env, saved);
+          const r = spawnSync(process.execPath, ['-e', probe], { env, encoding: 'utf8', timeout: 120000, windowsHide: true });
+          info(`Credential Manager, ${name}: ${`${r.stdout}${r.stderr}`.trim().replace(/\s*\n\s*/g, ' / ')}`);
         }
       }
       await uninstallChecks(c, { all: true });

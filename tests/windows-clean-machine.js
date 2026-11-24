@@ -370,6 +370,19 @@ function fenceCheck(c) {
       check(JSON.parse(fs.readFileSync(path.join(c.priv, 'config.json'), 'utf8')).keepMe === 'yes', 'the setting kept');
       check((await runCmd(path.join(c.bin, 'trif.cmd'), ['help'], c.env)).code === 0, 'trif.cmd help after the update');
 
+      if (!SAFE) {
+        // (For the record: Credential Manager deleting a key that isn't there, with the runner's own environment
+        // and with this computer's, on this script's Node.)
+        const credman = require('../helper/lib/win/credman');
+        for (const [name, env] of [['the runner\'s environment', process.env], ['the scratch profile\'s', c.env]]) {
+          const saved = { ...process.env };
+          for (const k of Object.keys(process.env)) delete process.env[k];
+          Object.assign(process.env, env);
+          try { info(`Credential Manager, a key that isn't there, ${name}: ${JSON.stringify(await credman.removeKey('TRIF clean-machine probe', `none-${process.pid}`))}`); } catch (e) { info(`Credential Manager, a key that isn't there, ${name}: ${e.message}`); }
+          for (const k of Object.keys(process.env)) delete process.env[k];
+          Object.assign(process.env, saved);
+        }
+      }
       await uninstallChecks(c, { all: true });
     }
 

@@ -553,13 +553,23 @@ b4febdf (no /install.sh redirect, `88975de`); docs/NO-NODE.md "Windows" has the 
   install.ps1's template and module, the site route, the pins check. no-node's POSIX tests skipped on
   Windows by name (`runtime-posix`, `install-sh`, `setup`). Smoke/browser/run keep the job's Node
   (`TRIF_RUNTIME=off`).
+- **CI**: windows [45297251783](https://github.com/acapellascience/trif/actions/runs/45297251783) at `aba567d`,
+  `clean-machine` 70 checks all passed (x64: install.ps1 10.2 s, runtime 94 MB, `trif help` ~120 ms, update
+  0.7 s, upgrade 2.7 s, node.exe inside the fence), Node 18 and 22 green (22 after one rerun: the
+  codex-sandbox "organization's profile" timing flake); windows-fence
+  [45297251761](https://github.com/acapellascience/trif/actions/runs/45297251761) green; the macOS tests
+  [45297251792](https://github.com/acapellascience/trif/actions/runs/45297251792) green after one rerun
+  (`phone-window-browser`, phone-link's own flake). On the way: windows-fence's `agents`/`run-codex` once red
+  on npm's 404 for `@openai/codex@0.172.0` (registry, not this), the macOS `phone-window-browser` flake once.
 - **Tim's VM** (Windows 11 ARM, `--safe`: registry under a scratch root, PowerShell stand-in for keys and
-  Path, `--no-link`, no fence; Tim's 0.3.1 checked untouched after): 67 checks, all passed (win-arm64:
+  Path, `--no-link`, no fence; Tim's 0.3.1 checked untouched after; last at `aba567d`): 67 checks, all passed (win-arm64:
   install.ps1 12.4 s, runtime 82 MB, `trif help` 1.1 s first then ~0.25-0.3 s, update 2.2 s, upgrade 7.8 s,
   folders gone ~3 s after uninstall ended).
 - **Found and fixed on the way** (VM and CI): Windows' tar.exe gets its arguments in the console's code page
   (a profile with an accent: "Failed to open …Zo? ??…"); Add-Type can't compile into such a TEMP either, so
-  Credential Manager failed for user names with accents (powershell.js PRELUDE: TEMP's 8.3 name); a Windows
+  Credential Manager failed for user names with accents (powershell.js PRELUDE finds an ASCII folder: TEMP's
+  8.3 name, else `%SystemRoot%\Temp\trif-<SID>` if this user owns it; credman.js names it in Add-Type's
+  CompilerParameters, since Windows Server 2025's .NET kept its old temporary path); a Windows
   PowerShell started from PowerShell 7 loads 7's modules (no Get-FileHash, ConvertFrom-Json): install.ps1
   uses .NET, powershell.js drops PSModulePath; Node's children die with it and a detached PowerShell never
   starts (removeLater goes through Start-Process); uninstall's late `require` after `app` was deleted; Node
